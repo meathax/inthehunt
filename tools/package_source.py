@@ -28,6 +28,8 @@ FILES = (
     "LICENSES/CRT-Hyllian-MIT.txt", "LICENSES/CRT-Lottes-Public-Domain.txt",
     "src/world_menu.c", "src/world_menu.h", "src/world_modes.c", "src/world_modes.h",
     "src/world_present.c", "src/world_present.h", "src/world_scores_store.c", "src/world_scores_store.h",
+    "src/world_dispatch_internal.h", "src/world_actors_1.c", "src/world_actors_2.c", "src/world_actors_3.c", "src/world_actors_4.c", "src/world_actors_5.c", "src/world_actors_6.c", "src/world_stage1.c", "src/world_stage2.c", "src/world_stage3.c", "src/world_stage4.c", "src/world_stage5.c", "src/world_stage6.c", "src/world_common.c",
+    "tools/clean_local.ps1", "tools/ref/Makefile", "tools/ref/check_replay.c", "tools/ref/ref_capture.lua", "tools/ref/run_capture.sh", "tools/ref/dasm.sh",
     "src/InTheHunt.manifest", ".gitignore", ".gitattributes",
     "tests/README.md", "tests/run_tests.ps1", "tests/achievements-test.c", "tests/clock-test.c",
     "tests/controls-remap-test.c", "tests/cycle-cost-test.c", "tests/prefetch-test.c", "tests/timing-option-test.c",
