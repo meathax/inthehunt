@@ -17,7 +17,9 @@ Capture options (Lua table body): `frames=N` (stop frame), `start=N` (first
 recorded frame, default 600), `stage=N` (start the campaign at stage index N),
 `refill=true` (top up P1 lives), `passes=false` (call log only, tiny output),
 `trace_pass=P, trace_count=M` (dump state before every handler call of those
-passes), `snap_every=N` (PNG every N passes), `bot=false`. One pass with full
+passes), `snap_every=N` (PNG every N passes), `bot=false`, `unstick=N` (when the
+camera stalls the bot stops weaving and holds one of N depths in turn; stage
+index 1 needs `unstick=6` to break through the buildings), `verbose=true`. One pass with full
 state costs 135 KB, so keep a recording to a few thousand passes and delete
 recordings you no longer need.
 

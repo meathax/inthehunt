@@ -20,6 +20,7 @@ local ports = machine.ioport.ports
 local coin = ports[":COINS_DSW3"].fields
 local pad = ports[":P1_P2"].fields
 local frame, pass = 0, 0
+local bot_camera, bot_still = nil, 0
 local recording, finished, saving = false, false, false
 local function open(name, mode) return assert(io.open(out .. "/" .. name, mode or "w")) end
 local hardware, irq_log, sounds, calls_log = open("hardware.txt"), open("irqs.txt"), open("sound.txt"), open("calls.txt")
@@ -184,7 +185,7 @@ frame_sub = emu.add_machine_frame_notifier(function()
     frame = frame + 1
     if finished then return end
     if cfg.frames and frame >= cfg.frames then finish("frames"); return end
-    if cfg.verbose and frame % 500 == 0 then print(("frame %d pass %d master %04x stage %d lives %d"):format(frame, pass, word(0x80), word(0x84), memory:read_u8(0xe0118))) end
+    if cfg.verbose and frame % 500 == 0 then print(("frame %d pass %d master %04x stage %d lives %d camera %04x"):format(frame, pass, word(0x80), word(0x84), memory:read_u8(0xe0118), word(0xb700))) end
     if cfg.stop_stage and word(0x84) >= cfg.stop_stage and word(0x80) == 0xb2e then finish("stage"); return end
     if cfg.bot ~= false then
         set(coin["Coin 1"], frame >= 1200 and frame < 1206)
@@ -195,6 +196,21 @@ frame_sub = emu.add_machine_frame_notifier(function()
         set(pad["P1 Left"], false)
         set(pad["P1 Up"], play and phase == 1)
         set(pad["P1 Down"], play and phase == 3)
+        if cfg.unstick then
+            -- unstick=N: when the camera stops advancing, stop weaving. Sink to the
+            -- seabed, rise for a while (longer on each of N attempts), then hold
+            -- that depth so every shot lands on the same obstacle.
+            local camera = word(0xb700)
+            if camera ~= bot_camera then bot_camera, bot_still = camera, 0 else bot_still = bot_still + 1 end
+            local stuck = bot_still - (cfg.unstick_after or 120)
+            if play and stuck > 0 then
+                local period, sink, rise = cfg.unstick_period or 420, cfg.unstick_sink or 110, cfg.unstick_rise or 22
+                local t, attempt = stuck % period, (stuck // period) % cfg.unstick
+                set(pad["P1 Right"], true)
+                set(pad["P1 Down"], t < sink)
+                set(pad["P1 Up"], t >= sink and t < sink + attempt * rise)
+            end
+        end
         set(pad["P1 Button 1"], play and frame % 12 < 6)
         set(pad["P1 Button 2"], play and frame % 16 < 8)
         if cfg.continue and play and (frame % 600) < 6 and (memory:read_u8(0xe0264) & 1) == 0 then
