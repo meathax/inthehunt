@@ -181,11 +181,42 @@ local function finish(reason)
 end
 -- Bot: coin, start, hold right, weave vertically, fire both weapons.
 local function set(field, on) if on then field:set_value(1) else field:clear_value() end end
+-- aim={[handler]=true or {dx=,dy=,face=,pri=,slack=}, ...}: while an actor with one of
+-- these handler entries (linear address) exists, P1 holds station beside it: dx pixels
+-- away (default -70, to its left) at its height plus dy (actor Y grows upward), facing
+-- right (or face="left"), so torpedoes hit it. Among several, the lowest pri wins
+-- (default 1), then list order. Returns the pad state or nil.
+local function aim_at()
+    if not cfg.aim then return nil end
+    local a, n, best, opt = 0x400, 0, nil, nil
+    while n < 300 do
+        local target = ((word(a + 2) << 4) + word(a)) & 0xfffff
+        if target == 0x96a then break end
+        local how = cfg.aim[target]
+        if how then
+            local o = type(how) == "table" and how or {}
+            if not best or (o.pri or 1) < (opt.pri or 1) then best, opt = a, o end
+        end
+        a = word(a + 4); n = n + 1
+    end
+    if not best then return nil end
+    local sub = word(0x90)
+    local x, y = word(sub + 0x21), word(sub + 0x24)
+    local ex = ((word(best + 0x21) + (opt.dx or -70) - x + 0x8000) & 0xffff) - 0x8000
+    local ey = ((word(best + 0x24) + (opt.dy or 0) - y + 0x8000) & 0xffff) - 0x8000
+    local slack = opt.slack or 20
+    local facing_left = (memory:read_u8(0xe0000 + sub + 0x29) & 1) ~= 0
+    local inside = ex >= -slack and ex <= slack
+    local right, left = ex > slack, ex < -slack
+    if inside and opt.face == "left" then left = not facing_left
+    elseif inside then right = facing_left end
+    return {right=right, left=left, up=ey > 3, down=ey < -3}
+end
 frame_sub = emu.add_machine_frame_notifier(function()
     frame = frame + 1
     if finished then return end
     if cfg.frames and frame >= cfg.frames then finish("frames"); return end
-    if cfg.verbose and frame % 500 == 0 then print(("frame %d pass %d master %04x stage %d lives %d camera %04x"):format(frame, pass, word(0x80), word(0x84), memory:read_u8(0xe0118), word(0xb700))) end
+    if cfg.verbose and frame % 500 == 0 then print(("frame %d pass %d master %04x stage %d lives %d camera %04x sub %d,%d"):format(frame, pass, word(0x80), word(0x84), memory:read_u8(0xe0118), word(0xb700), word(word(0x90) + 0x21), word(word(0x90) + 0x24))) end
     if cfg.stop_stage and word(0x84) >= cfg.stop_stage and word(0x80) == 0xb2e then finish("stage"); return end
     if cfg.bot ~= false then
         set(coin["Coin 1"], frame >= 1200 and frame < 1206)
@@ -222,6 +253,8 @@ frame_sub = emu.add_machine_frame_notifier(function()
                 up = t >= sink and t < sink + attempt * rise
             end
         end
+        local aim = play and aim_at()
+        if aim then right, left, up, down = aim.right, aim.left, aim.up, aim.down end
         set(pad["P1 Right"], play and right)
         set(pad["P1 Left"], play and left)
         set(pad["P1 Up"], play and up)

@@ -263,7 +263,7 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
     unsigned flags = word(ram + 0x262);
     int hidden_entry = word(a) == 0x7be5 && a[0x0a];
     if (word(a + 0x6e) || (!hidden_entry && !word(a + 0x26) && !(flags & 0x8080))
-        || (word(ram + 0xb8b2) & owner_bit) || (flags & 0x40)
+        || (word(ram + 0xb8b2) & owner_bit)
         || (!hidden_entry && word(ram + 0x2a4)))
         return 0;
     uint8_t predicted[128];
@@ -376,5 +376,15 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
         world_sub_pose(ram, rom, sub);
     world_player_weapons(ram, rom, sub);
     world_sub_wake(ram, rom, sub);
+    if (flags & 0x40) {
+        /* 7D5A: the last boss is gone. With both players alive the duel
+         * follows (7D91, not recovered). */
+        if ((word(ram + 0x264) & 3) == 3) return 0;
+        if (word(ram + 0x272)) ram[0x263] |= 0xc0;
+        else {
+            put(a + 0x42, 0x80);
+            put(a, 0x7da7);
+        }
+    }
     return 1;
 }

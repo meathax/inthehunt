@@ -6,6 +6,7 @@
 #include <string.h>
 
 void world_latch_cabinet(uint8_t *ram, uint16_t raw);
+int world_ending_master(uint8_t *ram, uint8_t *tiles, uint8_t *palette, const uint8_t *rom, int *master_command);
 
 static uint16_t word(const uint8_t *p)
 {
@@ -304,9 +305,11 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
                    master == 0xc7f8 || master == 0xc82b || master == 0xc861;
     int title = master == 0xa09 || master == 0x1d52 || master == 0x1de6 ||
                 master == 0x1e6c || master == 0x1ea5 || master == 0x1f52 || master == 0x1f85;
+    int ending = master == 0x344d || master == 0x3513 || master == 0x3522 || master == 0x355b ||
+                 master == 0x356e || master == 0x35be || master == 0x35f9;
     if (!vblanks || vblanks > 2 || (busy_system >= 0 && master != 0xa0e && master != 0x24e2) ||
-        (!title && !title_transition && !gameover && !stage_clear && master != 0xb2e && master != 0x2218 && master != 0x2282 && master != 0xa81 && master != 0xa31) ||
-        ((title || title_transition || stage_clear || gameover || master == 0xa81 || master == 0xa31) && (!tiles || !palette)) ||
+        (!title && !title_transition && !gameover && !stage_clear && !ending && master != 0xb2e && master != 0x2218 && master != 0x2282 && master != 0xa81 && master != 0xa31) ||
+        ((title || title_transition || stage_clear || gameover || ending || master == 0xa81 || master == 0xa31) && (!tiles || !palette)) ||
         ((title || master == 0x1f19) && word(ram + 0x84)) ||
         ((master == 0xa0e || master == 0xa81) && word(ram + 0x84) >= 6) ||
         !irq_supported(ram) ||
@@ -352,6 +355,8 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
         if (master == 0xa0e || master == 0x24e2) *master_command = 0x20;
     } else if (gameover) {
         if (!world_gameover_master(ram, tiles, palette, rom, master_command)) return 0;
+    } else if (ending) {
+        if (!world_ending_master(ram, tiles, palette, rom, master_command)) return 0;
     } else if (master == 0xb2e) {
         put(ram + 0x8e, word(ram + 0x8e) + 1);
         put(ram + 0xb892, 0);
