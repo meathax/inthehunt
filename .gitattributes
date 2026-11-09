@@ -1,0 +1,5 @@
+# Binary assets; text files keep their existing line endings in the repository.
+*.png binary
+*.jpg binary
+*.ico binary
+*.bin binary
