@@ -6,7 +6,7 @@
 /* Shared original UI font, also used by the native menu. */
 void world_menu_draw_text(uint32_t *, unsigned, unsigned, int, int, unsigned, uint32_t, const char *);
 
-enum { QUEUE_SIZE = 64, POPUP_MS = 5000, ROWS_VISIBLE = 6 };
+enum { QUEUE_SIZE = 64, POPUP_MS = 4500, ROWS_VISIBLE = 6 };
 static const uint32_t ink = 0xff0c191d, paper = 0xffe6e9d7, muted = 0xff9caeaa;
 static const uint32_t tiers[] = {0xffa4d5bb, 0xff8ac9d8, 0xffeeb873, 0xffffa195};
 static const char *tier_names[] = {"EASY", "MEDIUM", "DIFFICULT", "EXTREME"};

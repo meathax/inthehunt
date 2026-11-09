@@ -128,7 +128,7 @@ static int read_scores(const WorldScoresStore *store, const char *path, UserScor
     uint8_t bytes[LEGACY_BYTES];
     DWORD received = 0;
     int ok = GetFileSizeEx(file, &length) && length.QuadPart >= HEADER_BYTES &&
-             length.QuadPart <= sizeof bytes &&
+             length.QuadPart <= (LONGLONG)sizeof bytes &&
              ReadFile(file, bytes, (DWORD)length.QuadPart, &received, NULL) &&
              received == length.QuadPart;
     CloseHandle(file);
