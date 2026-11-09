@@ -310,7 +310,7 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
         ((title || master == 0x1f19) && word(ram + 0x84)) ||
         ((master == 0xa0e || master == 0xa81) && word(ram + 0x84) >= 6) ||
         !irq_supported(ram) ||
-        (raster && raster != 1 && raster != 2 && (raster != 4 || (word(ram + 0x298) & 6)))) return 0;
+        (raster && raster != 1 && raster != 2 && raster != 5 && (raster != 4 || (word(ram + 0x298) & 6)))) return 0;
     if (!valid_sprite_list(ram, rom)) return 0;
     build_sprites(ram, oam, rom);
     *sound_command = dispatch_sound(ram);

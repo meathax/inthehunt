@@ -192,10 +192,21 @@ frame_sub = emu.add_machine_frame_notifier(function()
         set(pad["P1 Start"] or coin["1 Player Start"], frame >= 1280 and frame < 1286)
         local play = frame >= 1400
         local phase = (frame // 90) % 4
-        set(pad["P1 Right"], play and phase ~= 3)
-        set(pad["P1 Left"], false)
-        set(pad["P1 Up"], play and phase == 1)
-        set(pad["P1 Down"], play and phase == 3)
+        local right, left, up, down = phase ~= 3, false, phase == 1, phase == 3
+        -- surface=true keeps the submarine near the surface, where its second weapon fires upward.
+        if cfg.surface then up, down = phase ~= 3, false end
+        if cfg.track_kind and play then
+            -- Boss helper: stay under the actor of this kind (word +0E) and keep surfacing.
+            local player = word(0x90)
+            for actor = 0x500, 0x8380, 0x80 do
+                if word(actor + 0x0e) == cfg.track_kind and word(actor) ~= 0xffff and word(actor + 0x3c) ~= 0xffff then
+                    local dx = ((word(actor + 0x21) + (cfg.track_dx or 0) - word(player + 0x21) + 0x8000) & 0xffff) - 0x8000
+                    right, left = dx > 6, dx < -6
+                    up, down = (frame // 40) % 4 ~= 3, (frame // 40) % 4 == 3 and cfg.track_dive == true
+                    break
+                end
+            end
+        end
         if cfg.unstick then
             -- unstick=N: when the camera stops advancing, stop weaving. Sink to the
             -- seabed, rise for a while (longer on each of N attempts), then hold
@@ -206,11 +217,15 @@ frame_sub = emu.add_machine_frame_notifier(function()
             if play and stuck > 0 then
                 local period, sink, rise = cfg.unstick_period or 420, cfg.unstick_sink or 110, cfg.unstick_rise or 22
                 local t, attempt = stuck % period, (stuck // period) % cfg.unstick
-                set(pad["P1 Right"], true)
-                set(pad["P1 Down"], t < sink)
-                set(pad["P1 Up"], t >= sink and t < sink + attempt * rise)
+                right, left = true, false
+                down = t < sink
+                up = t >= sink and t < sink + attempt * rise
             end
         end
+        set(pad["P1 Right"], play and right)
+        set(pad["P1 Left"], play and left)
+        set(pad["P1 Up"], play and up)
+        set(pad["P1 Down"], play and down)
         set(pad["P1 Button 1"], play and frame % 12 < 6)
         set(pad["P1 Button 2"], play and frame % 16 < 8)
         if cfg.continue and play and (frame % 600) < 6 and (memory:read_u8(0xe0264) & 1) == 0 then
