@@ -1,5 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
+#ifndef _WIN32
+#define _DEFAULT_SOURCE /* flock and fsync for the host-side tests. */
+#endif
 #include "world_achievements.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -354,5 +358,354 @@ int world_achievements_event(WorldAchievements *state, const WorldAchievementEve
         break;
     default: break;
     }
+    return 1;
+}
+
+/* ---- Lifetime progress and the persistent service record ---- */
+
+typedef struct {
+    const char *key;
+    size_t offset;
+} ProfileCounter;
+
+static const ProfileCounter counters[] = {
+    {"arcade_kills", offsetof(WorldAchievementProfile, arcade_kills)},
+    {"hard_solo_clears", offsetof(WorldAchievementProfile, hard_solo_clears)},
+    {"torpedo_school_clears", offsetof(WorldAchievementProfile, torpedo_school_clears)},
+    {"coop_clears", offsetof(WorldAchievementProfile, coop_clears)},
+    {"rush_clears", offsetof(WorldAchievementProfile, rush_clears)},
+    {"rush_clean_clears", offsetof(WorldAchievementProfile, rush_clean_clears)},
+    {"rush_clean_streak", offsetof(WorldAchievementProfile, rush_clean_streak)},
+    {"score_clears", offsetof(WorldAchievementProfile, score_clears)},
+    {"score_clean_clears", offsetof(WorldAchievementProfile, score_clean_clears)}
+};
+enum { COUNTERS = sizeof counters / sizeof counters[0], PROFILE_TEXT = 8192 };
+static const char profile_header[] = "INTHUNT-SERVICE 1";
+
+static uint64_t *counter_at(WorldAchievementProfile *profile, unsigned i)
+{
+    return (uint64_t *)(void *)((char *)profile + counters[i].offset);
+}
+
+static uint64_t counter_of(const WorldAchievementProfile *profile, unsigned i)
+{
+    uint64_t value;
+    memcpy(&value, (const char *)profile + counters[i].offset, sizeof value);
+    return value;
+}
+
+static uint64_t smaller(uint64_t a, uint64_t b) { return a < b ? a : b; }
+
+static uint64_t add_saturated(uint64_t a, uint64_t b)
+{
+    return b > UINT64_MAX - a ? UINT64_MAX : a + b;
+}
+
+static uint64_t charted_stages(const WorldAchievementProfile *profile)
+{
+    uint64_t total = 0;
+    for (unsigned i = 0; i < profile->campaign_stages && i < WORLD_ACHIEVEMENT_STAGES; ++i)
+        total += smaller(profile->hard_clean_stages[i], 3);
+    return total;
+}
+
+void world_achievements_progress(const WorldAchievements *state, unsigned index, uint64_t *current, uint64_t *target)
+{
+    uint64_t value = 0, goal = 0;
+    if (state) {
+        const WorldAchievementProfile *p = &state->profile;
+        switch (index) {
+        case ACH_CONTACT_REPORT: value = p->arcade_kills; goal = 20; break;
+        case ACH_SEA_TRIALS: value = bit_count(p->torpedo_types & 7); goal = 3; break;
+        case ACH_ABYSSAL_COMMAND: value = p->hard_solo_clears; goal = 10; break;
+        case ACH_TORPEDO_SCHOOL: value = p->torpedo_school_clears; goal = 15; break;
+        case ACH_PERFECT_CHARTS:
+            value = charted_stages(p);
+            goal = 3 * (uint64_t)(p->campaign_stages <= WORLD_ACHIEVEMENT_STAGES ? p->campaign_stages : 0);
+            break;
+        case ACH_CONVOY_DUTY: value = p->coop_clears; goal = 5; break;
+        case ACH_DEEP_PATROL:
+            value = smaller(p->rush_clears, 50) + smaller(p->rush_clean_clears, 5);
+            goal = 55;
+            break;
+        case ACH_UNBROKEN_LINE: value = p->rush_clean_streak; goal = 3; break;
+        case ACH_VICTORY_LEDGER: value = p->score_clears; goal = 25; break;
+        case ACH_CLEAN_SWEEP: value = p->score_clean_clears; goal = 5; break;
+        default: break;
+        }
+    }
+    if (current) *current = smaller(value, goal);
+    if (target) *target = goal;
+}
+
+static int catalog_index(const char *id)
+{
+    for (unsigned i = 0; i < WORLD_ACHIEVEMENT_COUNT; ++i)
+        if (!strcmp(world_achievement_catalog[i].id, id)) return (int)i;
+    return -1;
+}
+
+static int parse_number(const char *text, uint64_t *value)
+{
+    if (*text < '0' || *text > '9') return 0;
+    errno = 0;
+    char *end;
+    unsigned long long parsed = strtoull(text, &end, 10);
+    if (errno || *end) return 0;
+    *value = parsed;
+    return 1;
+}
+
+/* "kind name value" lines after the header. Any unknown or repeated entry
+ * rejects the file, so a damaged profile is never half-applied. */
+static int parse_profile(char *text, WorldAchievementProfile *profile)
+{
+    uint8_t seen_counter[COUNTERS] = {0}, seen_stage[WORLD_ACHIEVEMENT_STAGES] = {0};
+    unsigned seen_torpedoes = 0, seen_stages = 0, first = 1;
+    memset(profile, 0, sizeof *profile);
+    for (char *line = text; line; ) {
+        char *next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        size_t length = strlen(line);
+        if (length && line[length - 1] == '\r') line[--length] = 0;
+        if (first) {
+            if (strcmp(line, profile_header)) return 0;
+            first = 0;
+        } else if (length) {
+            char *name = strchr(line, ' ');
+            char *number = name ? strchr(name + 1, ' ') : NULL;
+            uint64_t value;
+            if (!number) return 0;
+            *name++ = 0;
+            *number++ = 0;
+            if (!parse_number(number, &value)) return 0;
+            if (!strcmp(line, "earned")) {
+                int index = catalog_index(name);
+                if (index < 0 || profile->earned[index]) return 0;
+                profile->earned[index] = 1;
+                profile->earned_at[index] = value;
+            } else if (!strcmp(line, "count")) {
+                unsigned i = 0;
+                while (i < COUNTERS && strcmp(counters[i].key, name)) ++i;
+                if (i == COUNTERS || seen_counter[i]++) return 0;
+                *counter_at(profile, i) = value;
+            } else if (!strcmp(line, "stage")) {
+                uint64_t stage;
+                if (!parse_number(name, &stage) || stage >= WORLD_ACHIEVEMENT_STAGES || seen_stage[stage]++) return 0;
+                profile->hard_clean_stages[stage] = value;
+            } else if (!strcmp(line, "state") && !strcmp(name, "torpedo_types")) {
+                if (seen_torpedoes++ || value > 7) return 0;
+                profile->torpedo_types = (unsigned)value;
+            } else if (!strcmp(line, "state") && !strcmp(name, "campaign_stages")) {
+                if (seen_stages++ || value > WORLD_ACHIEVEMENT_STAGES) return 0;
+                profile->campaign_stages = (unsigned)value;
+            } else return 0;
+        }
+        line = next;
+    }
+    return !first;
+}
+
+/* 1 loaded, 0 absent, -1 unreadable, -2 present but not a valid profile. */
+static int read_profile(const char *path, WorldAchievementProfile *profile)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) return errno == ENOENT ? 0 : -1;
+    char local[PROFILE_TEXT];
+    size_t length = fread(local, 1, sizeof local - 1, file);
+    int extra = fgetc(file), failed = ferror(file);
+    fclose(file);
+    if (failed) return -1;
+    if (extra != EOF || memchr(local, 0, length)) return -2;
+    local[length] = 0;
+    return parse_profile(local, profile) ? 1 : -2;
+}
+
+static int format_profile(const WorldAchievementProfile *profile, char *text, size_t capacity)
+{
+    size_t used = 0;
+#define APPEND(...) do { \
+        int written = snprintf(text + used, capacity - used, __VA_ARGS__); \
+        if (written < 0 || (size_t)written >= capacity - used) return -1; \
+        used += (size_t)written; \
+    } while (0)
+    APPEND("%s\n", profile_header);
+    for (unsigned i = 0; i < WORLD_ACHIEVEMENT_COUNT; ++i)
+        if (profile->earned[i])
+            APPEND("earned %s %" PRIu64 "\n", world_achievement_catalog[i].id, profile->earned_at[i]);
+    for (unsigned i = 0; i < COUNTERS; ++i)
+        APPEND("count %s %" PRIu64 "\n", counters[i].key, counter_of(profile, i));
+    for (unsigned i = 0; i < WORLD_ACHIEVEMENT_STAGES; ++i)
+        if (profile->hard_clean_stages[i])
+            APPEND("stage %u %" PRIu64 "\n", i, profile->hard_clean_stages[i]);
+    APPEND("state torpedo_types %u\n", profile->torpedo_types & 7);
+    APPEND("state campaign_stages %u\n", profile->campaign_stages);
+#undef APPEND
+    return (int)used;
+}
+
+int world_achievements_load(WorldAchievements *state, const char *path)
+{
+    if (!state || !path || !*path) return -1;
+    WorldAchievementProfile loaded;
+    int status = read_profile(path, &loaded);
+    if (status != 1) return status ? -1 : 0;
+    state->profile = state->saved = loaded;
+    state->pending_clean_rush = 0;
+    state->reset_rush_streak = 0;
+    return 1;
+}
+
+/* Awards that depend only on lifetime totals. Re-evaluated on the merged
+ * profile, because two game instances can each supply part of a total. */
+static void award_totals(WorldAchievementProfile *p, uint8_t fresh[WORLD_ACHIEVEMENT_COUNT], uint64_t utc)
+{
+    int charts = p->campaign_stages && p->campaign_stages <= WORLD_ACHIEVEMENT_STAGES &&
+                 charted_stages(p) == 3 * (uint64_t)p->campaign_stages;
+    const struct { unsigned index; int reached; } totals[] = {
+        {ACH_CONTACT_REPORT, p->arcade_kills >= 20},
+        {ACH_SEA_TRIALS, (p->torpedo_types & 7) == 7},
+        {ACH_ABYSSAL_COMMAND, p->hard_solo_clears >= 10},
+        {ACH_TORPEDO_SCHOOL, p->torpedo_school_clears >= 15},
+        {ACH_PERFECT_CHARTS, charts},
+        {ACH_CONVOY_DUTY, p->coop_clears >= 5},
+        {ACH_DEEP_PATROL, p->rush_clears >= 50 && p->rush_clean_clears >= 5},
+        {ACH_UNBROKEN_LINE, p->rush_clean_streak >= 3},
+        {ACH_VICTORY_LEDGER, p->score_clears >= 25},
+        {ACH_CLEAN_SWEEP, p->score_clean_clears >= 5}
+    };
+    for (unsigned i = 0; i < sizeof totals / sizeof totals[0]; ++i) {
+        unsigned index = totals[i].index;
+        if (!totals[i].reached || p->earned[index]) continue;
+        p->earned[index] = fresh[index] = 1;
+        p->earned_at[index] = utc;
+    }
+}
+
+static void merge_profile(const WorldAchievements *state, const WorldAchievementProfile *disk,
+                          WorldAchievementProfile *merged)
+{
+    const WorldAchievementProfile *now = &state->profile, *base = &state->saved;
+    *merged = *disk;
+    for (unsigned i = 0; i < WORLD_ACHIEVEMENT_COUNT; ++i) {
+        if (!now->earned[i]) continue;
+        if (!merged->earned[i] || (now->earned_at[i] && now->earned_at[i] < merged->earned_at[i]) ||
+            !merged->earned_at[i]) merged->earned_at[i] = now->earned_at[i];
+        merged->earned[i] = 1;
+    }
+    for (unsigned i = 0; i < COUNTERS; ++i) {
+        uint64_t current = counter_of(now, i), before = counter_of(base, i);
+        uint64_t *total = counter_at(merged, i);
+        *total = add_saturated(*total, current > before ? current - before : 0);
+    }
+    for (unsigned i = 0; i < WORLD_ACHIEVEMENT_STAGES; ++i) {
+        uint64_t current = now->hard_clean_stages[i], before = base->hard_clean_stages[i];
+        merged->hard_clean_stages[i] = add_saturated(merged->hard_clean_stages[i],
+                                                     current > before ? current - before : 0);
+    }
+    /* The streak is ordered, not additive: a break since the last save
+     * discards the stored run before this session's clean clears count. */
+    merged->rush_clean_streak = add_saturated(state->reset_rush_streak ? 0 : disk->rush_clean_streak,
+                                              state->pending_clean_rush);
+    merged->torpedo_types = (disk->torpedo_types | now->torpedo_types) & 7;
+    if (now->campaign_stages) merged->campaign_stages = now->campaign_stages;
+}
+
+#ifdef _WIN32
+typedef HANDLE ProfileLock;
+/* 1 held, 0 busy, -1 error. */
+static int lock_profile(const char *path, ProfileLock *lock)
+{
+    *lock = CreateFileA(path, GENERIC_WRITE | DELETE, 0, NULL, OPEN_ALWAYS,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (*lock != INVALID_HANDLE_VALUE) return 1;
+    DWORD error = GetLastError();
+    return error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION ? 0 : -1;
+}
+static void unlock_profile(const char *path, ProfileLock lock) { (void)path; CloseHandle(lock); }
+static unsigned long process_id(void) { return (unsigned long)GetCurrentProcessId(); }
+static int replace_file(const char *from, const char *to)
+{
+    return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+}
+/* 1 written and flushed, 0 failed, -1 the name already exists. */
+static int create_file(const char *path, const char *text, size_t length)
+{
+    HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_EXISTS ? -1 : 0;
+    DWORD written = 0;
+    int ok = WriteFile(file, text, (DWORD)length, &written, NULL) && written == length &&
+             FlushFileBuffers(file);
+    if (!CloseHandle(file)) ok = 0;
+    return ok;
+}
+#else
+typedef int ProfileLock;
+static int lock_profile(const char *path, ProfileLock *lock)
+{
+    *lock = open(path, O_CREAT | O_RDWR, 0600);
+    if (*lock < 0) return -1;
+    if (!flock(*lock, LOCK_EX | LOCK_NB)) return 1;
+    int busy = errno == EWOULDBLOCK;
+    close(*lock);
+    return busy ? 0 : -1;
+}
+static void unlock_profile(const char *path, ProfileLock lock) { unlink(path); close(lock); }
+static unsigned long process_id(void) { return (unsigned long)getpid(); }
+static int replace_file(const char *from, const char *to) { return !rename(from, to); }
+static int create_file(const char *path, const char *text, size_t length)
+{
+    int file = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+    if (file < 0) return errno == EEXIST ? -1 : 0;
+    int ok = write(file, text, length) == (ssize_t)length && !fsync(file);
+    if (close(file)) ok = 0;
+    return ok;
+}
+#endif
+
+static int write_profile(const char *path, const char *text, size_t length)
+{
+    static unsigned long serial;
+    char temporary[4096];
+    for (unsigned attempt = 0; attempt < 16; ++attempt) {
+        int size = snprintf(temporary, sizeof temporary, "%s.%lu.%lu.tmp", path, process_id(), ++serial);
+        if (size < 0 || (size_t)size >= sizeof temporary) return 0;
+        int created = create_file(temporary, text, length);
+        if (created < 0) continue; /* Name already taken. */
+        if (created && replace_file(temporary, path)) return 1;
+        remove(temporary);
+        return 0;
+    }
+    return 0;
+}
+
+int world_achievements_save(WorldAchievements *state, const char *path)
+{
+    if (!state || !path || !*path) return -1;
+    char lock_path[4096], text[PROFILE_TEXT];
+    int size = snprintf(lock_path, sizeof lock_path, "%s.lock", path);
+    if (size < 0 || (size_t)size >= sizeof lock_path) return -1;
+    ProfileLock lock;
+    int held = lock_profile(lock_path, &lock);
+    if (held != 1) return held;
+    WorldAchievementProfile disk, merged;
+    uint8_t fresh[WORLD_ACHIEVEMENT_COUNT] = {0};
+    int status = read_profile(path, &disk);
+    int ok = status != -1;
+    if (ok) {
+        if (status != 1) memset(&disk, 0, sizeof disk);
+        merge_profile(state, &disk, &merged);
+        award_totals(&merged, fresh, state->last_utc);
+        int length = format_profile(&merged, text, sizeof text);
+        ok = length > 0 && write_profile(path, text, (size_t)length);
+    }
+    unlock_profile(lock_path, lock);
+    if (!ok) return -1;
+    state->profile = state->saved = merged;
+    state->pending_clean_rush = 0;
+    state->reset_rush_streak = 0;
+    if (state->notify)
+        for (unsigned i = 0; i < WORLD_ACHIEVEMENT_COUNT; ++i)
+            if (fresh[i]) state->notify(state->notify_context, i);
     return 1;
 }

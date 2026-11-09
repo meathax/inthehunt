@@ -72,10 +72,17 @@ void world_achievements_init(WorldAchievements *state, WorldAchievementUnlocked 
 void world_achievements_begin(WorldAchievements *state, const WorldAchievementRunConfig *config);
 /* Event serials increase within a run. Repeated/old serials are ignored. */
 int world_achievements_event(WorldAchievements *state, const WorldAchievementEvent *event);
+/* Lifetime progress toward a counted award, clamped to its target. Awards
+ * without a persistent counter report 0/0. Deep Patrol reports its two parts
+ * as one sum: ranked clears (of 50) plus no-loss clears (of 5). */
 void world_achievements_progress(const WorldAchievements *state, unsigned index, uint64_t *current, uint64_t *target);
-/* Load returns 1 on success, 0 when absent, -1 on invalid data or I/O error.
- * Failed loads preserve state. Save merges concurrent earned IDs/counter
- * increments under a file lock and replaces the profile atomically.
+/* Paths use the process ANSI code page (UTF-8 under the shipped manifest).
+ * Load returns 1 on success, 0 when absent, -1 on invalid data or I/O error.
+ * Failed loads preserve state. Save returns 1 on success, 0 when another
+ * save holds the lock (retry later) and -1 on error; a failed save leaves
+ * both the state and the previous file intact. Save merges concurrent earned
+ * IDs/counter increments under a file lock and replaces the profile
+ * atomically. An unreadable profile is replaced by the current progress.
  * The consecutive Boss Rush award is committed by save after run completion. */
 int world_achievements_load(WorldAchievements *state, const char *path);
 int world_achievements_save(WorldAchievements *state, const char *path);
