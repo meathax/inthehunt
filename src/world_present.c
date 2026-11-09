@@ -37,6 +37,23 @@ static struct {
 } renderer;
 static char last_error[1024];
 
+/* Both libraries are loaded on demand from the system directory, so a
+   machine without Direct3D 11 or the shader compiler still starts the game
+   and the host can fall back to its GDI path. */
+typedef HRESULT (WINAPI *CreateDeviceAndSwapChain)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT,
+    const D3D_FEATURE_LEVEL *, UINT, UINT, const DXGI_SWAP_CHAIN_DESC *, IDXGISwapChain **,
+    ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
+typedef HRESULT (WINAPI *CompileShader)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO *,
+    ID3DInclude *, LPCSTR, LPCSTR, UINT, UINT, ID3DBlob **, ID3DBlob **);
+static HMODULE device_library, compiler_library;
+static CreateDeviceAndSwapChain create_device;
+static CompileShader compile_shader;
+/* Local copies keep the link independent of an import library's GUID set. */
+static const GUID texture_interface =
+    {0x6f15aaf2, 0xd208, 0x4e89, {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
+static const GUID factory_interface =
+    {0x7b7166ec, 0x21c7, 0x44ae, {0xb2, 0x1a, 0xc9, 0xae, 0x32, 0x1a, 0xe3, 0x69}};
+
 static const char vertex_source[] =
     "cbuffer Geometry:register(b1){float4 UVTransform;}"
     "struct Vertex{float4 position:SV_Position;float2 uv:TEXCOORD0;};"
@@ -63,10 +80,39 @@ static int fail(const char *operation, HRESULT result)
     return 0;
 }
 
+static HMODULE system_library(const wchar_t *name)
+{
+    wchar_t path[MAX_PATH];
+    UINT prefix = GetSystemDirectoryW(path, MAX_PATH);
+    if (!prefix || prefix + lstrlenW(name) + 2 > MAX_PATH) return NULL;
+    path[prefix] = L'\\';
+    lstrcpyW(path + prefix + 1, name);
+    return LoadLibraryW(path);
+}
+
+static int load_libraries(void)
+{
+    if (!device_library) device_library = system_library(L"d3d11.dll");
+    if (device_library && !create_device)
+        create_device = (CreateDeviceAndSwapChain)(void *)GetProcAddress(device_library, "D3D11CreateDeviceAndSwapChain");
+    if (!create_device) {
+        snprintf(last_error, sizeof last_error, "Direct3D 11 is not installed.");
+        return 0;
+    }
+    if (!compiler_library) compiler_library = system_library(L"d3dcompiler_47.dll");
+    if (compiler_library && !compile_shader)
+        compile_shader = (CompileShader)(void *)GetProcAddress(compiler_library, "D3DCompile");
+    if (!compile_shader) {
+        snprintf(last_error, sizeof last_error, "The Direct3D shader compiler (d3dcompiler_47.dll) is not installed.");
+        return 0;
+    }
+    return 1;
+}
+
 static ID3DBlob *compile(const char *source, const char *entry, const char *profile)
 {
     ID3DBlob *code = NULL, *errors = NULL;
-    HRESULT result = D3DCompile(source, strlen(source), NULL, NULL, NULL,
+    HRESULT result = compile_shader(source, strlen(source), NULL, NULL, NULL,
                                entry, profile, D3DCOMPILE_ENABLE_STRICTNESS, 0,
                                &code, &errors);
     if (FAILED(result)) {
@@ -139,7 +185,7 @@ static int resize(unsigned width, unsigned height)
     release_surface();
     HRESULT result = IDXGISwapChain_ResizeBuffers(renderer.swap, 0, width, height, DXGI_FORMAT_UNKNOWN, 0);
     if (FAILED(result)) return fail("Swapchain resize", result);
-    result = IDXGISwapChain_GetBuffer(renderer.swap, 0, &IID_ID3D11Texture2D, (void **)&renderer.surface);
+    result = IDXGISwapChain_GetBuffer(renderer.swap, 0, &texture_interface, (void **)&renderer.surface);
     if (FAILED(result)) return fail("Swapchain image retrieval", result);
     result = ID3D11Device_CreateRenderTargetView(renderer.device, (ID3D11Resource *)renderer.surface, NULL, &renderer.target);
     if (FAILED(result)) return fail("Render target creation", result);
@@ -180,6 +226,7 @@ int world_present_open(void *native_window)
 {
     world_present_close();
     last_error[0] = 0;
+    if (!load_libraries()) return 0;
     renderer.window = native_window;
     renderer.brightness = 100;
     DXGI_SWAP_CHAIN_DESC desc = {0};
@@ -191,17 +238,17 @@ int world_present_open(void *native_window)
     desc.Windowed = TRUE;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-    HRESULT result = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+    HRESULT result = create_device(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, sizeof levels / sizeof levels[0],
         D3D11_SDK_VERSION, &desc, &renderer.swap, &renderer.device, NULL, &renderer.context);
     if (FAILED(result))
-        result = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_WARP, NULL,
+        result = create_device(NULL, D3D_DRIVER_TYPE_WARP, NULL,
             D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, sizeof levels / sizeof levels[0],
             D3D11_SDK_VERSION, &desc, &renderer.swap, &renderer.device, NULL, &renderer.context);
     if (FAILED(result)) { fail("D3D11 device creation", result); goto error; }
 
     IDXGIFactory *factory = NULL;
-    if (SUCCEEDED(IDXGISwapChain_GetParent(renderer.swap, &IID_IDXGIFactory, (void **)&factory))) {
+    if (SUCCEEDED(IDXGISwapChain_GetParent(renderer.swap, &factory_interface, (void **)&factory))) {
         IDXGIFactory_MakeWindowAssociation(factory, renderer.window, DXGI_MWA_NO_ALT_ENTER);
         RELEASE(IDXGIFactory, factory);
     }

@@ -32,13 +32,13 @@ if (Test-Path -LiteralPath $portable) { $exe = $portable }
 else {
     $build = Get-Item -LiteralPath $exe -ErrorAction SilentlyContinue
     $newest = @(
-        Get-ChildItem -Recurse -File -Path "$PSScriptRoot/src" -Include *.c,*.h,*.cpp,*.ipp,*.manifest
+        Get-ChildItem -Recurse -File -Path "$PSScriptRoot/src" -Include *.c,*.h,*.cpp,*.ipp,*.manifest,*.hlsl
         Get-Item -LiteralPath "$PSScriptRoot/tools/world_native.ps1"
     ) |
         Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     if (!$build -or $newest.LastWriteTimeUtc -gt $build.LastWriteTimeUtc) { Build-WorldNative -Root $PSScriptRoot }
 }
-Write-Host '5 inserts a coin. 1 starts Player 1. Arrow keys move. Z and X fire. Esc closes the game.'
+Write-Host '5 inserts a coin. 1 starts Player 1. Arrow keys move. Z and X fire. Esc opens the menu.'
 $gameArguments = @($world)
 if ($PSBoundParameters.ContainsKey('TimingMode')) {
     $modeName = if ($TimingMode -eq 'RemoveSlowdown') { 'remove-slowdown' } else { 'arcade' }

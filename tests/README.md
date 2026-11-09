@@ -16,7 +16,9 @@ Executables are written to `.local/tests`, which stays out of source control.
 | `clock-test.c` | Board clock boundaries, drift, mode latching, raster phase | No |
 | `controls-remap-test.c` | Default bindings, focus loss, capture and cancellation | No |
 | `cycle-cost-test.c` | Tile-transfer cycle annotations against a reference blitter | Yes (`.local/world/maincpu.bin`) |
+| `menu-test.c` | Pause menu pages, capability gating, locked modes, display rows, menu controls, remapping page | No |
 | `prefetch-test.c` | Reference V33 prefetch timing model | No |
+| `service-test.c` | Service-record events derived from board RAM; awards that must stay locked | No |
 | `timing-option-test.c` | Timing-mode parsing | No |
 
 The trace-comparison harnesses that need MAME captures (`tools/run_encounter.py`,

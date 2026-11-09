@@ -18,6 +18,9 @@ typedef struct {
     float beam_min, beam_max, scanline_strength, profile;
 } WorldCrtConstants;
 
+/* The pixel shader for every profile, embedded from shaders/world_crt.hlsl
+ * when the executable is built (world_crt_shader.c). Entry point "main". */
+const char *world_crt_source(void);
 const char *world_crt_id(WorldCrtProfile profile);
 const char *world_crt_name(WorldCrtProfile profile);
 int world_crt_parse(const char *id, WorldCrtProfile *profile);

@@ -9,7 +9,10 @@ typedef struct {
     int x, y, width, height, scale;
 } WorldPresentViewport;
 
-/* native_window is an HWND. Frames are top-down opaque ARGB8888. */
+/* native_window is an HWND. Frames are top-down opaque ARGB8888.
+ * d3d11.dll and d3dcompiler_47.dll are loaded from the system directory at
+ * the first open; a failed open reports why through world_present_error and
+ * leaves the window untouched for another renderer. */
 int world_present_open(void *native_window);
 int world_present_draw(const uint32_t pixels[320 * 240], int vsync);
 void world_present_close(void);

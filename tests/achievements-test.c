@@ -21,7 +21,29 @@ static void begin(WorldAchievements *s, uint64_t id, WorldGameMode mode)
     WorldAchievementRunConfig c = {0};
     c.run_id = id; c.mode = mode; c.eligible = 1; c.ranked = mode != WORLD_MODE_ARCADE; c.fresh_start = 1;
     c.default_lives = 1; c.normal_or_harder = 1; c.players = 1; c.campaign_stages = 6;
+    c.reports_shots = 1;
     world_achievements_begin(s, &c);
+}
+static void stage(WorldAchievements *s, WorldAchievementEventType t, unsigned index)
+{
+    WorldAchievementEvent e = {0};
+    e.serial = ++serial; e.utc_seconds = 1000 + serial; e.type = t; e.stage = index; e.players = 1; e.confirmed = 1;
+    assert(world_achievements_event(s, &e));
+}
+/* A clean solo stage earns Torpedo Discipline only from a host that reports shots. */
+static void shot_reporting(void)
+{
+    WorldAchievements s;
+    world_achievements_init(&s, NULL, NULL);
+    WorldAchievementRunConfig c = {0};
+    c.run_id = 900; c.mode = WORLD_MODE_ARCADE; c.eligible = 1; c.fresh_start = 1; c.players = 1; c.campaign_stages = 6;
+    world_achievements_begin(&s, &c);
+    stage(&s, WORLD_ACHIEVEMENT_STAGE_START, 0); stage(&s, WORLD_ACHIEVEMENT_STAGE_CLEAR, 0);
+    assert(s.profile.earned[find("steady_helm")] && !s.profile.earned[find("tubes_only")]);
+    c.run_id = 901; c.reports_shots = 1;
+    world_achievements_begin(&s, &c);
+    stage(&s, WORLD_ACHIEVEMENT_STAGE_START, 0); stage(&s, WORLD_ACHIEVEMENT_STAGE_CLEAR, 0);
+    assert(s.profile.earned[find("tubes_only")]);
 }
 static int exists(const char *path)
 {
@@ -33,6 +55,7 @@ static int exists(const char *path)
 /* Optional argument: a writable scratch directory. */
 int main(int argc, char **argv)
 {
+    shot_reporting();
     char path[4096], lock[4112];
     snprintf(path, sizeof path, "%s/achievements-test-profile.txt", argc > 1 ? argv[1] : ".");
     snprintf(lock, sizeof lock, "%s.lock", path);

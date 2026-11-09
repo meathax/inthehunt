@@ -6,5 +6,8 @@
 int world_audio_output_open(void);
 /* Queue at most 1024 mono frames at 48 kHz. Returns zero on device failure. */
 int world_audio_output_submit(const int16_t *samples, size_t count);
+/* Hold or release the queued audio while the game is paused, so playback
+ * resumes from the same sample. Harmless without an open device. */
+void world_audio_output_pause(int paused);
 void world_audio_output_close(void);
 #endif

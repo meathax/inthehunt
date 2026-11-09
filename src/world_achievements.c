@@ -197,7 +197,7 @@ static void stage_cleared(WorldAchievements *state, const WorldAchievementEvent 
         award(state, ACH_STEADY_HELM);
         ++run->clean_stages;
         if (solo(run)) {
-            if (!run->stage_secondary_shots) award(state, ACH_TUBES_ONLY);
+            if (run->config.reports_shots && !run->stage_secondary_shots) award(state, ACH_TUBES_ONLY);
             if (run->clean_stages >= 3) award(state, ACH_IRON_WATCH);
             if (run->config.hard) {
                 uint64_t *count = &state->profile.hard_clean_stages[event->stage];

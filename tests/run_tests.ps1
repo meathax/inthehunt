@@ -16,7 +16,9 @@ $tests = [ordered]@{
     'clock-test'          = @('clock', 'timing_options')
     'controls-remap-test' = @('input')
     'cycle-cost-test'     = @('cycle_costs')
+    'menu-test'           = @('menu', 'crt', 'input')
     'prefetch-test'       = @('cycle_costs')
+    'service-test'        = @('service', 'achievements')
     'timing-option-test'  = @('timing_options')
 }
 $failed = @()

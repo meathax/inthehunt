@@ -39,6 +39,9 @@ typedef struct {
     unsigned eligible, ranked, fresh_start, default_lives;
     unsigned normal_or_harder, hard, players, campaign_stages;
     unsigned previous_best;
+    /* Nonzero when the host reports every WORLD_ACHIEVEMENT_SHOT. Awards
+       that depend on a weapon never being fired stay locked without it. */
+    unsigned reports_shots;
 } WorldAchievementRunConfig;
 typedef struct {
     uint8_t earned[WORLD_ACHIEVEMENT_COUNT];

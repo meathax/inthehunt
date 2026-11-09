@@ -10,6 +10,7 @@ static HANDLE completion;
 static WAVEHDR buffers[BUFFER_COUNT];
 static int16_t pcm[BUFFER_COUNT][BUFFER_FRAMES];
 static unsigned prepared, next_buffer, queued;
+static int held;
 
 void world_audio_output_close(void)
 {
@@ -22,6 +23,17 @@ void world_audio_output_close(void)
     if (completion) CloseHandle(completion);
     completion = NULL;
     prepared = next_buffer = queued = 0;
+    held = 0;
+}
+
+void world_audio_output_pause(int paused)
+{
+    paused = !!paused;
+    if (!device || paused == held) return;
+    held = paused;
+    if (paused) waveOutPause(device);
+    /* Before two buffers are queued the device is still in its start-up pause. */
+    else if (queued >= 2) waveOutRestart(device);
 }
 
 int world_audio_output_open(void)
@@ -71,6 +83,6 @@ int world_audio_output_submit(const int16_t *samples, size_t count)
     buffer->dwBufferLength = (DWORD)(count * sizeof *samples);
     if (waveOutWrite(device, buffer, sizeof *buffer) != MMSYSERR_NOERROR) return 0;
     next_buffer = (next_buffer + 1) % BUFFER_COUNT;
-    if (queued < 2 && ++queued == 2 && waveOutRestart(device) != MMSYSERR_NOERROR) return 0;
+    if (queued < 2 && ++queued == 2 && !held && waveOutRestart(device) != MMSYSERR_NOERROR) return 0;
     return 1;
 }

@@ -7,6 +7,9 @@ FILES = {
     "LICENSES/MAME-Timing-BSD-3-Clause.txt": "LICENSES/MAME-Timing-BSD-3-Clause.txt",
     "LICENSES/ymfm-BSD-3-Clause.txt": "LICENSES/ymfm-BSD-3-Clause.txt",
     "LICENSES/GA20-BSD-3-Clause.txt": "LICENSES/GA20-BSD-3-Clause.txt",
+    # The executable embeds src/shaders/world_crt.hlsl.
+    "LICENSES/CRT-Hyllian-MIT.txt": "LICENSES/CRT-Hyllian-MIT.txt",
+    "LICENSES/CRT-Lottes-Public-Domain.txt": "LICENSES/CRT-Lottes-Public-Domain.txt",
     "InTheHunt.exe": ".local/native/InTheHunt.exe",
     "play.cmd": "play.cmd",
     "play.ps1": "play.ps1",
@@ -23,7 +26,8 @@ images stay under .local/world. Later launches can run without the archive.
 
 5 inserts a coin, 1 starts Player 1, the arrow keys move and Z and X fire.
 On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
-Esc closes the window.
+Esc pauses and opens the menu: Resume, Options and Exit game. Options holds
+the display, sound, slowdown and control settings; changes are saved.
 
 PowerShell timing selection accepts:
 .\play.ps1 -TimingMode Arcade
