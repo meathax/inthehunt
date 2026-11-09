@@ -92,6 +92,10 @@ tap_io = cpu.spaces.io:install_read_tap(0, 9, "ref_ports", function(addr, data)
         else
             system_port = data & 0xffff
         end
+    elseif pc == 0x5e21 or pc == 0x5e7a then
+        -- The VBlank IRQ's own pad latch belongs to the next master, which samples
+        -- the ports itself. Letting it update the previous record corrupted the pad
+        -- word of masters that run no actor pass (stage transitions).
     elseif current and (addr == 0 or addr == 4 or addr == 6) then
         current[addr] = data & 0xffff
     end
@@ -104,11 +108,13 @@ local dispatch_pc = {[0x894]=true, [0x8ab]=true, [0x8c9]=true, [0x904]=true, [0x
 local start_frame = cfg.start or 600
 local function on_pass_start()
     -- Runs at the dispatcher's first far call: the native "after dispatch_begin" point.
-    if not recording and frame < start_frame then return end
     -- Scripted state edits happen here, recorded as W events before this pass's P,
     -- so the native replay applies them after the boundary and before the pass.
+    -- They also run before the recording window opens, so a late window sees
+    -- the same game as a recording started earlier.
     if cfg.refill and (memory:read_u8(0xe0264) & 1) ~= 0 and memory:read_u8(0xe0118) < 2 then poke(0x118, 3, 1) end
     if cfg.stage and not cfg.stage_done and word(0x80) == 0x2218 then poke(0x84, cfg.stage, 2); cfg.stage_done = true end
+    if not recording and frame < start_frame then pending = {}; return end
     if not recording then
         recording = true
         pending = {}
