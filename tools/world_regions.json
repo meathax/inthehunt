@@ -1,0 +1,137 @@
+[
+  {
+    "name": "maincpu",
+    "size": 1048576,
+    "chips": [
+      {
+        "file": "ith_-h0-d.ic28",
+        "offset": 1,
+        "size": 262144,
+        "stride": 2,
+        "sha1": "26d9e272b01e7b82019812059dcc9fbb043c6129"
+      },
+      {
+        "file": "ith_-l0-d.ic39",
+        "offset": 0,
+        "size": 262144,
+        "stride": 2,
+        "sha1": "ffd4228d7b88a44a82e639a5583753da183fcb23"
+      },
+      {
+        "file": "ith_-h1-b.ic38",
+        "offset": 524289,
+        "size": 131072,
+        "stride": 2,
+        "sha1": "f811ff5fd55655afdb25950d317db85c8091b6d6"
+      },
+      {
+        "file": "ith_-l1-b.ic27",
+        "offset": 524288,
+        "size": 131072,
+        "stride": 2,
+        "sha1": "2515accc2f4a06b07418e45eb62e746d09c81720"
+      }
+    ]
+  },
+  {
+    "name": "soundcpu",
+    "size": 131072,
+    "chips": [
+      {
+        "file": "ith_-sh0-.ic30",
+        "offset": 1,
+        "size": 65536,
+        "stride": 2,
+        "sha1": "eaf4a6d9222fe181df65cea1f13c3f2ebff2ec5b"
+      },
+      {
+        "file": "ith_-sl0-.ic31",
+        "offset": 0,
+        "size": 65536,
+        "stride": 2,
+        "sha1": "2705e94ee350ffda272c50ea3bf605826aa19978"
+      }
+    ]
+  },
+  {
+    "name": "gfx1",
+    "size": 2097152,
+    "chips": [
+      {
+        "file": "ith_-c0-.ic26",
+        "offset": 0,
+        "size": 524288,
+        "stride": 1,
+        "sha1": "fc8c2ae640bc3504a52736be46febb92c998fd7d"
+      },
+      {
+        "file": "ith_-c1-.ic25",
+        "offset": 524288,
+        "size": 524288,
+        "stride": 1,
+        "sha1": "71b2695575f189a2fc72635831ba408f824d4928"
+      },
+      {
+        "file": "ith_-c2-.ic24",
+        "offset": 1048576,
+        "size": 524288,
+        "stride": 1,
+        "sha1": "7e34220b9b21b82e012dcbf3052cccb118e3c382"
+      },
+      {
+        "file": "ith_-c3-.ic23",
+        "offset": 1572864,
+        "size": 524288,
+        "stride": 1,
+        "sha1": "4a303ed292ce79e3f990139c35b921213eb2711d"
+      }
+    ]
+  },
+  {
+    "name": "gfx2",
+    "size": 4194304,
+    "chips": [
+      {
+        "file": "ith_-000-.ic34",
+        "offset": 0,
+        "size": 1048576,
+        "stride": 1,
+        "sha1": "59012a41d152a471a95f1f86b6b1e0f9dd3f9711"
+      },
+      {
+        "file": "ith_-010-.ic35",
+        "offset": 1048576,
+        "size": 1048576,
+        "stride": 1,
+        "sha1": "bdae171cb7705647f28354ca83ecdea3a15f6e22"
+      },
+      {
+        "file": "ith_-020-.ic36",
+        "offset": 2097152,
+        "size": 1048576,
+        "stride": 1,
+        "sha1": "290947d77242e837444766ff5d420bc9b53b5b01"
+      },
+      {
+        "file": "ith_-030-.ic37",
+        "offset": 3145728,
+        "size": 1048576,
+        "stride": 1,
+        "sha1": "99237ebab7cf4689e06965bd546cd80a825ab024"
+      }
+    ]
+  },
+  {
+    "name": "irem",
+    "size": 524288,
+    "chips": [
+      {
+        "file": "ith_-da-.ic9",
+        "offset": 0,
+        "size": 524288,
+        "stride": 1,
+        "sha1": "e6f49a7adf7155ba40c4f33a8fdc9553c00f5e3d"
+      }
+    ]
+  }
+]

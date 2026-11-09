@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="240" viewBox="0 0 160 240">
+<defs>
+  <linearGradient id="metal" x2=".92" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#324247"/><stop offset=".36" stop-color="#202c30"/><stop offset=".8" stop-color="#111c21"/><stop offset="1" stop-color="#0c1215"/></linearGradient>
+  <linearGradient id="lip"><stop stop-color="#10191e"/><stop offset=".45" stop-color="#465456"/><stop offset=".58" stop-color="#27363b"/><stop offset="1" stop-color="#091014"/></linearGradient>
+  <linearGradient id="shadow"><stop stop-color="#020507" stop-opacity="0"/><stop offset=".65" stop-color="#020507" stop-opacity=".62"/><stop offset="1" stop-color="#010203"/></linearGradient>
+</defs>
+<rect width="160" height="240" fill="url(#metal)"/>
+<path d="M0 40h75l31-30h48 M0 195h74l29 31h51" fill="none" stroke="#0a1215" stroke-width="5"/>
+<path d="M0 38h75l31-30h48 M0 193h75l29 31h50" fill="none" stroke="#3a494b" stroke-width="1"/>
+<path d="M114 -4h8v248h-8z" fill="url(#lip)"/>
+<path d="M143 -4h7v248h-7z" fill="url(#lip)"/>
+<path d="M124 54h17m-17 133h17" stroke="#0e181b" stroke-width="2"/>
+<g fill="#111a1d" stroke="#586266" stroke-width=".65">
+<circle cx="132" cy="23" r="2.4"/><circle cx="132" cy="67" r="2.4"/><circle cx="132" cy="171" r="2.4"/><circle cx="132" cy="216" r="2.4"/><circle cx="91" cy="34" r="2"/><circle cx="91" cy="201" r="2"/>
+</g>
+<path d="M130.5 24l3-2m-3 46l3-2m-3 106l3-2m-3 47l3-2" stroke="#354244" stroke-width=".7"/>
+<rect x="146" width="14" height="240" fill="url(#shadow)"/>
+</svg>
