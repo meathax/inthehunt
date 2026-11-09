@@ -1,4 +1,4 @@
-"""Build and replay the World encounter captured by play.ps1 -CaptureEncounter."""
+"""Build and replay the World encounter captured by tools/play_reference.ps1 -CaptureEncounter."""
 import argparse
 import os
 from pathlib import Path

@@ -22,6 +22,15 @@ FILES = (
     "artwork/worldborders/default.lay", "artwork/worldborders/hull.svg", "artwork/worldborders/ocean.svg", "tools/world_menu_input.ps1",
     "src/world_video.c", "src/world_video.h", "src/world_gameover.c", "src/world_title_master.c", "src/world_title_master.h", "src/world_title.c", "src/world_title.h", "src/world_enemy_target.c", "src/world_enemy_target.h", "play.ps1", "setup.ps1", "tools/import_world.py", "tools/build_world.py",
     "tools/stage_one.lua", "tools/package_source.py", "src/world_io.c",
+    # Presentation, modes and service-record modules awaiting integration.
+    "src/world_achievements.c", "src/world_achievements.h", "src/world_achievement_view.c", "src/world_achievement_view.h",
+    "src/world_crt.c", "src/world_crt.h", "src/shaders/world_crt.hlsl",
+    "LICENSES/CRT-Hyllian-MIT.txt", "LICENSES/CRT-Lottes-Public-Domain.txt",
+    "src/world_menu.c", "src/world_menu.h", "src/world_modes.c", "src/world_modes.h",
+    "src/world_present.c", "src/world_present.h", "src/world_scores_store.c", "src/world_scores_store.h",
+    "src/InTheHunt.manifest", ".gitignore", ".gitattributes",
+    "tests/README.md", "tests/run_tests.ps1", "tests/achievements-test.c", "tests/clock-test.c",
+    "tests/controls-remap-test.c", "tests/cycle-cost-test.c", "tests/prefetch-test.c", "tests/timing-option-test.c",
     "src/world_player.c", "src/world_camera.c", "src/world_dispatch.c", "src/world_dispatch.h", "src/world_terrain.c", "src/world_tile_address.h", "src/world_tile_v33.c", "src/world_stage.c", "src/world_stage.h", "src/world_candidates.c", "src/world_death.c", "src/world_fire.c", "src/world_torpedo.h", "src/world_torpedo.c", "src/world_contact.c", "src/world_score.c", "tools/replay_score.c", "tools/replay_frame.c", "src/world_motion.c", "src/world_sound.c",
 )
 

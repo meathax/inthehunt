@@ -14,7 +14,7 @@ FILES = {
     "tools/world_native.ps1": "tools/world_native.ps1",
     "CREDITS.md": "CREDITS.md",
 }
-INSTRUCTIONS = """In The Hunt World - native Windows development build
+INSTRUCTIONS = r"""In The Hunt World - native Windows development build
 
 Extract the complete ZIP to a writable folder and open play.cmd.
 Select your own World ROM archive when prompted. The launcher also checks your
