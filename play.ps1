@@ -32,7 +32,7 @@ if (Test-Path -LiteralPath $portable) { $exe = $portable }
 else {
     $build = Get-Item -LiteralPath $exe -ErrorAction SilentlyContinue
     $newest = @(
-        Get-ChildItem -Recurse -File -Path "$PSScriptRoot/src" -Include *.c,*.h,*.cpp,*.ipp
+        Get-ChildItem -Recurse -File -Path "$PSScriptRoot/src" -Include *.c,*.h,*.cpp,*.ipp,*.manifest
         Get-Item -LiteralPath "$PSScriptRoot/tools/world_native.ps1"
     ) |
         Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1

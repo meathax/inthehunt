@@ -196,6 +196,9 @@ function Build-WorldNative {
         'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette')
     $sources = @($names | ForEach-Object { Join-Path $Root "src/world_$_.c" })
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')
+    # The manifest selects UTF-8 as the process code page, so the data path
+    # and every file the game opens agree on encoding outside ASCII folders.
+    $appManifest = Join-Path $Root 'src/InTheHunt.manifest'
     $cppSources = @('src/world_ym.cpp', 'src/third_party/ymfm/ymfm_opm.cpp')
     $objects = @()
     try {
@@ -205,7 +208,7 @@ function Build-WorldNative {
             & $Compiler c++ -target x86_64-windows-gnu -std=c++17 -O2 -c (Join-Path $Root $source) -o $object
             if ($LASTEXITCODE) { throw "Native FM build failed for $source." }
         }
-        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -lc++
+        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects $appManifest -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -lc++
         if ($LASTEXITCODE) { throw 'Native Windows build failed.' }
         try {
             Move-Item -Force -LiteralPath $temp -Destination $target -ErrorAction Stop
