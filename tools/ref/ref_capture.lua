@@ -119,7 +119,7 @@ tap_io = cpu.spaces.io:install_read_tap(0, 9, "ref_ports", function(addr, data)
         if (memory:read_u16(0xe025e) & 0x8000) ~= 0 then
             if in_pass then
                 irq_log:write(("%d %d %04x\n"):format(pass, calls, data & 0xffff))
-            elseif current and (current.master == 0xa0e or current.master == 0x24e2) then
+            elseif current and (current.master == 0xa0e or current.master == 0x24e2 or current.master == 0xa09 or current.master == 0x344d or current.master == 0x356e or current.master == 0x333d) then
                 current.busy = data & 0xffff
             else
                 table.insert(pending, ("I %04x"):format(data & 0xffff))
@@ -147,7 +147,15 @@ local function on_pass_start()
     -- so the native replay applies them after the boundary and before the pass.
     -- They also run before the recording window opens, so a late window sees
     -- the same game as a recording started earlier.
-    if cfg.refill and (memory:read_u8(0xe0264) & 1) ~= 0 and memory:read_u8(0xe0118) < 2 then poke(0x118, 3, 1) end
+    if cfg.refill and (not cfg.refill_until or frame < cfg.refill_until) and (memory:read_u8(0xe0264) & 1) ~= 0 and memory:read_u8(0xe0118) < 2 then poke(0x118, 3, 1) end
+    if cfg.refill2 and (memory:read_u8(0xe0264) & 2) ~= 0 and memory:read_u8(0xe0158) < 2 then poke(0x158, 3, 1) end
+    -- duel_keep=true: keep both submarines alive through the two-player duel so that it ends in a draw.
+    if cfg.duel_keep and word(0x80) == 0x33a9 then
+        for _, slot in ipairs({0x90, 0x92}) do
+            local sub = word(slot)
+            if memory:read_u8(0xe0000 + sub + 0x26) < 4 and memory:read_u8(0xe0000 + sub + 0x27) == 0 then poke(sub + 0x26, 8, 1) end
+        end
+    end
     if cfg.arm and frame >= (cfg.arm.from or 1500) and word(0x80) == 0xb2e and (memory:read_u8(0xe0264) & 1) ~= 0 then
         -- arm={mode=M, level=L, kind2=K, level2=L, from=FRAME}: keep P1 equipped with
         -- primary weapon mode M (2, 4 or 6) and/or secondary kind K (2 or 4), as the
@@ -159,6 +167,13 @@ local function on_pass_start()
         end
     end
     if cfg.stage and not cfg.stage_done and word(0x80) == 0x2218 then poke(0x84, cfg.stage, 2); cfg.stage_done = true end
+    -- pokes={{frame=F, addr=A, value=V, size=1|2, master=M}, ...}: one recorded poke each, at the
+    -- first pass start at or after frame F (and, with master=M, while that master runs).
+    for _, p in ipairs(cfg.pokes or {}) do
+        if not p.done and frame >= (p.frame or 0) and (not p.master or word(0x80) == p.master) then
+            poke(p.addr, p.value, p.size or 2); p.done = true
+        end
+    end
     if not recording and frame < start_frame then pending = {}; return end
     if not recording then
         recording = true
@@ -377,6 +392,9 @@ frame_sub = emu.add_machine_frame_notifier(function()
             set(pad["P2 Button 1"], on and frame % 14 < 7)
             set(pad["P2 Button 2"], on and frame % 18 < 9)
         end
+        -- coin_at={F,...}: extra Coin 1 presses; start_at={F,...}: extra P1 Start presses (continue).
+        for _, f in ipairs(cfg.coin_at or {}) do if frame >= f and frame < f + 6 then set(coin["Coin 1"], true) end end
+        for _, f in ipairs(cfg.start_at or {}) do if frame >= f and frame < f + 6 then set(pad["P1 Start"] or coin["1 Player Start"], true) end end
         if cfg.continue and play and (frame % 600) < 6 and (memory:read_u8(0xe0264) & 1) == 0 then
             set(coin["Coin 1"], true)
         end

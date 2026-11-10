@@ -157,5 +157,6 @@ void surface_enemy_pose(uint8_t *ram, const uint8_t *bank, uint16_t actor, int m
 void surface_enemy_fire(uint8_t *ram, uint16_t actor);
 int surface_enemy_swim(uint8_t *ram, const uint8_t *rom, const uint8_t *tiles, uint16_t actor, uint16_t handler);
 int boss_segment_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t handler);
+void world_duel_shot_contact(uint8_t *ram, const uint8_t *rom, uint16_t actor); /* A402, world_credits.c */
 
 #endif

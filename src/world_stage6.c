@@ -840,7 +840,7 @@ static int final_boss(uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles, uin
             WW(0x24, read_word(ram, parent + 0x24));
             if (!decrement(ram, actor + 0x42)) {
                 unsigned players = read_word(ram, 0x264) & 3;
-                if (players == 3) return WORLD_HANDLER_STOP; /* two-player target choice not recovered */
+                if (players == 3 && !world_enemy_target_mode_supported(ram[actor + 0x0c])) return WORLD_HANDLER_STOP;
                 WW(0x38, 0xff80);
                 WW(0x42, 0x20);
                 if (!players) WW(0x70, 0);
@@ -1785,7 +1785,7 @@ int world_stage6_handlers(WorldDispatch *pass, uint8_t *ram, const uint8_t *main
             if (RW(0x48) & (uint16_t)(int16_t)(int8_t)(RW(0x38) >> 8)) WW(0x48, RW(0x48) - 1);
             else {
                 unsigned players = read_word(ram, 0x264) & 3;
-                if (players == 3) return WORLD_HANDLER_STOP; /* two-player target choice not recovered */
+                if (players == 3 && !world_enemy_target_mode_supported(ram[actor + 0x0c])) return WORLD_HANDLER_STOP;
                 if (players) {
                     uint16_t target = world_enemy_target(ram, actor);
                     int chase = 1;
@@ -2244,8 +2244,11 @@ int world_stage6_handlers(WorldDispatch *pass, uint8_t *ram, const uint8_t *main
     }
     case 0xa9a2c:
         if (decrement(ram, actor + 0x42)) break;
-        if (read_word(ram, 0x272) == 3) return WORLD_HANDLER_STOP; /* duel ending not recovered */
-        write_word(ram, 0x86, 0x80);
+        if (read_word(ram, 0x272) == 3) {
+            memset(tiles, 0, 0x4000);   /* 37BB: the duel draw clears the text layer and goes on */
+            world_queue_sound(ram, 0x17);
+            ram[0x26f] &= (uint8_t)~0x80u;
+        } else write_word(ram, 0x86, 0x80);
         finish_animation(ram, actor);
         break;
     case 0xa9a6b: {
@@ -2294,6 +2297,7 @@ static void ending_fade(uint8_t *ram, unsigned speed)
 
 /* Returns 0 for a master that is not an ending controller. *master_command
  * receives the sound-board reset the controller issues, if any. */
+int world_duel_master(uint8_t *ram, uint8_t *tiles, uint8_t *palette, const uint8_t *rom, int *master_command);
 int world_ending_master(uint8_t *ram, uint8_t *tiles, uint8_t *palette, const uint8_t *rom, int *master_command)
 {
     unsigned variant = (read_word(ram, 0x272) & 3) << 1;
@@ -2362,5 +2366,5 @@ int world_ending_master(uint8_t *ram, uint8_t *tiles, uint8_t *palette, const ui
         }
         return 1;
     }
-    return 0;
+    return world_duel_master(ram, tiles, palette, rom, master_command); /* 333D..342A, world_credits.c */
 }

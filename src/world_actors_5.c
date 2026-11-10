@@ -209,7 +209,7 @@ int world_actors_5(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         break;
     case 0x9c33:
     case 0x9c82:
-        if (!tiles || (ram[actor + 0x0b] & 0x80) || read_word(ram, 0x84) == 4 ||
+        if (!tiles || read_word(ram, 0x84) == 4 ||
             (address == 0x9c33 && !read_word(ram, actor + 0x42)))
             return 0;
         update_standard_torpedo(ram, main_rom, tiles + 0x4000, actor, address == 0x9c33);

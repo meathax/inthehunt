@@ -189,7 +189,11 @@ static int dispatch_sound(uint8_t *ram)
 
 static int irq_supported(const uint8_t *ram)
 {
-    return !word(ram + 0xba80) && !word(ram + 0xba84) && !(ram[0x282] & 0x22);
+    if (word(ram + 0xba80) || word(ram + 0xba84) || (ram[0x282] & 0x20)) return 0;
+    /* A sound reply still outstanding (bit 1) only matters when the retry
+     * countdown expires; the fifth expiry resets the sound board. */
+    if (!(ram[0x282] & 2) || (ram[0x282] & 0x14)) return 1;
+    return word(ram + 0xba82) != 1 || word(ram + 0xba7e) < 4;
 }
 
 /* Common IRQ tail, 0696..07B6. A busy actor pass skips display and
@@ -210,7 +214,9 @@ static void irq_tick(uint8_t *ram, uint16_t raw_system)
     unsigned wait = word(ram + 0xba82);
     if (!wait) return;
     put(ram + 0xba82, wait - 1);
-    if (wait == 1) {
+    if (wait == 1 && (ram[0x282] & 2)) {
+        put(ram + 0xba7e, word(ram + 0xba7e) + 1);
+    } else if (wait == 1) {
         unsigned attempts = (uint16_t)(word(ram + 0xba86) + 1);
         put(ram + 0xba86, attempts);
         if (attempts >= 5) ram[0x282] |= 0x10;
@@ -316,15 +322,16 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
     int title = master == 0xa09 || master == 0x1d52 || master == 0x1de6 ||
                 master == 0x1e6c || master == 0x1ea5 || master == 0x1f52 || master == 0x1f85;
     int ending = master == 0x344d || master == 0x3513 || master == 0x3522 || master == 0x355b ||
-                 master == 0x356e || master == 0x35be || master == 0x35f9;
-    if (!vblanks || vblanks > 2 || (busy_system >= 0 && master != 0xa0e && master != 0x24e2) ||
+                 master == 0x356e || master == 0x35be || master == 0x35f9 ||
+                 master == 0x333d || master == 0x33a9 || master == 0x33e4 || master == 0x341e || master == 0x342a;
+    if (!vblanks || vblanks > 2 || (busy_system >= 0 && master != 0xa0e && master != 0x24e2 && master != 0xa09 && master != 0x344d && master != 0x356e && master != 0x333d) ||
         (!title && !title_transition && !gameover && !stage_clear && !ending && master != 0xb2e && master != 0x2218 && master != 0x2282 && master != 0xa81 && master != 0xa31) ||
         ((title || title_transition || stage_clear || gameover || ending || master == 0xa81 || master == 0xa31) && (!tiles || !palette)) ||
         ((title || master == 0x1f19) && word(ram + 0x84)) ||
         ((master == 0xa0e || master == 0xa81) && word(ram + 0x84) >= 6) ||
         !irq_supported(ram) ||
         (raster && raster != 1 && raster != 2 && raster != 5 &&
-         (raster != 4 || ((word(ram + 0x298) & 6) && (word(ram + 0x298) & 14) != 6)))) return 0;
+         (raster != 4 || ((word(ram + 0x298) & 6) && (word(ram + 0x298) & 14) != 6 && (word(ram + 0x298) & 14) != 2)))) return 0;
     if (!valid_sprite_list(ram, rom)) return 0;
     build_sprites(ram, oam, rom);
     *sound_command = dispatch_sound(ram);
@@ -359,6 +366,8 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
     put(ram + 0x9e02, 210);
     put(ram + 0xb892, word(ram + 0xb892) + polls);
     if (title) {
+        /* A VBlank inside the long title set-up (1D52) arrives before its sound reset. */
+        if (busy_system >= 0) irq_tick(ram, (uint16_t)busy_system);
         if (!world_title_boundary(ram, tiles, palette, rom)) return 0;
         if (master == 0xa09 || master == 0x1d52) *master_command = 0x20;
     } else if (title_transition || stage_clear) {
@@ -367,11 +376,20 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
     } else if (gameover) {
         if (!world_gameover_master(ram, tiles, palette, rom, master_command)) return 0;
     } else if (ending) {
+        if (busy_system >= 0) irq_tick(ram, (uint16_t)busy_system); /* before the scene's sound reset */
         if (!world_ending_master(ram, tiles, palette, rom, master_command)) return 0;
     } else if (master == 0xb2e) {
         put(ram + 0x8e, word(ram + 0x8e) + 1);
         put(ram + 0xb892, 0);
         world_start_player(ram);
+        if (!(ram[0x263] & 0x80) && (ram[0x28c] & 1) && tiles && !(word(ram + 0x274) & 0x1f)) {
+            /* 0D25: the attract demo blinks its coin prompt every 32 passes. */
+            unsigned text = !(word(ram + 0x274) & 0x20) ? 0x9fd : (ram[0x2c4] & 1) ? 0x9f1 : 0x9e5;
+            for (unsigned pos = 0x1f68; rom[text] != 0xff; ++text, pos = (pos & 0xff00) | ((pos + 4) & 255)) {
+                put(tiles + pos, rom[text]);
+                put(tiles + pos + 2, 0x104);
+            }
+        }
         if (ram[0x263] & 0x80) {
             put(ram + 0x86, 64);
             put(ram + 0x80, 0xbb3);

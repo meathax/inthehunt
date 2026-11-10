@@ -411,7 +411,14 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
     if (flags & 0x40) {
         /* 7D5A: the last boss is gone. With both players alive the duel
          * follows (7D91, not recovered). */
-        if ((word(ram + 0x264) & 3) == 3) return 0;
+        if ((word(ram + 0x264) & 3) == 3) {
+            /* 7D91: the submarine sails on, then turns back (7DB3.., world_credits.c). */
+            put(a + 0x38, 0x180);
+            put(a + 0x42, 0x40);
+            put(ram + 0xb73e, 0x101);
+            put(a, 0x7db3);
+            return 1;
+        }
         if (word(ram + 0x272)) ram[0x263] |= 0xc0;
         else {
             put(a + 0x42, 0x80);

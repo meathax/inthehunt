@@ -1591,7 +1591,9 @@ void update_standard_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t *te
         ram[trail + 0x2c] = 3;
         write_word(ram, actor + 0x52, read_word(ram, actor + 0x52) ^ 1);
     }
-    if (read_word(ram, actor + 0x3c) != 0xffff)
+    if (ram[actor + 0x0b] & 0x80)
+        world_duel_shot_contact(ram, rom, actor);
+    else if (read_word(ram, actor + 0x3c) != 0xffff)
         world_append_candidate(ram + 0xa6e2, actor);
 }
 
@@ -2576,7 +2578,7 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
 {
     int rising = handler != 0xa0a9;
     int surface = handler == 0x9fcd || handler == 0x9fda;
-    if (ram[actor + 0x0b] & 0x80)
+    if ((ram[actor + 0x0b] & 0x80) && surface)
         return 0;
     uint16_t velocity = read_word(ram, actor + 0x3a);
     int accelerate = (handler == 0x9eb2 || handler == 0x9fcd) &&
@@ -2673,12 +2675,18 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
                 release_actor_resources(ram, actor);
                 write_word(ram, actor + 0x36, 0x20);
                 write_word(ram, actor, 0xa199);
+                if (ram[actor + 0x0b] & 0x80) {   /* a duel shot just bursts */
+                    spawn_impact(ram, rom, actor);
+                    finish_animation(ram, actor);
+                }
             } else
                 finish_animation(ram, actor);
             return 1;
         }
     }
-    if (read_word(ram, actor + 0x3c) != 0xffff)
+    if (ram[actor + 0x0b] & 0x80)
+        world_duel_shot_contact(ram, rom, actor);
+    else if (read_word(ram, actor + 0x3c) != 0xffff)
         world_append_candidate(ram + 0xa6e2, actor);
     return 1;
 }
