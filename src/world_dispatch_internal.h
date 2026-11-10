@@ -21,7 +21,7 @@ typedef int WorldHandlerGroup(WorldDispatch *pass, uint8_t *ram, const uint8_t *
 WorldHandlerGroup world_actors_1, world_actors_2, world_actors_3, world_actors_4, world_actors_5, world_actors_6;
 WorldHandlerGroup world_stage1_handlers, world_stage2_handlers, world_stage3_handlers,
                   world_stage4_handlers, world_stage5_handlers, world_stage6_handlers,
-                  world_common_handlers;
+                  world_common_handlers, world_gaps_handlers, world_credits_handlers, world_coop_handlers, world_explore1_handlers, world_explore2_handlers;
 
 /* Recovered routines in other sources. */
 uint16_t world_player_contact(uint8_t *, const uint8_t *, uint16_t);

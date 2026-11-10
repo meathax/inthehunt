@@ -8,7 +8,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 WORLD = ROOT / ".local" / "world"
 SOURCES = (
-    "dispatch", "actors_1", "actors_2", "actors_3", "actors_4", "actors_5", "actors_6", "stage1", "stage2", "stage3", "stage4", "stage5", "stage6", "common",
+    "dispatch", "actors_1", "actors_2", "actors_3", "actors_4", "actors_5", "actors_6", "stage1", "stage2", "stage3", "stage4", "stage5", "stage6", "common", "gaps", "credits", "coop", "explore1", "explore2",
     "title", "title_master", "gameover", "enemy_target", "stage", "fire", "camera", "torpedo", "contact", "terrain",
     "death", "score", "candidates", "player", "frame", "frame_video", "palette",
 )

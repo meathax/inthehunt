@@ -1,8 +1,8 @@
 # Linux developer build of the reference checks (never shipped).
-#   make -f tools/ref/Makefile        from the project root
+#   make -f tools/ref/build.mk        from the project root
 CC ?= gcc
 CFLAGS ?= -std=c99 -O2 -g -Wall -Wextra
-CORE = dispatch actors_1 actors_2 actors_3 actors_4 actors_5 actors_6 stage1 stage2 stage3 stage4 stage5 stage6 common \
+CORE = dispatch actors_1 actors_2 actors_3 actors_4 actors_5 actors_6 stage1 stage2 stage3 stage4 stage5 stage6 common gaps credits coop explore1 explore2 \
        title title_master gameover enemy_target stage fire camera torpedo contact \
        terrain death score candidates player frame frame_video palette
 CORE_SRC = $(patsubst %,src/world_%.c,$(CORE))

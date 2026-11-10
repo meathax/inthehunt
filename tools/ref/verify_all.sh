@@ -3,7 +3,7 @@
 # per window. Takes roughly half an hour and about 1 GB of scratch disk.
 # Usage: tools/ref/verify_all.sh [stage-index ...]     (default: all six)
 root=$(cd "$(dirname "$0")/../.." && pwd); cd "$root" || exit 1
-make -s -f tools/ref/Makefile >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+make -s -f tools/ref/build.mk >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 AIM='aim={[0x7c690]=true,[0x7b572]=true,[0x7b61e]=true,[0x7b64e]=true,[0x7b696]=true,[0x7b6ef]=true,[0x7bb61]=true,[0x7b050]={pri=3},[0x7b2a4]={pri=3},[0x7b1ff]={pri=3},[0x7af56]={pri=5}}'
 run() { # stage start end options
   rec=".local/ref/verify-$1-$2"

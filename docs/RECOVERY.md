@@ -8,7 +8,7 @@ program. Everything here is a development aid; none of it ships.
 | Command | Purpose |
 |---|---|
 | `tools/ref/run_capture.sh DIR 'opts'` | Run the World set in MAME headless and record a reference into `DIR` (keep it under `.local/ref/`). |
-| `make -f tools/ref/Makefile` | Build `.local/bin/check_replay` from the native core. Add `CFLAGS='-std=c99 -O1 -g -Wall -Wextra'` for faster builds. |
+| `make -f tools/ref/build.mk` | Build `.local/bin/check_replay` from the native core. Add `CFLAGS='-std=c99 -O1 -g -Wall -Wextra'` for faster builds. |
 | `.local/bin/check_replay DIR [--from P] [--passes N] [--keep-going --quiet] [--trace DIR/trace.bin]` | Run the native handlers over a recording. Exit 0 = every compared pass matches the original byte for byte. |
 | `... --keep-going --quiet --verified --trace DIR/trace.bin` | Inside traced passes a missing handler is stepped over using the reference state before the next call, so the handlers after it are still compared one by one. `--verified` lists per handler how many calls were compared and matched. |
 | `tools/ref/dasm.sh ADDR LEN` | Disassemble main-CPU code (hex linear address and length) with MAME's NEC V33 disassembler. |

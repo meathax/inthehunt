@@ -192,7 +192,7 @@ function Build-WorldNative {
             if ($LASTEXITCODE) { throw 'Could not unpack Zig.' }
         }
     }
-    $names = @('native','clock','cycle_costs','timing_options','settings','input','border','present','crt','crt_shader','menu','scores_store','achievements','achievement_view','modes','service','audio_output','ga20','audio_driver','audio_notes','boot','window','video','dispatch','actors_1','actors_2','actors_3','actors_4','actors_5','actors_6','stage1','stage2','stage3','stage4','stage5','stage6','common','title','title_master','gameover','enemy_target','stage','fire',
+    $names = @('native','clock','cycle_costs','timing_options','settings','input','border','present','crt','crt_shader','menu','scores_store','achievements','achievement_view','modes','service','audio_output','ga20','audio_driver','audio_notes','boot','window','video','dispatch','actors_1','actors_2','actors_3','actors_4','actors_5','actors_6','stage1','stage2','stage3','stage4','stage5','stage6','common','gaps','credits','coop','explore1','explore2','title','title_master','gameover','enemy_target','stage','fire',
         'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette')
     $sources = @($names | ForEach-Object { Join-Path $Root "src/world_$_.c" })
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')

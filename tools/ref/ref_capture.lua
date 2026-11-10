@@ -229,6 +229,7 @@ local function set(field, on) if on then field:set_value(1) else field:clear_val
 -- away (default -70, to its left) at its height plus dy (actor Y grows upward), facing
 -- right (or face="left"), so torpedoes hit it. Among several, the lowest pri wins
 -- (default 1), then list order. Returns the pad state or nil.
+local rng, rnd = (cfg.random or 1) * 2654435761 % 0x7fffffff, 0
 local function aim_at()
     if not cfg.aim then return nil end
     local a, n, best, opt = 0x400, 0, nil, nil
@@ -318,12 +319,40 @@ frame_sub = emu.add_machine_frame_notifier(function()
         end
         local aim = play and aim_at()
         if aim then right, left, up, down = aim.right, aim.left, aim.up, aim.down end
+        local fire1, fire2 = frame % 12 < 6, frame % 16 < 8
+        if cfg.random then
+            -- random=SEED: a different deterministic player per seed. Every 24
+            -- frames pick a new direction (biased to the right so the stage
+            -- advances) and new fire habits, to reach paths the weaving bot misses.
+            if frame % 24 == 0 then
+                rng = (rng * 1103515245 + 12345) & 0x7fffffff
+                rnd = rng >> 8
+            end
+            right, left = rnd % 8 < 5, rnd % 8 == 5
+            up, down = (rnd >> 3) % 4 == 0, (rnd >> 3) % 4 == 1
+            fire1 = (rnd >> 5) % 4 ~= 0 and frame % 12 < 6
+            fire2 = (rnd >> 7) % 4 ~= 0 and frame % 16 < 8
+        end
         set(pad["P1 Right"], play and right)
         set(pad["P1 Left"], play and left)
         set(pad["P1 Up"], play and up)
         set(pad["P1 Down"], play and down)
-        set(pad["P1 Button 1"], play and frame % 12 < 6)
-        set(pad["P1 Button 2"], play and frame % 16 < 8)
+        set(pad["P1 Button 1"], play and fire1)
+        set(pad["P1 Button 2"], play and fire2)
+        if cfg.p2 then
+            -- p2=true: a second credit and player two, who mirrors player one
+            -- vertically. p2_join=FRAME joins mid-game instead of at the start.
+            local join = cfg.p2_join or 1300
+            set(coin["Coin 2"], frame >= 1220 and frame < 1226)
+            set(coin["2 Players Start"], frame >= join and frame < join + 6)
+            local on = frame >= join + 100
+            set(pad["P2 Right"], on and right)
+            set(pad["P2 Left"], on and left)
+            set(pad["P2 Up"], on and down)
+            set(pad["P2 Down"], on and up)
+            set(pad["P2 Button 1"], on and frame % 14 < 7)
+            set(pad["P2 Button 2"], on and frame % 18 < 9)
+        end
         if cfg.continue and play and (frame % 600) < 6 and (memory:read_u8(0xe0264) & 1) == 0 then
             set(coin["Coin 1"], true)
         end
