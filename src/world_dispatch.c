@@ -9822,6 +9822,32 @@ stage2_jumper_terrain:
     case 0xccb7:
         finish_animation(ram,actor);
         break;
+    /* 0:2612: start the stage tally: one 2681 column per player, ten 2B68
+       actors, and two forty-cell rules on the first layer; then idle. */
+    case 0x2612: {
+        if (!tiles) return 0;
+        for (unsigned side = 0; side < 2; ++side) {
+            uint16_t column = effect_slot(ram, actor, 0x2681);
+            write_word(ram, column + 0x1e, side);
+        }
+        do {
+            uint16_t item = effect_slot(ram, actor, 0x2b68);
+            write_word(ram, item + 0x1e, read_word(ram, actor + 0x42));
+            write_word(ram, actor + 0x42, read_word(ram, actor + 0x42) + 1);
+        } while (read_word(ram, actor + 0x42) < 0x0a);
+        for (unsigned line = 0; line < 2; ++line) {
+            uint16_t cell = line ? 0x2030 : 0x1f30;
+            for (unsigned i = 0; i < 0x28; ++i) {
+                write_word(tiles, cell, 1);
+                write_word(tiles, (uint16_t)(cell + 2), 0x111);
+                cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+            }
+        }
+        write_word(ram, actor, 0x2680);
+        break;
+    }
+    case 0x2680:
+        break;
     /* 0:1A24: the list head that starts the 0:2612 actor, then idles. */
     case 0x1a24:
         effect_slot(ram, actor, 0x2612);
