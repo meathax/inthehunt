@@ -36,6 +36,7 @@ local polls, system_port, last_irq, calls, in_pass = 0, 0xffff, 0, 0, false
 local pending, current, seen_ports, handlers = {}, nil, {}, {}
 local stages_seen = {}
 local trace = nil
+local regs_log, regs_hist = nil, {}
 local patch_set, patch_file, patch_before, patch_call = nil, nil, nil, 0
 if cfg.patch then
     patch_set = {}
@@ -359,7 +360,7 @@ frame_sub = emu.add_machine_frame_notifier(function()
         local aim = play and aim_at()
         if aim then right, left, up, down = aim.right, aim.left, aim.up, aim.down end
         local fire1, fire2 = frame % 12 < 6, frame % 16 < 8
-        if cfg.random then
+        if cfg.random and frame >= (cfg.random_from or 0) and frame < (cfg.random_until or math.huge) then
             -- random=SEED: a different deterministic player per seed. Every 24
             -- frames pick a new direction (biased to the right so the stage
             -- advances) and new fire habits, to reach paths the weaving bot misses.
@@ -397,6 +398,9 @@ frame_sub = emu.add_machine_frame_notifier(function()
         for _, f in ipairs(cfg.start_at or {}) do if frame >= f and frame < f + 6 then set(pad["P1 Start"] or coin["1 Player Start"], true) end end
         if cfg.continue and play and (frame % 600) < 6 and (memory:read_u8(0xe0264) & 1) == 0 then
             set(coin["Coin 1"], true)
+        end
+        if cfg.continue and play and (frame % 600) >= 60 and (frame % 600) < 66 and (memory:read_u8(0xe0264) & 1) == 0 then
+            set(pad["P1 Start"] or coin["1 Player Start"], true)
         end
     end
 end)

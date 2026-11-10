@@ -108,17 +108,28 @@ int world_actors_4(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
             write_word(ram, actor + 0x40, step + 2);
         }
         ram[actor + 0xd] = 1;
-        world_player_contact(ram, main_rom, actor);
+        /* BX through D237 and D2B7: the touched player or [92], then the shot that hit or,
+         * without a hit, the last entry read from the shot list. 6237 credits whoever BX names. */
+        uint16_t bx = world_player_contact(ram, main_rom, actor);
+        if (!bx) bx = read_word(ram, 0x92);
         uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
         write_word(ram, actor + 0x3c, read_word(bank, 0x60ed));
         ram[actor + 0xd] = 0;
         uint16_t hit = world_projectile_contact(ram, main_rom, actor);
-        if (hit) ram[parent + 0x19] = (ram[parent + 0x19] & 1) + 32;
+        if (hit) {
+            ram[parent + 0x19] = (ram[parent + 0x19] & 1) + 32;
+            bx = hit;
+        } else if (read_word(ram, 0xa6e2)) {
+            bx = read_word(ram, 0xa6e4 + read_word(ram, 0xa6e2));
+        }
         uint16_t hp = read_word(ram, actor + 0x26);
         if (!hp) {
-            world_award_score(ram, main_rom, actor, hit);
+            world_award_score(ram, main_rom, actor, bx);
             write_word(ram, parent + 0x26, 0);
-            write_word(ram, parent + 0x74, hit);
+            /* 6237 leaves the owner number in BX: 0 or 2 once the score is credited. */
+            unsigned owner = ram[(uint16_t)(bx + 0x0b)] & 3;
+            if (owner == 1 && (ram[0x264] & 4)) owner = 0;
+            write_word(ram, parent + 0x74, owner);
         }
         write_word(ram, actor + 0x3c, read_word(bank, 0x6135));
         write_word(ram, actor + 0x48, hp);
