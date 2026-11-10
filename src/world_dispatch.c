@@ -7340,6 +7340,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
         if (read_word(ram, actor + 0x21) < 0x40) {
             finish_animation(ram, actor);
+            keep_si();                      /* 432B never loads SI */
             break;
         }
         if (!decrement(ram, actor + 0x44)) {
@@ -7363,7 +7364,10 @@ stage2_jumper_terrain:
             ram[actor + 0x0d] = 0;
             hit = world_projectile_contact(ram, main_rom, actor);
             if (hit) ram[actor + 0x19] = (ram[actor + 0x19] & 1) + 20;
-            if (read_word(ram, actor + 0x26)) break;
+            if (read_word(ram, actor + 0x26)) {
+                leave_si(read_word(ram, actor + 0x3c));   /* D2B7 at 7E50D */
+                break;
+            }
         }
         ram[actor + 0xb] = ram[hit + 0xb];
         world_award_score(ram, main_rom, actor, hit);
@@ -7510,6 +7514,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         if (outside_pickup_area(ram, actor)) {
             finish_animation(ram, actor);
+            if (address == 0x7e857) keep_si();     /* only 4311 ran */
             break;
         }
         if (!(ram[actor + 0x1e] & 1)) {
@@ -7526,7 +7531,10 @@ stage2_jumper_terrain:
         if (!hit) {
             ram[actor + 0xd] = 0;
             hit = world_projectile_contact(ram, main_rom, actor);
-            if (read_word(ram, actor + 0x26)) break;
+            if (read_word(ram, actor + 0x26)) {
+                leave_si(read_word(ram, actor + 0x3c));   /* D2B7 loaded the shape */
+                break;
+            }
         }
         world_award_score(ram, main_rom, actor, hit);
         unsigned variant = read_word(ram, actor + 0x1f) & 2;
@@ -9020,6 +9028,8 @@ stage2_jumper_terrain:
         break;
     case 0x7dc27:
     case 0x7dc68:
+        /* 7DC68 loads SI only through a successful 1769 at 7DCD6. */
+        if (address == 0x7dc68) keep_si();
         if (read_word(ram, actor + 0x48) < read_word(ram, 0xb700)) {
             finish_animation(ram, actor);
             break;
@@ -9049,9 +9059,12 @@ stage2_jumper_terrain:
                 write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
                 write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
             }
+            uint16_t successor = read_word(ram, actor + 4);
             uint16_t child = effect_slot(ram, actor, read_word(ram, actor + 0x60));
-            if (child != 0x8480)
+            if (child != 0x8480) {
                 write_word(ram, child + 2, read_word(ram, actor + 0x62));
+                leave_si(successor);
+            }
             write_word(ram, child + 0x21, read_word(ram, actor + 0x21));
             write_word(ram, child + 0x24, read_word(ram, actor + 0x24));
             write_word(ram, child + 0x1e, read_word(ram, actor + 0x44));
@@ -11000,7 +11013,13 @@ stage2_jumper_terrain:
         break;
     case 0xb2b03: {
         uint16_t velocity = read_word(ram, actor + 0x3a);
-        if (velocity == 0xffe0 && !(read_word(ram, 0x264) & 3)) return 0;
+        /* With no active player 65B1 leaves SI as the previous actor left it,
+           and B2B18 tests bit 1 of that. */
+        int idle = !(read_word(ram, 0x264) & 3);
+        if (velocity == 0xffe0 && idle && !entry_si_known) {
+            world_dispatch_detail = untracked_si_detail();
+            return 0;
+        }
         scroll_actor(ram, actor, 0xb71a);
         unsigned fraction = ram[actor + 0x23] + (velocity & 255);
         ram[actor + 0x23] = (uint8_t)fraction;
@@ -11010,13 +11029,35 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x3a, velocity);
         if (!velocity) {
             uint16_t target = world_enemy_target(ram, actor);
-            if (read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
+            if (idle ? (entry_si & 2) != 0
+                     : read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
                 ram[actor + 0x29] = 1;
             write_word(ram, actor, 0x2c46);
         }
         queue_surface_enemy(ram, main_rom, actor);
         register_surface_enemy(ram, actor);
         surface_enemy_hit(ram, main_rom, actor);
+        break;
+    }
+    /* B000:9036: spawn a formation from the six-byte rows selected by the
+       variant, then retire. */
+    case 0xb9036: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        uint16_t flags = read_word(ram, actor + 0x1e);
+        uint16_t row = read_word(bank, 0x8d98 + (flags & 0x0e));
+        unsigned kind = (flags & 1) << 2;
+        for (;;) {
+            write_word(ram, actor + 0x40, row);
+            uint16_t child = world_spawn_child(ram, actor, read_word(bank, 0x8e00 + kind));
+            if (!child) break;
+            write_word(ram, child + 2, read_word(bank, 0x8e02 + kind));
+            write_word(ram, child + 0x21, read_word(ram, actor + 0x21) + read_word(bank, row));
+            write_word(ram, child + 0x24, read_word(ram, actor + 0x24) + read_word(bank, (uint16_t)(row + 2)));
+            write_word(ram, child + 0x1e, read_word(bank, (uint16_t)(row + 4)));
+            row += 6;
+            if (read_word(bank, row) == 0xffff) break;
+        }
+        finish_animation(ram, actor);
         break;
     }
     case 0xb921a: {
@@ -11056,34 +11097,17 @@ stage2_jumper_terrain:
             if (fire) write_word(ram, actor, 0x92ce);
         } else {
             if (read_word(ram, actor + 0x21) < 0x40) { finish_animation(ram, actor); break; }
-            uint16_t kind = read_word(ram, actor + 0x7a);
-            uint16_t next = read_word(ram, actor + 0x7e);
-            uint16_t next_kind = read_word(main_rom + 0xb0000, next);
-            if (kind > 2 || (read_word(ram, actor + 0x7c) == 1 && next_kind != 0xffff && next_kind > 2))
+            /* B000:92D4: D6B7 steps the flight script; at its end the
+               enemy bursts (6B2E) and retires. */
+            int step = step_flight_script(ram, main_rom, actor);
+            if (!step) {
+                world_dispatch_detail = "flight script kind not recovered";
                 return 0;
-            scroll_actor(ram, actor, 0xb71a);
-            if (kind == 2) {
-                for (unsigned i = 0; i < 2; ++i) {
-                    uint16_t speed = read_word(ram, actor + 0x38 + 2*i) + read_word(ram, actor + 0x78 - 2*i);
-                    write_word(ram, actor + 0x38 + 2*i, speed);
-                    move_actor_axis(ram, actor + 0x20 + 3*i, speed);
-                }
             }
-            if (!decrement(ram, actor + 0x7c)) {
-                if (next_kind == 0xffff) {
-                    world_queue_sound(ram, 0x5d);
-                    uint16_t effect = effect_slot(ram, actor, 0x6efe);
-                    write_word(ram, effect + 0x4c, read_word(main_rom, 0x6b44));
-                    write_word(ram, effect + 0x4a, read_word(main_rom, 0x6b49));
-                    ram[effect + 0x2c] = 10;
-                    ram[effect + 0x2d] = 0x20;
-                    write_word(ram, effect + 0x56, 0x30);
-                    write_word(ram, effect + 0x58, 0x80);
-                    if (!(effect & 0x300)) write_word(ram, effect + 0x44, 0x5d);
-                    finish_animation(ram, actor);
-                    break;
-                }
-                begin_linear_script(ram, main_rom, actor, next);
+            if (step < 0) {
+                spawn_kill_blast(ram, actor);
+                finish_animation(ram, actor);
+                break;
             }
         }
         if (fire) update_cruiser_fire(ram, main_rom, actor, read_word(ram, actor + 0x50) ? 0x50 : 0x54);
