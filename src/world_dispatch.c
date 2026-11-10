@@ -9822,6 +9822,14 @@ stage2_jumper_terrain:
     case 0xccb7:
         finish_animation(ram,actor);
         break;
+    /* 0:1A24: the list head that starts the 0:2612 actor, then idles. */
+    case 0x1a24:
+        effect_slot(ram, actor, 0x2612);
+        write_word(ram, actor, 0x1a39);
+        write_word(ram, actor + 2, 0);
+        break;
+    case 0x1a39:
+        break;
     case 0x1a3a:
         effect_slot(ram, actor, 0xcccb);
         write_word(ram, actor, 0x1a4f);
