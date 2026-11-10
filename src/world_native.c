@@ -214,6 +214,75 @@ static void record_stop(const char *dir)
     fclose(f);
 }
 
+/* Developer test mode: no window, no sound device, no pacing and no dialogs.
+   Each script line is "FRAME HELD BUTTONS [shot]" with active-high hex masks
+   in the world_window_poll layout, applied from that board frame onward;
+   "FRAME end" stops the run. "shot" saves that frame as a BMP in the data
+   directory, as does the last frame of the run. */
+static void headless_shot(const char *dir, const char *name)
+{
+    char path[4096];
+    int n = snprintf(path, sizeof path, "%s/headless-%s.bmp", dir, name);
+    if (n < 0 || (size_t)n >= sizeof path) return;
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    BITMAPFILEHEADER file;
+    BITMAPINFOHEADER info;
+    memset(&file, 0, sizeof file);
+    memset(&info, 0, sizeof info);
+    file.bfType = 0x4d42;
+    file.bfOffBits = sizeof file + sizeof info;
+    file.bfSize = file.bfOffBits + sizeof pixels;
+    info.biSize = sizeof info;
+    info.biWidth = 320;
+    info.biHeight = -240;
+    info.biPlanes = 1;
+    info.biBitCount = 32;
+    fwrite(&file, sizeof file, 1, f);
+    fwrite(&info, sizeof info, 1, f);
+    fwrite(pixels, sizeof pixels, 1, f);
+    fclose(f);
+}
+
+static void headless_run(const char *dir, const char *script_path)
+{
+    FILE *script = fopen(script_path, "r");
+    if (!script) {
+        snprintf(failure, sizeof failure, "Cannot open the headless input script.");
+        return;
+    }
+    unsigned held = 0, buttons = 0;
+    unsigned long at = 0;
+    char first[32], second[32], third[32];
+    int fields = fscanf(script, "%lu %31s", &at, first);
+    for (;;) {
+        int shot = 0;
+        while (fields == 2 && ticks >= at) {
+            if (!strcmp(first, "end")) goto done;
+            if (fscanf(script, "%31s", second) != 1) goto done;
+            held = (unsigned)strtoul(first, NULL, 16);
+            buttons = (unsigned)strtoul(second, NULL, 16);
+            long mark = ftell(script);
+            if (fscanf(script, "%31s", third) == 1 && !strcmp(third, "shot")) shot = 1;
+            else fseek(script, mark, SEEK_SET);
+            fields = fscanf(script, "%lu %31s", &at, first);
+        }
+        if (fields != 2) break;
+        if (!tick((uint16_t)~held, (uint16_t)~buttons)) break;
+        ticks += elapsed_board_frames;
+        draw();
+        if (shot) {
+            char name[32];
+            snprintf(name, sizeof name, "%06lu", ticks);
+            headless_shot(dir, name);
+        }
+    }
+done:
+    fclose(script);
+    draw();
+    headless_shot(dir, "final");
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".local/world";
@@ -223,7 +292,12 @@ int main(int argc, char **argv)
     if (path_length < 0 || (size_t)path_length >= sizeof settings_path) return 1;
     WorldSettingsStatus settings_status = world_settings_load(settings_path, &settings);
     int timing_override = 0;
+    const char *headless = NULL;
     for (int i = 2; i < argc; ++i) {
+        if (!strncmp(argv[i], "--headless=", 11)) {
+            headless = argv[i] + 11;
+            continue;
+        }
         if (strncmp(argv[i], "--timing=", 9) ||
             !world_timing_mode_parse(argv[i] + 9, &settings.timing_mode)) {
             fprintf(stderr, "Unknown native option %s. Use --timing=arcade or --timing=remove-slowdown.\n", argv[i]);
@@ -236,12 +310,12 @@ int main(int argc, char **argv)
         || !load(dir, "gfx2.bin", gfx2, sizeof gfx2)
         || !load(dir, "soundcpu.bin", sound_rom, sizeof sound_rom)
         || !load(dir, "irem.bin", samples, sizeof samples)) {
-        MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
+        if (!headless) MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
         return 1;
     }
     if (!world_boot_world(ram, tiles, oam, palette, rom, 0xffbf)) {
-        MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
-                    "In The Hunt", MB_ICONERROR);
+        if (!headless) MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
+                                   "In The Hunt", MB_ICONERROR);
         world_audio_output_close();
         return 1;
     }
@@ -258,6 +332,10 @@ int main(int argc, char **argv)
     world_audio_receive(sound_state, 0); /* Power-on command gate. */
     world_audio_receive(sound_state, 0x20); /* Title initialization's reset command. */
     world_audio_tick(sound_state, sound_rom, &sound_bus);
+    if (headless) {
+        headless_run(dir, headless);
+        goto finished;
+    }
     sound_device = world_audio_output_open();
     if (!world_window_open()) {
         MessageBoxA(NULL, "Windows could not create the game window.", "In The Hunt", MB_ICONERROR);
@@ -291,13 +369,14 @@ int main(int argc, char **argv)
     }
     world_window_close();
     world_audio_output_close();
+finished:
     if (sound_gaps) fprintf(stderr, "%u sound callbacks need recovery.\n", sound_gaps);
     fprintf(stderr, "%llu executed blocks have unrecovered original timing in this run.\n",
             (unsigned long long)board_clock.unrecovered_costs);
     if (*failure) {
         record_stop(dir);
         fprintf(stderr, "%s\n", failure);
-        MessageBoxA(NULL, failure, "In The Hunt - native coverage", MB_ICONINFORMATION);
+        if (!headless) MessageBoxA(NULL, failure, "In The Hunt - native coverage", MB_ICONINFORMATION);
         return 2;
     }
     return 0;

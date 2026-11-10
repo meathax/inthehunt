@@ -1,4 +1,5 @@
 #include "world_frame.h"
+#include <stdio.h>
 #include "world_frame_video.h"
 #include "world_stage.h"
 #include "world_title.h"
@@ -309,9 +310,18 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
         ((title || title_transition || stage_clear || gameover || master == 0xa81 || master == 0xa31) && (!tiles || !palette)) ||
         ((title || master == 0x1f19) && word(ram + 0x84)) ||
         ((master == 0xa0e || master == 0xa81) && word(ram + 0x84) >= 6) ||
-        !irq_supported(ram) ||
-        (raster && raster != 2 && (raster != 4 || (word(ram + 0x298) & 6)))) return 0;
-    if (!valid_sprite_list(ram, rom)) return 0;
+        !irq_supported(ram)) {
+        /* Every 0:FC1B row-scroll selection is recovered in
+           world_frame_rowscroll: the four 294 modes at FBFF, the single 296
+           routine at FC07 and the 298 table at FC0B (4 and A..E return). */
+        fprintf(stderr, "boundary stop: master %04X ba80=%04X ba84=%04X 282=%02X stage %u\n",
+                master, word(ram + 0xba80), word(ram + 0xba84), ram[0x282], word(ram + 0x84));
+        return 0;
+    }
+    if (!valid_sprite_list(ram, rom)) {
+        fprintf(stderr, "boundary stop: invalid sprite list at master %04X\n", master);
+        return 0;
+    }
     build_sprites(ram, oam, rom);
     *sound_command = dispatch_sound(ram);
     if (raster) world_frame_rowscroll(ram, rom, tiles, raw_dips);
