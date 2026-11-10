@@ -4,6 +4,7 @@
 #include "world_title.h"
 #include "world_torpedo.h"
 #include "world_tile_address.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,14 @@ static void swap_bytes(uint8_t *ram, uint16_t offset)
     ram[offset + 1] = low;
 }
 
+static int si_known;
+static uint32_t si_source;
+/* 0DA4/0DD6 leave SI pointing at the display-list entry they filled, and
+   leave it alone when the sprite budget is exhausted (entry 0 here). */
+static uint16_t queued_sprite_entry;
+static void leave_si(uint16_t value);
+static void keep_si(void);
+
 void world_dispatch_begin(WorldDispatch *pass, uint8_t *ram)
 {
     write_word(ram, 0xb8a2, 0);
@@ -33,6 +42,8 @@ void world_dispatch_begin(WorldDispatch *pass, uint8_t *ram)
     pass->actor = 0x0400;
     pass->phase = WORLD_FRAME_HEAD;
     world_dispatch_detail = "";
+    si_known = 0;
+    si_source = 0;
 }
 
 int world_dispatch_target(const WorldDispatch *pass, const uint8_t *ram, uint32_t *address)
@@ -102,9 +113,11 @@ static int queue_sprite(uint8_t *ram, const uint8_t *rom, uint16_t actor, int fl
 
     if ((uint16_t)(cost + 6) >= budget) {
         write_word(ram, 0x026a, read_word(ram, 0x026a) | 0x8000);
+        queued_sprite_entry = 0;
         return 0;
     }
     write_word(ram, 0x9e02, budget - cost);
+    queued_sprite_entry = read_word(ram, 0x9e04);
 
     uint8_t palette = ram[actor + 0x2c];
     if (flash && ram[actor + 0x19] && (--ram[actor + 0x19] & 1))
@@ -322,9 +335,17 @@ static void update_radial_effect(uint8_t *ram, const uint8_t *rom, uint16_t acto
 
 /* Tile RAM starts at physical D0000. The far layer replaces tile numbers
    while the near layer copies both numbers and attributes. */
+/* DA13 and DB86 load SI with the variant bits before running into the
+   update; -1 when the update was entered directly. */
+static int scenery_init_si = -1;
+
 static void update_scenery(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
                            uint16_t actor, int near_layer)
 {
+    /* Paths that draw nothing leave SI as it was on reaching DA4F/DBAF. */
+    if (scenery_init_si >= 0) leave_si((uint16_t)scenery_init_si);
+    else keep_si();
+    scenery_init_si = -1;
     scroll_actor(ram, actor, near_layer ? 0xb71e : 0xb72a);
     uint16_t bottom = read_word(ram, 0x26e) & 2 ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
     if (read_word(ram, actor + 0x21) < (near_layer ? 0x3f : 0x41)
@@ -355,6 +376,8 @@ static void update_scenery(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
             write_word(ram, 0xb89c, dest);
         }
     }
+    /* Each DC25 strip copy ends with SI = 40h, each DC9C copy with 20h. */
+    leave_si(near_layer ? 0x20 : 0x40);
 }
 
 uint16_t world_player_contact(uint8_t *, const uint8_t *, uint16_t);
@@ -370,6 +393,42 @@ void world_queue_sound(uint8_t *, uint16_t);
 
 /* Set by a handler that stops on a known untranslated branch. */
 const char *world_dispatch_detail = "";
+
+/* The 0:08AB actor loop never loads SI, so a handler can observe the value
+   its predecessor in the actor list left there. Each handler's exit value is
+   unknown unless it calls leave_si(); a consumer stops on an unknown value. */
+static int si_known, entry_si_known;
+static uint16_t si_value, entry_si;
+static uint32_t si_source, entry_si_source;
+
+static void leave_si(uint16_t value)
+{
+    si_known = 1;
+    si_value = value;
+}
+
+/* For a path verified never to load SI: the next actor sees what this one saw. */
+static void keep_si(void)
+{
+    si_known = entry_si_known;
+    si_value = entry_si;
+    si_source = entry_si_source;
+}
+
+/* For a path whose last SI load, if any, is its final 0DA4/0DD6 call. */
+static void si_after_sprite(void)
+{
+    if (queued_sprite_entry) leave_si(queued_sprite_entry);
+    else keep_si();
+}
+
+static const char *untracked_si_detail(void)
+{
+    static char text[96];
+    snprintf(text, sizeof text, "needs SI left by handler %05lX (0 = frame start)",
+             (unsigned long)entry_si_source);
+    return text;
+}
 
 static int above_cruiser(const uint8_t *ram, uint16_t enemy, uint16_t player)
 {
@@ -557,21 +616,9 @@ static uint8_t aim_angle(const uint8_t *rom, int16_t dx, int16_t dy)
     return angle + (((dx < 0) != (dy < 0)) ? (uint8_t)-octant : octant);
 }
 
-static void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+/* B000:96F3..9741, shared by the cruising and turning states. */
+static void cruiser_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
-    unsigned pose = read_word(ram, actor + 0x4e) & 14;
-    write_word(ram, actor + 0x2a, read_word(rom + 0xb0000, 0x8cd4 + pose));
-    queue_sprite(ram, rom, actor, 1);
-    if (!decrement(ram, actor + 0x48)) {
-        write_word(ram, actor + 0x48, 8);
-        uint16_t wake = effect_slot(ram, read_word(ram, 0x9a), 0x7f73);
-        uint8_t facing = ram[actor + 0x29] ^ 1;
-        ram[wake + 0x29] = facing;
-        uint16_t dx = read_word(rom + 0xb0000, 0x902e + 2 * (facing & 1));
-        write_word(ram, wake + 0x21, read_word(ram, actor + 0x21) + dx);
-        write_word(ram, wake + 0x24, read_word(ram, actor + 0x24));
-    }
-    write_word(ram, actor + 0x3c, 0xf723);
     ram[actor + 0x0d] = 0;
     uint16_t attacker = world_player_contact(ram, rom, actor);
     if (read_word(ram, actor + 0x26)) {
@@ -592,9 +639,31 @@ static void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16
             write_word(ram, actor + 2, 0);
             return;
         }
+        if (read_word(ram, actor + 0x26)) {
+            /* D2B7 loaded SI with the collision shape and nothing follows. */
+            leave_si(read_word(ram, actor + 0x3c));
+            return;
+        }
     }
-    if (!read_word(ram, actor + 0x26))
-        world_kind11_death(ram, rom, actor, attacker);
+    world_kind11_death(ram, rom, actor, attacker);
+}
+
+static void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    unsigned pose = read_word(ram, actor + 0x4e) & 14;
+    write_word(ram, actor + 0x2a, read_word(rom + 0xb0000, 0x8cd4 + pose));
+    queue_sprite(ram, rom, actor, 1);
+    if (!decrement(ram, actor + 0x48)) {
+        write_word(ram, actor + 0x48, 8);
+        uint16_t wake = effect_slot(ram, read_word(ram, 0x9a), 0x7f73);
+        uint8_t facing = ram[actor + 0x29] ^ 1;
+        ram[wake + 0x29] = facing;
+        uint16_t dx = read_word(rom + 0xb0000, 0x902e + 2 * (facing & 1));
+        write_word(ram, wake + 0x21, read_word(ram, actor + 0x21) + dx);
+        write_word(ram, wake + 0x24, read_word(ram, actor + 0x24));
+    }
+    write_word(ram, actor + 0x3c, 0xf723);
+    cruiser_contacts(ram, rom, actor);
 }
 
 /* The cruising branch. Check branches still handled by the guest before
@@ -618,17 +687,9 @@ static int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t
     uint16_t x = read_word(ram, actor + 0x21) + read_word(ram, 0xb71a);
     x += read_word(rom + 0xb0000, 0x8d58 + 2 * (ram[actor + 0x29] & 1));
     uint16_t y = read_word(ram, actor + 0x24) + read_word(ram, 0xb71c);
-    if (turns && !players && ((ram[actor + 0x64] & 1) || read_word(ram, actor + 0x66) != 1)) {
-        unsigned turn = read_word(ram, actor + 0x6e);
-        int32_t fixed_x = ((int32_t)read_word(ram, actor + 0x21) + (int16_t)read_word(ram, 0xb71a)) * 256
-                        + ram[actor + 0x20] + (int16_t)read_word(ram, actor + 0x38);
-        int16_t px = (int16_t)((uint32_t)fixed_x >> 8);
-        if ((turn == 1 && (read_word(ram, actor + 0x70) == 1 || px >= 0x160)) ||
-            (turn > 1 && px <= (int16_t)read_word(ram, actor + 0x6c))) {
-            world_dispatch_detail = "turn with no active player depends on leftover SI";
-            return 0;
-        }
-    }
+    /* SI on reaching 96A6: the projectile probe's result when 9B24 ran its
+       scan this tick, otherwise the value the previous actor left. */
+    int probe_ran = 0;
     scroll_actor(ram, actor, 0xb71a);
     if (read_word(ram, actor + 0x4e) && !decrement(ram, actor + 0x4e))
         write_word(ram, actor + 0x3a, 0);
@@ -686,6 +747,7 @@ static int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t
         ram[actor + 0x6a] = ram[actor + 0x29];
         ram[actor + 0x0d] = 3;
         uint16_t shot = world_projectile_contact(ram, rom, actor);
+        probe_ran = 1;
         probe_direction = read_word(ram, actor + 0x3c) & 1;
         ram[actor + 0x29] = ram[actor + 0x6a];
         uint16_t type = shot ? read_word(ram, shot + 0x0e) : 0;
@@ -718,7 +780,14 @@ static int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t
             if (!wall) {
                 ram[actor + 0x0c] = 12;
                 uint16_t target = world_enemy_target(ram, actor);
-                /* With neither player active 65B1 leaves IX from the projectile probe. */
+                /* With neither player active 65B1 leaves SI untouched. */
+                if (!players && !probe_ran) {
+                    if (!entry_si_known) {
+                        world_dispatch_detail = untracked_si_detail();
+                        return 0;
+                    }
+                    probe_direction = entry_si & 1;
+                }
                 unsigned above = players ? read_word(ram, target + 0x24) < py : probe_direction;
                 write_word(ram, actor + 0x3a, read_word(rom + 0xb0000, 0x8d6c + 2 * above));
             }
@@ -3187,6 +3256,11 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
     uint16_t actor = pass->actor;
     if (!world_dispatch_target(pass, ram, &address))
         return 0;
+    entry_si_known = si_known;
+    entry_si = si_value;
+    entry_si_source = si_source;
+    si_known = 0;
+    si_source = address;
     switch (address) {
     case 0xb7960: {
         const uint8_t *bank = main_rom + 0xb0000;
@@ -4596,8 +4670,22 @@ stage2_jumper_terrain:
         if (!tiles || ((address == 0x3ca1 || address == 0x3ca4) &&
                        read_word(ram, 0x2a2) && (read_word(ram, 0x2a8) & 0x100)))
             return 0;
+    {
+        int16_t camera = read_word(ram, 0xb700);
+        int scrolling = address == 0x3f68 && (read_word(ram, 0x26e) & 0x4000);
+        int column = scrolling && (int16_t)read_word(ram, actor + 0x6a) <= camera;
+        int script = scrolling && (int16_t)read_word(ram, actor + 0x46) <= camera;
+        uint16_t row = read_word(ram, actor + 0x40);
         update_camera_layers(ram, main_rom, tiles, actor, address == 0x3f68, address == 0x3ca1);
+        if (address == 0x3f68) {
+            /* 3F68: 4621 leaves the advanced script cursor in SI; otherwise
+               each 390B block copy ends with SI = 40h; 459B never loads it. */
+            if (script) leave_si(row + 0x0e);
+            else if (column) leave_si(0x40);
+            else keep_si();
+        }
         break;
+    }
     case 0x57e3:
     case 0x57fc: {
         int first = address == 0x57e3;
@@ -5607,7 +5695,7 @@ stage2_jumper_terrain:
         uint16_t frame = read_word(ram, actor + 0x40);
         if (!decrement(ram, actor + 0x44)) {
             uint16_t sprite = read_word(bank, 0xe3d8 + frame);
-            if (sprite == 0xffff) { finish_animation(ram, actor); break; }
+            if (sprite == 0xffff) { finish_animation(ram, actor); keep_si(); break; }
             write_word(ram, actor + 0x2a, sprite);
             write_word(ram, actor + 0x44, read_word(bank, 0xe3fa + frame));
             frame += 2;
@@ -5616,6 +5704,7 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         if (frame >= 4 && frame < 8 && read_word(ram, actor + 0x3c) != 0xffff)
             world_append_candidate(ram + 0xa6e2, actor);
+        si_after_sprite();
         break;
     }
     case 0xb2e05:
@@ -7128,15 +7217,22 @@ stage2_jumper_terrain:
     case 0x1950:
         update_rank(ram, main_rom);
         break;
-    case 0x3b26:
+    case 0x3b26: {
+        /* Only the 4621 script advance loads SI, with the new cursor. */
+        int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
+        uint16_t row = read_word(ram, actor + 0x40);
         update_layer_scroll(ram, main_rom, actor);
+        if (script) leave_si(row + 0x0e);
+        else keep_si();
         break;
+    }
     case 0x4177:
         update_background_vertical(ram, actor);
         /* fall through */
     case 0x417a:
         write_word(ram, 0xb71e, 0);
         write_word(ram, 0xb720, 0);
+        keep_si();
         break;
     case 0x3fcd:
         update_background_vertical(ram, actor);
@@ -7273,9 +7369,16 @@ stage2_jumper_terrain:
     case 0x40f2:
         if (!tiles)
             return 0;
+    {
+        uint16_t row = read_word(ram, actor + 0x40);
         update_tile_script(ram, main_rom, tiles, actor,
                            address == 0x3bd1 ? 0 : address == 0x3ee8 ? 0x4000 : 0x8000);
+        /* 4665 ends by advancing the script cursor through SI; the idle and
+           finished paths never load it. */
+        if (read_word(ram, actor + 0x40) != row) leave_si(row + 10);
+        else keep_si();
         break;
+    }
     case 0xa419:
         write_word(ram, actor + 0x44, 2);
         write_word(ram, actor + 0x46, 1);
@@ -7415,6 +7518,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x58, read_word(main_rom, (uint16_t)(0xaa2f + frame)));
             if (sprite == 0xffff) {
                 finish_animation(ram, actor);
+                keep_si();
                 break;
             }
             write_word(ram, actor + 0x2a, sprite);
@@ -7428,6 +7532,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x26, 0x7f00);
             if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
         }
+        si_after_sprite();
         break;
     /* 0:AE2A: an enemy thrown by a type-121 blast. */
     case 0xae2a:
@@ -8829,10 +8934,6 @@ stage2_jumper_terrain:
     }
     case 0xb9742: {
         if (!tiles) return 0;
-        for (unsigned i = 0; i < read_word(ram, 0xa6e2); i += 2) {
-            uint16_t shot = read_word(ram, 0xa6e6 + i);
-            if (shot && read_word(ram, shot + 0x0e) == 0x121) return 0;
-        }
         const uint8_t *bank = main_rom + 0xb0000;
         if (!decrement(ram, actor + 0x44)) {
             write_word(ram, actor + 0x44, 6);
@@ -8864,12 +8965,7 @@ stage2_jumper_terrain:
             break;
         }
         queue_sprite(ram, main_rom, actor, 1);
-        ram[actor + 0x0d] = 0;
-        uint16_t attacker = world_player_contact(ram, main_rom, actor);
-        if (read_word(ram, actor + 0x26))
-            attacker = world_projectile_contact(ram, main_rom, actor);
-        if (!read_word(ram, actor + 0x26))
-            world_kind11_death(ram, main_rom, actor, attacker);
+        cruiser_contacts(ram, main_rom, actor);
         break;
     }
     case 0xb97ee:
@@ -8897,6 +8993,8 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x21, x);
         if (x < 0x40 || x > 0x1c0) {
             finish_animation(ram, actor);
+            /* 9825 reaches here through 4311 and 5E9B only. */
+            if (address == 0xb9825) keep_si();
             break;
         }
         queue_sprite(ram, main_rom, actor, 1);
@@ -8907,7 +9005,14 @@ stage2_jumper_terrain:
             write_word(ram, smoke + 0x24, y);
             write_word(ram, smoke + 0x2c, 3);
         }
+        uint16_t successor = read_word(ram, actor + 4);
         enemy_torpedo_contact(ram, main_rom, actor, world_terrain_mask(ram, tiles + 0x4000, x, y));
+        if (read_word(ram, actor) != 0x1b4c)
+            /* B000:98A2. D2B7 loaded SI with the shape; D237 and D3D0 keep it. */
+            leave_si(read_word(ram, actor + 0x3c));
+        else if (read_word(ram, actor + 4) != successor)
+            /* 6ACB found a slot: 1769 leaves the previous successor in SI. */
+            leave_si(successor);
         break;
     }
     case 0xbeae:
@@ -8981,9 +9086,16 @@ stage2_jumper_terrain:
         write_word(ram, actor, 0xdc27);
         break;
     }
-    case 0x15d98:
+    case 0x15d98: {
+        uint16_t successor = read_word(ram, actor + 4);
         world_stage_spawns(ram, main_rom, actor);
+        /* Only 1769 loads SI here: each successful spawn leaves the spawner's
+           previous successor, which the new child also stores as its link. */
+        uint16_t newest = read_word(ram, actor + 4);
+        if (newest == successor) keep_si();
+        else leave_si(read_word(ram, newest + 4));
         break;
+    }
     case 0xb909f:
         world_kind11_init(ram, main_rom, actor);
         break;
@@ -8996,6 +9108,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x50, read_word(main_rom, 0xdd13 + (ram[actor + 0x1e] & 6)));
         write_word(ram, actor + 0x52, read_word(main_rom, 0xdd1b + (ram[actor + 0x1f] & 30)));
         write_word(ram, actor, 0xdbaf);
+        scenery_init_si = read_word(ram, actor + 0x1e) & 6;
         update_scenery(ram, main_rom, tiles, actor, 1);
         break;
     case 0xda13: {
@@ -9006,6 +9119,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x52, read_word(main_rom, 0xfe87 + (ram[actor + 0x1f] & 30)));
         write_word(ram, actor + 0x54, read_word(main_rom, 0xdcff + stage));
         write_word(ram, actor, 0xda4f);
+        scenery_init_si = read_word(ram, actor + 0x1e) & 6;
     }
         /* fall through */
     case 0xda4f:
@@ -9079,17 +9193,20 @@ stage2_jumper_terrain:
         ram[actor + 0x2c] = 3;
         ram[actor + 0x2d] = 0x3e;
         write_word(ram, actor, 0x7f81);
+        keep_si();
         break;
     case 0x7f81: {
         uint16_t index = 2 * ram[actor + 0x41];
         uint16_t sprite = read_word(main_rom, 0x781f + index);
         scroll_actor(ram, actor, 0xb71a);
         write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 0x80);
-        if (sprite == 0xffff)
+        if (sprite == 0xffff) {
             finish_animation(ram, actor);
-        else {
+            keep_si();
+        } else {
             write_word(ram, actor + 0x2a, sprite);
             queue_sprite(ram, main_rom, actor, 0);
+            si_after_sprite();
         }
         break;
     }
@@ -9102,6 +9219,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x58, 1);
         write_word(ram, actor + 0x42, 0x14);
         write_word(ram, actor, 0x7fd1);
+        keep_si();
         break;
     case 0x7fd1:
     case 0x7ff5: {
@@ -9122,6 +9240,7 @@ stage2_jumper_terrain:
             uint16_t sprite = read_word(main_rom, (uint16_t)(0x7835 + frame));
             if (sprite == 0xffff) {
                 finish_animation(ram, actor);
+                keep_si();
                 break;
             }
             write_word(ram, actor + 0x2a, sprite);
@@ -9129,6 +9248,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x40, frame + 2);
         }
         queue_sprite(ram, main_rom, actor, 0);
+        si_after_sprite();
         break;
     }
     case 0xa199:
@@ -9196,11 +9316,16 @@ stage2_jumper_terrain:
     case 0x1b4c:
         write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + read_word(ram, 0xb71a));
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
-        if (read_word(ram, actor + 8) >= read_word(ram, read_word(ram, actor + 4) + 8))
+        if (read_word(ram, actor + 8) >= read_word(ram, read_word(ram, actor + 4) + 8)) {
+            /* 1861 unlinks through SI = the retired actor's successor. */
+            leave_si(read_word(ram, actor + 4));
             retire_actor(ram, actor);
+        } else
+            keep_si();
         break;
     case 0x1b4b:
     case 0x1b62:
+        keep_si();
         break;
     default: {
         if (address < 0xa89d9 || address > 0xa8ed8) return 0;
