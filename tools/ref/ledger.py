@@ -16,7 +16,7 @@ TITLE = range(0xA89D9, 0xA8ED9)  # world_title_actor range in world_dispatch.c
 def native_handlers():
     found = {}
     files = sorted(glob.glob(str(ROOT / "src/world_actors_*.c")) + glob.glob(str(ROOT / "src/world_stage[0-9].c"))
-                   + [str(ROOT / "src/world_common.c")])
+                   + [str(ROOT / f"src/world_{n}.c") for n in ("common", "gaps", "credits", "coop", "explore1", "explore2")])
     for path in files:
         for line in open(path, encoding="utf-8", errors="replace"):
             # Top-level labels only: four spaces of indentation.
