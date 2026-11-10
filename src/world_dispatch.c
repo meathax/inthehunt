@@ -6374,6 +6374,224 @@ static int stage_two_block(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
     return 1;
 }
 
+/* Stage-two hover gunner B000:488A (4915 4A1A 4A4B 4A64 4A94) and its
+   undercarriage B000:4AB7 (4B06 4B73 4BF2 4C6E). */
+static int stage_two_gunner(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    uint16_t hit, parent;
+    int fire = 0, step;
+    switch (address) {
+    case 0xb488a: {
+        world_acquire_resource(ram, actor, 0x0a);
+        world_acquire_resource(ram, actor, 0x0f);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x3c, 0xf40b);
+        write_word(ram, actor + 0x2a, 0x3b02);
+        ram[actor + 0x0c] = 0x0c;
+        write_word(ram, actor + 0x0e, 0x0b);
+        uint16_t row = 0x47ac + read_word(bank, (uint16_t)(0x476c + read_word(ram, 0x8a) +
+                                                 (read_word(ram, actor + 0x1e) & 0x20)));
+        write_word(ram, actor + 0x50, read_word(bank, row));
+        write_word(ram, actor + 0x52, read_word(bank, row));
+        write_word(ram, actor + 0x54, read_word(bank, (uint16_t)(row + 2)));
+        write_word(ram, actor + 0x56, read_word(bank, (uint16_t)(row + 2)));
+        write_word(ram, actor + 0x2e, read_word(bank, (uint16_t)(row + 4)));
+        write_word(ram, actor + 0x26, read_word(bank, (uint16_t)(row + 6)));
+        write_word(ram, actor + 0x36, read_word(bank, (uint16_t)(row + 6)));
+        write_word(ram, actor + 0x42, 0x64);
+        write_word(ram, actor + 0x5a, 0x140);
+        uint16_t gear = bank_b_effect(ram, actor, 0x4ab7);
+        ram[gear + 0x2c] = ram[actor + 0x2c];
+        ram[gear + 0x2d] = 0x21;
+        write_word(ram, gear + 0x2a, 0x3b1c);
+        write_word(ram, actor, 0x4915);
+        return 1;
+    }
+    case 0xb4915:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, rom, actor, 1);
+        if (read_word(ram, actor + 0x42)) decrement(ram, actor + 0x42);
+        else if (!read_word(ram, actor + 0x60)) {
+            /* B000:4CE4: 4CEC never, 4CEE / 4D07 target within 40h / 20h in x, 4D20 a timer. */
+            unsigned rule = read_word(ram, actor + 0x1e) & 6;
+            int start = 0;
+            if (rule == 6) start = !decrement(ram, actor + 0x5a);
+            else if (rule && (read_word(ram, 0x264) & 3)) {
+                uint16_t dx = read_word(ram, world_enemy_target(ram, actor) + 0x21) - read_word(ram, actor + 0x21);
+                if (dx & 0x8000) dx = -dx;
+                start = dx < (rule == 2 ? 0x40 : 0x20);
+            }
+            if (start) {
+                write_word(ram, actor + 0x60, 1);
+                write_word(ram, actor, 0x4a1a);
+            }
+        }
+        fire = 1;
+        break;
+    case 0xb4a1a:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, rom, actor, 1);
+        if (read_word(ram, actor + 0x60) == 2) {
+            begin_linear_script(ram, rom, actor, read_word(bank, 0x47f4 + ((read_word(ram, actor + 0x1e) & 8) >> 2)));
+            write_word(ram, actor + 0x62, 1);
+            write_word(ram, actor, 0x4a4b);
+        }
+        break;
+    case 0xb4a4b:
+    case 0xb4a94:
+        step = step_flight_script(ram, rom, actor);
+        if (!step) {
+            world_dispatch_detail = "hover gunner flight script kind";
+            return 0;
+        }
+        if (step < 0) {
+            write_word(ram, actor + 0x42, 0x12c);
+            if (address == 0xb4a4b) write_word(ram, actor, 0x4a64);
+            else {
+                write_word(ram, actor + 0x60, 8);
+                write_word(ram, actor + 0x62, 0);
+                write_word(ram, actor, 0x4915);
+            }
+        }
+        queue_sprite(ram, rom, actor, 1);
+        break;
+    case 0xb4a64:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, rom, actor, 1);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x60, 4);
+            begin_linear_script(ram, rom, actor, read_word(bank, 0x47fc + ((read_word(ram, actor + 0x1e) & 8) >> 2)));
+            write_word(ram, actor, 0x4a94);
+        }
+        fire = 1;
+        break;
+    case 0xb4ab7:
+        if (!(parent = stage_two_machine_parent(ram, actor))) return 1;
+        if (read_word(ram, parent + 0x60) == 1) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0x4b06);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        return 1;
+    case 0xb4b06:
+        if (!stage_two_machine_parent(ram, actor)) return 1;
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(bank, (uint16_t)(0x4742 + frame));
+            if (sprite == 0xffff) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x42, 0x2f);
+                write_word(ram, actor, 0x4b73);
+            } else {
+                write_word(ram, actor + 0x2a, sprite);
+                write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0x474a + frame)));
+                write_word(ram, actor + 0x40, frame + 2);
+            }
+        }
+        queue_sprite(ram, rom, actor, 1);
+        return 1;
+    case 0xb4b73:
+        if (!(parent = stage_two_machine_parent(ram, actor))) return 1;
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) +
+                   read_word(bank, 0x475a + ((read_word(ram, actor + 0x42) & 0x30) >> 3)));
+        write_word(ram, actor + 0x2a, read_word(bank, 0x4752 + 2 * (ram[actor + 0x41] & 3)));
+        queue_sprite(ram, rom, actor, 1);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, parent + 0x60, 2);
+            write_word(ram, actor + 0x44, 0x100);
+            write_word(ram, actor, 0x4bf2);
+        }
+        return 1;
+    case 0xb4bf2:
+        if (!(parent = stage_two_machine_parent(ram, actor))) return 1;
+        if (read_word(ram, parent + 0x60) == 8) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0x4c6e);
+        } else {
+            if (read_word(ram, parent + 0x60) == 4) {
+                write_word(ram, actor + 0x44, 0x80);
+                write_word(ram, parent + 0x60, 0);
+            }
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + read_word(ram, actor + 0x44));
+            write_word(ram, actor + 0x2a, read_word(bank, 0x4752 + 2 * (ram[actor + 0x41] & 3)));
+        }
+        queue_sprite(ram, rom, actor, 1);
+        return 1;
+    case 0xb4c6e:
+        if (!(parent = stage_two_machine_parent(ram, actor))) return 1;
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t hold = read_word(bank, (uint16_t)(0x4766 + frame));
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x4760 + frame)));
+            if (hold == 0xffff) {
+                write_word(ram, parent + 0x60, 0);
+                write_word(ram, actor, 0x4ab7);
+            } else {
+                write_word(ram, actor + 0x44, hold);
+                write_word(ram, actor + 0x40, frame + 2);
+            }
+        }
+        queue_sprite(ram, rom, actor, 1);
+        return 1;
+    default:
+        return 0;
+    }
+
+    /* B000:494D: burst fire while above 190h. */
+    if (fire && read_word(ram, actor + 0x24) < 0x190) {
+        int shoot = 0;
+        if (read_word(ram, actor + 0x50)) {
+            if (!decrement(ram, actor + 0x50)) {
+                write_word(ram, actor + 0x58, 4);
+                shoot = 1;
+            }
+        } else if (!decrement(ram, actor + 0x54)) {
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+            if (!decrement(ram, actor + 0x58)) write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            shoot = 1;
+        }
+        if (shoot) {
+            uint16_t shot = world_spawn_child(ram, actor, 0xa2ec);
+            if (shot) {
+                unsigned lane = (read_word(ram, actor + 0x58) << 1) & 6;
+                write_word(ram, shot + 2, 0xb000);
+                write_word(ram, shot + 0x38, read_word(bank, 0x4882 + lane));
+                write_word(ram, shot + 0x21, read_word(ram, actor + 0x21) + read_word(bank, 0x487a + lane));
+                write_word(ram, shot + 0x24, read_word(ram, actor + 0x24));
+                ram[shot + 0x2c] = ram[actor + 0x14];
+                world_queue_sound(ram, 0x95);
+            }
+        }
+    }
+    /* B000:49BB */
+    if (read_word(ram, actor + 0x21) < 0x40) {
+        finish_animation(ram, actor);
+        return 1;
+    }
+    ram[actor + 0x0d] = 0;
+    hit = world_player_contact(ram, rom, actor);
+    if (read_word(ram, actor + 0x26)) {
+        ram[actor + 0x0d] = 0;
+        hit = world_projectile_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) {
+            ram[actor + 0x0d] = 0;
+            hit = world_surface_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) return 1;
+        }
+    }
+    if (!hit) {
+        world_dispatch_detail = "hover gunner died without a hit this tick; 0:6237 reads leftover BX";
+        return 0;
+    }
+    world_award_score(ram, rom, actor, hit);
+    s2_wreck_blast(ram, actor, 4);      /* 0:6B91 */
+    finish_animation(ram, actor);
+    return 1;
+}
+
 int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles)
 {
     uint32_t address;
@@ -15016,6 +15234,11 @@ stage2_jumper_terrain:
     /* Stage-two palette cycler B000:88E1 and breakable block B000:8939. */
     case 0xb88e1: case 0xb88ef: case 0xb8939: case 0xb8965: case 0xb89fd:
         if (!stage_two_block(ram, main_rom, actor, address)) return 0;
+        break;
+    /* Stage-two hover gunner B000:488A and its undercarriage B000:4AB7. */
+    case 0xb488a: case 0xb4915: case 0xb4a1a: case 0xb4a4b: case 0xb4a64: case 0xb4a94:
+    case 0xb4ab7: case 0xb4b06: case 0xb4b73: case 0xb4bf2: case 0xb4c6e:
+        if (!stage_two_gunner(ram, main_rom, actor, address)) return 0;
         break;
     /* Stage-five ice boss: hull 7FFE, core 8337, arms 8A19, tentacle 8EB5. */
     case 0x77ffe: case 0x78085: case 0x780c9: case 0x781ed: case 0x7826a: case 0x78295:
