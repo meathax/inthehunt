@@ -7820,6 +7820,34 @@ stage2_jumper_terrain:
         break;
     }
     case 0x19e1:
+    /* 0:C99F/C9B2 and C9D1/C9E4: a three-piece banner row; 0:CA03/CA3E: a
+       single plate chosen by 272 and the active player. */
+    case 0xc99f:
+    case 0xc9d1:
+        ram[actor + 0x2c] = address == 0xc99f ? 0x10 : 0x0e;
+        write_word(ram, actor + 0x2a, 0x966f);
+        write_word(ram, actor + 0x24, address == 0xc99f ? 0xd0 : 0x110);
+        write_word(ram, actor, address == 0xc99f ? 0xc9b2 : 0xc9e4);
+        /* fall through */
+    case 0xc9b2:
+    case 0xc9e4:
+        for (unsigned x = 0x80; x <= 0x180; x += 0x80) {
+            write_word(ram, actor + 0x21, x);
+            queue_sprite(ram, main_rom, actor, 1);
+        }
+        break;
+    case 0xca03: {
+        unsigned which = read_word(ram, 0x272) & 3;
+        ram[actor + 0x2c] = main_rom[0xd1ad + which] + ((read_word(ram, 0x264) & 2) >> 1);
+        write_word(ram, actor + 0x2a, read_word(main_rom, 0xd1b1 + 2 * which));
+        write_word(ram, actor + 0x21, read_word(main_rom, 0xd1b9 + 2 * which));
+        write_word(ram, actor + 0x24, read_word(main_rom, 0xd1c1 + 2 * which));
+        write_word(ram, actor, 0xca3e);
+    }
+        /* fall through */
+    case 0xca3e:
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
     case 0xca63:
         break;
     case 0xca44:
