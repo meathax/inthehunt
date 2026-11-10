@@ -4940,6 +4940,70 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* 1000:E720/E769 and its 1000:E7A1/E7C8 companion: paired scenery
+       pieces that loop a flight script. 1000:E800/E828 is a fixed piece. */
+    case 0x1e720:
+    case 0x1e7a1: {
+        const uint8_t *bank = main_rom + 0x10000;
+        unsigned variant = read_word(ram, actor + 0x1e) & 2;
+        int lead = address == 0x1e720;
+        ram[actor + 0x2c] = 0x15;
+        ram[actor + 0x2d] = lead ? 0x3e : 0x3f;
+        if (lead) write_word(ram, actor + 0x3c, 0xfb4b);
+        write_word(ram, actor + 0x2a, read_word(bank, (lead ? 0xd44a : 0xd44e) + variant));
+        begin_linear_script(ram, main_rom, actor, read_word(bank, (lead ? 0xd452 : 0xd456) + variant));
+        if (lead) {
+            uint16_t companion = effect_slot(ram, actor, 0xe7a1);
+            if (companion != 0x8480) write_word(ram, companion + 2, 0x1000);
+            write_word(ram, companion + 0x21, read_word(ram, actor + 0x21));
+            write_word(ram, companion + 0x24, read_word(ram, actor + 0x24));
+            write_word(ram, companion + 0x1e, read_word(ram, actor + 0x1e));
+        }
+        write_word(ram, actor, lead ? 0xe769 : 0xe7c8);
+        break;
+    }
+    case 0x1e769:
+    case 0x1e7c8: {
+        const uint8_t *bank = main_rom + 0x10000;
+        int lead = address == 0x1e769;
+        int step = step_flight_script(ram, main_rom, actor);
+        if (!step) return 0;
+        if (step < 0)
+            begin_linear_script(ram, main_rom, actor,
+                                read_word(bank, (lead ? 0xd452 : 0xd456) + (read_word(ram, actor + 0x1e) & 2)));
+        uint16_t x = read_word(ram, actor + 0x21);
+        /* E781 retires the lead piece only at exactly 40h; E7E0 below it. */
+        if (lead ? x == 0x40 : x < 0x40) finish_animation(ram, actor);
+        else queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    case 0x1e800: {
+        const uint8_t *bank = main_rom + 0x10000;
+        unsigned variant = read_word(ram, actor + 0x1e) & 6;
+        write_word(ram, actor + 0x2a, read_word(bank, 0xd4b2 + variant));
+        world_acquire_resource(ram, actor, read_word(bank, 0xd4ba + variant));
+        ram[actor + 0x2d] = 0x3e;
+        write_word(ram, actor + 0x3c, 0xfb4b);
+        write_word(ram, actor, 0xe828);
+        break;
+    }
+    /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
+    case 0x1e6fe:
+        queue_palette(ram, 0x10, 0x1cb, 8);
+        finish_animation(ram, actor);
+        keep_si();
+        break;
+    case 0x1e6d9:
+    case 0x1e828:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            keep_si();
+        } else {
+            queue_sprite(ram, main_rom, actor, 0);
+            si_after_sprite();
+        }
+        break;
     /* A000:EC7E (init) and ECAE: a scripted swimmer that faces along its
        horizontal velocity and cycles a per-leg animation. */
     case 0xaec7e:
