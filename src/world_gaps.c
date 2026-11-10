@@ -65,6 +65,47 @@ static void angle_velocity(uint8_t *ram, const uint8_t *rom, uint16_t actor, uns
     write_word(ram, actor + 0x3a, (uint16_t)(((int16_t)read_word(bank, 0x9d92 + angle) * (int32_t)speed) >> 8));
 }
 
+/* BC616 (grab != 0) and BC6FD: does the tongue shape overlap a target that
+ * is not held yet? Targets 0/2 are the players, 4/6 the actors at B8B8/B8BA.
+ * BC616 marks the target held and spawns the grab actor on it. */
+static int tongue_target(uint8_t *ram, const uint8_t *rom, uint16_t actor, int grab)
+{
+    uint16_t flags = read_word(ram, 0xb8b2), shape = read_word(ram, actor + 0x3c);
+    uint16_t target = 0, which;
+    int found = 0;
+    for (which = 0; which < 8; which += 2) {
+        if (flags & (1u << which)) continue;
+        if (which < 4) {
+            target = read_word(ram, 0x90 + which);
+            found = read_word(ram, target + 0x3c) != 0xffff &&
+                    world_shape_overlap(ram, rom, actor, target, shape, 0x78db);
+        } else {
+            target = read_word(ram, 0xb8b8 + which - 4);
+            found = target && read_word(ram, target) != 0xffff &&
+                    world_shape_overlap(ram, rom, actor, target, shape, read_word(ram, target + 0x3c));
+        }
+        if (found) break;
+    }
+    if (!found || !grab) return found;
+    write_word(ram, 0xb8b2, flags | (1u << which));
+    uint16_t held = bank_b_effect(ram, actor, 0xc0c0);
+    write_word(ram, held + 0x21, read_word(ram, target + 0x21));
+    write_word(ram, held + 0x24, read_word(ram, target + 0x24));
+    ram[held + 0x29] = ram[actor + 0x29];
+    write_word(ram, held + 0x60, read_word(ram, actor + 0x60));
+    write_word(ram, held + 0x68, which);
+    write_word(ram, held + 0x6a, target);
+    ram[held + 0x0b] = ram[target + 0x0b];
+    return 1;
+}
+
+/* BC186/BC20E: the creature that owns the tongue, through the slot table. */
+static uint16_t tongue_owner(const uint8_t *ram, uint16_t actor)
+{
+    uint16_t slot = read_word(ram, actor + 8);
+    return read_word(ram, 0x8500 + (uint16_t)(slot - 2 * ((uint16_t)(slot - 4) >> 1)));
+}
+
 int world_gaps_handlers(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         uint8_t *tiles, uint16_t *actor_io, uint32_t address)
 {
@@ -158,6 +199,138 @@ int world_gaps_handlers(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_r
             if (!((W(0x274) & 3) ^ W(actor + 0x54)) && W(actor + 0x3c) != 0xffff)
                 world_append_candidate(ram + 0xaee6, actor);
         }
+        break;
+    /* Tongue grab: the cocoon that holds a caught submarine or actor until
+     * it is shaken off, shot open or swallowed. */
+    case 0xbc0c0: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        world_acquire_resource(ram, actor, 0x2f);
+        uint16_t cover = bank_b_effect(ram, actor, 0xc2eb);
+        SW(cover + 0x21, W(actor + 0x21));
+        SW(cover + 0x24, W(actor + 0x24));
+        ram[cover + 0x2c] = ram[actor + 0x2c];
+        ram[cover + 0x29] = ram[actor + 0x29];
+        SW(cover + 0x60, W(actor + 0x60));
+        ram[actor + 0x2d] = 7;
+        SW(actor + 0x3c, 0xf603);
+        SW(actor + 0x26, 0x200);
+        SW(actor + 0x36, 0x400);
+        SW(actor + 0x44, 1);
+        SW(actor + 0x46, read_word(bank, 0xb7be + W(actor + 0x60)));
+        world_queue_sound(ram, 0x7a);
+        SW(actor, 0xc122);
+        break;
+    }
+    case 0xbc122:
+    case 0xbc305: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        scroll_actor(ram, actor, 0xb71a);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = W(actor + 0x40);
+            uint16_t sprite = read_word(bank, frame + W(actor + 0x46));
+            if (sprite == 0xffff) {
+                if (address == 0xbc122) {
+                    SW(actor + 0x54, 0);
+                    SW(actor + 0x56, 8);
+                    SW(actor, 0xc166);
+                } else SW(actor, 0xc337);
+            } else {
+                SW(actor + 0x2a, sprite);
+                if (address == 0xbc122 && frame == 4) tongue_target(ram, main_rom, actor, 1);
+                SW(actor + 0x44, 3);
+                SW(actor + 0x40, frame + 2);
+            }
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    case 0xbc166: {
+        uint16_t which = W(actor + 0x68);
+        int release = which >= 4 && !W(0xb8b8 + which - 4);
+        if (!release) {
+            scroll_actor(ram, actor, 0xb71a);
+            queue_sprite(ram, main_rom, actor, 0);
+            release = W(tongue_owner(ram, actor) + 0x66) & 1;
+        }
+        if (!release) {
+            int swallow = 0;
+            if (ram[actor + 0x0b]) {
+                /* The held player shakes free with eight separate stick pushes. */
+                uint8_t stick = ram[actor + 0x0b] == 2 ? ram[0xb742] : ram[0xb743];
+                if (stick & 0x0f) {
+                    SW(actor + 0x54, 8);
+                    if (!decrement(ram, actor + 0x56)) swallow = 1;
+                } else if (W(actor + 0x54) && !decrement(ram, actor + 0x54)) SW(actor + 0x56, 8);
+            }
+            if (!swallow) swallow = tongue_target(ram, main_rom, actor, 0);
+            if (!swallow) {
+                ram[actor + 0x0d] = 3;
+                uint16_t shot = world_projectile_contact(ram, main_rom, actor);
+                if (shot && W(shot + 0x3c) != 0x79f1) {
+                    if (W(shot + 0x0e) == 0x1b) SW(shot + 0x26, 0);
+                    SW(actor + 0x26, W(actor + 0x26) - W(shot + 0x36));
+                    if ((int16_t)W(actor + 0x26) <= 0) SW(actor + 0x26, 0);
+                }
+                if (W(actor + 0x26)) break;
+            }
+            uint16_t owner = tongue_owner(ram, actor);
+            if (!(W(owner + 0x66) & 2)) { SW(actor + 0x26, 0x100); break; }
+            SW(owner + 0x66, W(owner + 0x66) | 4);
+        }
+        SW(actor + 0x26, 0);
+        SW(0xb8b2, W(0xb8b2) & ~(1u << (which & 15)));
+        SW(actor + 0x40, 0);
+        SW(actor + 0x44, 1);
+        SW(actor, 0xc26b);
+        uint16_t burst = bank_b_effect(ram, actor, 0xc2ab);
+        SW(burst + 0x21, W(actor + 0x21));
+        SW(burst + 0x24, W(actor + 0x24));
+        break;
+    }
+    case 0xbc26b: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        scroll_actor(ram, actor, 0xb71a);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = W(actor + 0x40);
+            if (read_word(bank, 0xb81e + frame) == 0xffff) { finish_animation(ram, actor); break; }
+            SW(actor + 0x2a, read_word(bank, 0xb81e + frame));
+            SW(actor + 0x44, read_word(bank, 0xb832 + frame));
+            SW(actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    case 0xbc2ab:
+    case 0xbc2c7:
+        if (address == 0xbc2ab) {
+            SW(actor + 0x3c, 0xf60b);
+            SW(actor + 0x26, 0x200);
+            SW(actor + 0x36, 0x400);
+            SW(actor + 0x42, 4);
+            SW(actor, 0xc2c7);
+        } else scroll_actor(ram, actor, 0xb71a);
+        if (!decrement(ram, actor + 0x42)) finish_animation(ram, actor);
+        else if (W(actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+        break;
+    case 0xbc2eb:
+        ram[actor + 0x2d] = 0x3e;
+        SW(actor + 0x44, 1);
+        SW(actor + 0x46, read_word(main_rom + 0xb0000, 0xb7ee + W(actor + 0x60)));
+        SW(actor, 0xc305);
+        break;
+    case 0xbc337:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!W(slot_parent(ram, actor) + 0x26)) {
+            SW(actor + 0x2a, 0x8752);
+            SW(actor + 0x44, 3);
+            SW(actor, 0xc366);
+        }
+        break;
+    case 0xbc366:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!decrement(ram, actor + 0x44)) finish_animation(ram, actor);
         break;
     default:
         return WORLD_HANDLER_UNKNOWN;
