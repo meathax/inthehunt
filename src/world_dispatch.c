@@ -11681,6 +11681,21 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* B000:D13B/D149: a second sprite drawn on its parent, sharing the
+       parent's hit flash. */
+    case 0xbd13b:
+        ram[actor + 0x2d] = 0x21;
+        write_word(ram, actor + 0x2a, 0x6bf0);
+        write_word(ram, actor, 0xd149);
+        /* fall through */
+    case 0xbd149: {
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (ram[parent + 0x19]) ram[actor + 0x19] = ram[parent + 0x19] + 1;
+        queue_sprite(ram, main_rom, actor, 1);
+        break;
+    }
     /* B000:92F7 (init) and 930F: releases two 9380 submarines, one per
        lane, 128 ticks apart, and retires once the camera passes word 1E. */
     case 0xb92f7:

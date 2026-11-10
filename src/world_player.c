@@ -262,6 +262,28 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
     unsigned held = ram[0xb73e], owner_bit = 1u << (a[0x0b] & 2);
     unsigned flags = word(ram + 0x262);
     int hidden_entry = word(a) == 0x7be5 && a[0x0a];
+    /* 7C58..7CA0: a submarine sealed in ice (its B8B2 bit) cannot die or
+       steer. After the HUD it clears the held directions and resumes at
+       7D1B, skipping the velocity and the 8480 terrain step. */
+    if ((word(ram + 0xb8b2) & owner_bit) && word(a) == 0x7c3b && !word(a + 0x6e) &&
+        !(flags & 0x40) && !word(ram + 0x2a4)) {
+        if (!(flags & 0x8080) && !a[0x0a] && !word(a + 0x26)) put(a + 0x26, 1);
+        world_sub_hud(ram, rom, tiles, sub);
+        put(ram + 0xb73e, word(ram + 0xb73e) & 0xfff0);
+        put(a + 0x6c, 0);
+        unsigned timer = word(a + 0x42);
+        if (timer) {
+            put(a + 0x42, timer - 1);
+            if (timer == 1) {
+                put(a + 0x26, 1);
+                put(a + 0x36, 0x100);
+            }
+        }
+        world_sub_pose(ram, rom, sub);
+        world_player_weapons(ram, rom, sub);
+        world_sub_wake(ram, rom, sub);
+        return 1;
+    }
     if (word(a + 0x6e) || (!hidden_entry && !word(a + 0x26) && !(flags & 0x8080))
         || (word(ram + 0xb8b2) & owner_bit) || (flags & 0x40)
         || (!hidden_entry && word(ram + 0x2a4)))
