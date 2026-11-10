@@ -8292,6 +8292,38 @@ stage2_jumper_terrain:
         }
         break;
     }
+    /* B000:46D4/46E6: an animation held 32h left of its parent. */
+    case 0xb46d4:
+    case 0xb46e6: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (address == 0xb46d4) {
+            ram[actor + 0x2c] = 3;
+            ram[actor + 0x2d] = 0x28;
+            write_word(ram, actor + 0x6e, 1);
+            write_word(ram, actor, 0x46e6);
+        }
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) - 0x32);
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24) + read_word(ram, actor + 0x34));
+        if (!decrement(ram, actor + 0x6e)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(bank, (uint16_t)(0x3570 + frame));
+            if (sprite == 0xffff) {
+                finish_animation(ram, actor);
+                break;
+            }
+            write_word(ram, actor + 0x2a, sprite);
+            write_word(ram, actor + 0x6e, read_word(bank, (uint16_t)(0x3592 + frame)));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 1);
+        break;
+    }
+    /* B000:463D: set the 4652 spawner's end point from the variant. */
+    case 0xb463d:
+        write_word(ram, actor + 0x6e, ((read_word(ram, actor + 0x1e) & 0xff00) >> 4) + read_word(ram, 0xb700));
+        write_word(ram, actor, 0x4652);
+        /* fall through */
     case 0xb4652: {
         const uint8_t *bank = main_rom + 0xb0000;
         if ((int16_t)read_word(ram, 0xb700) >= (int16_t)read_word(ram, actor + 0x6e)) {
