@@ -8097,6 +8097,143 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* B000:047A (init), 04A4 (carried), 04F8 (lift off) and 057B/05B0
+       (flight): the missile carried by the 0357 enemy. It rises, levels
+       with a submarine, then runs left. */
+    case 0xb047a:
+        world_acquire_resource(ram, actor, 0x61);
+        write_word(ram, actor + 0x3c, 0xf2ab);
+        write_word(ram, actor + 0x26, 0xa0);
+        write_word(ram, actor + 0x36, 0x80);
+        ram[actor + 0x2d] = 0x21;
+        ram[actor + 0x0c] = 0x0c;
+        write_word(ram, actor + 0x2a, 0x4956);
+        write_word(ram, actor, 0x4a4);
+        break;
+    case 0xb04a4: {
+        uint16_t carrier = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        write_word(ram, actor + 0x21, read_word(ram, carrier + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, carrier + 0x24) - 3);
+        if (ram[carrier + 0x0a] & 1) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!read_word(ram, carrier + 0x46)) {
+            write_word(ram, actor + 0x42, 8);
+            write_word(ram, actor + 0x3a, 0xff00);
+            write_word(ram, actor, 0x4f8);
+        }
+        queue_sprite(ram, main_rom, actor, 1);
+        break;
+    }
+    case 0xb04f8:
+    case 0xb057b:
+    case 0xb05b0: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        int flame = 0;
+        if (address == 0xb057b) {
+            unsigned players = read_word(ram, 0x264) & 3;
+            if (players == 3) {
+                world_dispatch_detail = "two-player target; SI after 65B1 not recovered";
+                return 0;
+            }
+            ram[actor + 0x2d] = 4;
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor + 0x38, 0xff00);
+            write_word(ram, actor + 0x3a, 0);
+            write_word(ram, actor + 0x46, 1);
+            if (players) {
+                uint16_t target = world_enemy_target(ram, actor);
+                write_word(ram, actor + 0x50, target);
+                /* 65DA/65F4 leave SI bit 0 set when the target is higher. */
+                write_word(ram, actor + 0x3a,
+                           read_word(ram, target + 0x24) < read_word(ram, actor + 0x24) ? 0xff80 : 0x80);
+            }
+            write_word(ram, actor, 0x5b0);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if (address == 0xb04f8) {
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+            if (!decrement(ram, actor + 0x42)) {
+                world_queue_sound(ram, 0x74);
+                write_word(ram, actor, 0x57b);
+            }
+            flame = 1;
+        } else {
+            move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+            uint16_t x = read_word(ram, actor + 0x21);
+            if (x > 0x1c0 || x < 0x40) {
+                finish_animation(ram, actor);
+                break;
+            }
+            if (read_word(ram, actor + 0x3a)) {
+                uint16_t target = read_word(ram, actor + 0x50);
+                uint16_t gap = read_word(ram, actor + 0x24) - read_word(ram, target + 0x24);
+                if (gap & 0x8000) gap = -gap;
+                if (gap >= 4 && decrement(ram, actor + 0x42))
+                    flame = 1;
+                else {
+                    write_word(ram, actor + 0x3a, 0);
+                    write_word(ram, actor + 0x38, 0xfd00);
+                }
+            }
+            if (!flame && !decrement(ram, actor + 0x46)) {
+                write_word(ram, actor + 0x46, 4);
+                uint16_t smoke = effect_slot(ram, read_word(ram, 0x9a), 0xbe41);
+                write_word(ram, smoke + 0x21, x + 0x10);
+                write_word(ram, smoke + 0x24, read_word(ram, actor + 0x24));
+                ram[smoke + 0x2c] = 3;
+            }
+        }
+        if (flame) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x40, frame + 2 < 6 ? frame + 2 : 0);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x2ce + frame)));
+            ram[actor + 0x2c] = 3;
+            queue_sprite(ram, main_rom, actor, 0);
+        }
+        write_word(ram, actor + 0x2a, 0x4956);
+        ram[actor + 0x2c] = ram[actor + 0x14];
+        queue_sprite(ram, main_rom, actor, 1);
+        ram[actor + 0x0d] = 2;
+        if (world_player_contact(ram, main_rom, actor)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        ram[actor + 0x0d] = 0;
+        world_projectile_contact(ram, main_rom, actor);
+        if (!read_word(ram, actor + 0x26)) {
+            spawn_impact(ram, main_rom, actor);
+            finish_animation(ram, actor);
+        }
+        break;
+    }
+    /* B000:02E0: init of the 0357 enemy; it needs its 047A companion. */
+    case 0xb02e0: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        uint16_t flags = read_word(ram, actor + 0x1e);
+        unsigned pick = flags & 6;
+        world_acquire_resource(ram, actor, 0x61);
+        write_word(ram, actor + 0x3c, 0xf2a3);
+        write_word(ram, actor + 0x26, 0x80);
+        write_word(ram, actor + 0x36, 0x80);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x0e, 2);
+        write_word(ram, actor + 0x2a, 0x490e);
+        ram[actor + 0x29] = flags & 1;
+        if (pick == 6) pick = world_random_byte(ram) & 6;
+        write_word(ram, actor + 0x46, read_word(bank, 0x2d6 + pick));
+        uint16_t companion = world_spawn_child(ram, actor, 0x47a);
+        if (!companion) {
+            finish_animation(ram, actor);
+            break;
+        }
+        write_word(ram, companion + 2, 0xb000);
+        ram[companion + 0x29] = ram[actor + 0x29];
+        write_word(ram, actor, 0x357);
+        break;
+    }
     case 0xb0357:
     case 0xb03f1:
     case 0xb042b: {
