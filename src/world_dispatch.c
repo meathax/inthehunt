@@ -8879,6 +8879,44 @@ stage2_jumper_terrain:
         }
         break;
     }
+    /* 07FB9: parent-attached effect. It follows the parent actor for 20
+       ticks (07FD1), then drifts with the b716 scroll delta (07FF5) while
+       stepping the sprite/duration tables at 7835/7857. */
+    case 0x7fb9:
+        ram[actor + 0x2c] = 3;
+        ram[actor + 0x2d] = 0x3e;
+        write_word(ram, actor + 0x58, 1);
+        write_word(ram, actor + 0x42, 0x14);
+        write_word(ram, actor, 0x7fd1);
+        break;
+    case 0x7fd1:
+    case 0x7ff5: {
+        int detached = address == 0x7ff5;
+        if (!detached) {
+            uint16_t parent = read_word(ram, actor + 0x7c);
+            uint16_t offset = read_word(main_rom, (uint16_t)(0x7955 + read_word(ram, actor + 0x68)));
+            write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) + offset);
+            write_word(ram, actor + 0x24, read_word(ram, parent + 0x24) + 4);
+            if (!decrement(ram, actor + 0x42)) {
+                write_word(ram, actor, 0x7ff5);
+                detached = 1;
+            }
+        }
+        if (detached) scroll_actor(ram, actor, 0xb716);
+        if (!decrement(ram, actor + 0x58)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(main_rom, (uint16_t)(0x7835 + frame));
+            if (sprite == 0xffff) {
+                finish_animation(ram, actor);
+                break;
+            }
+            write_word(ram, actor + 0x2a, sprite);
+            write_word(ram, actor + 0x58, read_word(main_rom, (uint16_t)(0x7857 + frame)));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
     case 0xa199:
         ram[actor + 0x2c] = 3;
         ram[actor + 0x0a] = 0;
