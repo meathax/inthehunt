@@ -4,11 +4,19 @@
  *
  *   check_replay REFDIR [--from PASS] [--passes N] [--rom maincpu.bin]
  *                [--dump-on-stop DIR] [--keep-going] [--quiet] [--trace trace.bin]
+ *                [--verified]
  *
  * --keep-going resynchronises from the reference after a mismatch or a missing
  * handler and prints a tally of every missing handler in the recording.
  * --trace compares before every handler call of the traced passes, naming the
- * handler whose result first differs (capture with trace_pass=N).
+ * handler whose result first differs (capture with trace_pass=N). Together
+ * with --keep-going, a missing handler inside a traced pass is stepped over
+ * using the reference state before the next call, so the handlers after it
+ * are still compared; such calls are tallied separately.
+ *
+ * --verified lists, per handler, how many of its calls had their result
+ * compared and found equal: calls inside passes that ran completely and matched
+ * at the next pass start, and calls followed by a matching trace record.
  *
  * State is compared at each pass start (after world_dispatch_begin): work RAM
  * 0000-BFFF, video RAM, OAM and palette. --from loads that pass's reference
@@ -33,6 +41,24 @@ static FILE *trace;
 enum { MISSING_MAX = 4096 };
 static struct { uint32_t address; unsigned count, first_pass; } missing[MISSING_MAX];
 static unsigned missing_count;
+static int resync_calls;
+/* --verified: per handler, calls whose result was compared and matched. */
+enum { TALLY_MAX = 8192, PASS_CALLS_MAX = 4096 };
+static struct { uint32_t address; unsigned traced, whole; } tally[TALLY_MAX];
+static unsigned tally_count;
+static uint32_t pass_calls[PASS_CALLS_MAX];
+static unsigned pass_call_count;
+static int pass_whole;
+
+static void credit(uint32_t address, int whole)
+{
+    unsigned i;
+    for (i = 0; i < tally_count; ++i) if (tally[i].address == address) break;
+    if (i == TALLY_MAX) return;
+    if (i == tally_count) { tally[i].address = address; tally[i].traced = tally[i].whole = 0; ++tally_count; }
+    if (whole) ++tally[i].whole; else ++tally[i].traced;
+}
+static unsigned trace_skipped_passes;
 
 static void note_missing(uint32_t address, unsigned pass)
 {
@@ -45,30 +71,81 @@ static void note_missing(uint32_t address, unsigned pass)
     }
 }
 
+/* Trace records are written in (pass, call) order; index their headers once. */
+enum { TRACE_RECORD = 8 + 0xc000 + 65536 };
+static struct { unsigned pass, call; } *trace_index;
+static size_t trace_records, trace_cursor;
+static uint8_t trace_record[TRACE_RECORD];
+
+static void index_trace(void)
+{
+    uint8_t header[8];
+    size_t capacity = 0;
+    for (long at = 0; !fseek(trace, at, SEEK_SET) && fread(header, 1, 8, trace) == 8; at += TRACE_RECORD) {
+        if (trace_records == capacity) {
+            capacity = capacity ? capacity * 2 : 1024;
+            trace_index = realloc(trace_index, capacity * sizeof *trace_index);
+            if (!trace_index) { fprintf(stderr, "out of memory\n"); exit(1); }
+        }
+        trace_index[trace_records].pass = header[0] | header[1] << 8 | header[2] << 16 | (unsigned)header[3] << 24;
+        trace_index[trace_records++].call = header[4] | header[5] << 8 | header[6] << 16 | (unsigned)header[7] << 24;
+    }
+}
+
+/* Load the trace record (pass, call) into trace_record. Returns 0 when absent. */
+static int trace_load(unsigned pass, unsigned call)
+{
+    if (!trace) return 0;
+    if (!trace_index) index_trace();
+    size_t i = trace_cursor;
+    if (i >= trace_records || trace_index[i].pass > pass || (trace_index[i].pass == pass && trace_index[i].call > call)) i = 0;
+    for (; i < trace_records; ++i)
+        if (trace_index[i].pass == pass && trace_index[i].call == call) break;
+    if (i == trace_records) return 0;
+    trace_cursor = i;
+    return !fseek(trace, (long)i * TRACE_RECORD, SEEK_SET) && fread(trace_record, 1, TRACE_RECORD, trace) == TRACE_RECORD;
+}
+
 /* Compare against the per-call trace record (pass, call). 1 match, 0 differ, -1 no record. */
 static int trace_check(unsigned pass, unsigned call, uint32_t previous)
 {
-    static uint8_t record[8 + 0xc000 + 65536];
-    if (!trace) return -1;
-    rewind(trace);
-    while (fread(record, 1, sizeof record, trace) == sizeof record) {
-        unsigned p = record[0] | record[1] << 8 | record[2] << 16 | (unsigned)record[3] << 24;
-        unsigned c = record[4] | record[5] << 8 | record[6] << 16 | (unsigned)record[7] << 24;
-        if (p != pass || c != call) continue;
-        unsigned shown = 0;
-        for (unsigned a = 0; a < 0xc000; ++a)
-            if (ram[a] != record[8 + a]) {
-                if (!shown) printf("pass %u: state differs before call %u (after handler %05lX)\n", pass, call + 1, (unsigned long)previous);
-                if (shown++ < 24) printf("  work[%04x] native %02x reference %02x\n", a, ram[a], record[8 + a]);
-            }
-        for (unsigned a = 0; a < 65536; ++a)
-            if (tiles[a] != record[8 + 0xc000 + a]) {
-                if (!shown) printf("pass %u: state differs before call %u (after handler %05lX)\n", pass, call + 1, (unsigned long)previous);
-                if (shown++ < 24) printf("  video[%04x] native %02x reference %02x\n", a, tiles[a], record[8 + 0xc000 + a]);
-            }
-        return !shown;
+    const uint8_t *record = trace_record;
+    if (!trace_load(pass, call)) return -1;
+    unsigned shown = 0;
+    for (unsigned a = 0; a < 0xc000; ++a)
+        if (ram[a] != record[8 + a]) {
+            if (!shown) printf("pass %u: state differs before call %u (after handler %05lX)\n", pass, call + 1, (unsigned long)previous);
+            if (shown++ < 24) printf("  work[%04x] native %02x reference %02x\n", a, ram[a], record[8 + a]);
+        }
+    for (unsigned a = 0; a < 65536; ++a)
+        if (tiles[a] != record[8 + 0xc000 + a]) {
+            if (!shown) printf("pass %u: state differs before call %u (after handler %05lX)\n", pass, call + 1, (unsigned long)previous);
+            if (shown++ < 24) printf("  video[%04x] native %02x reference %02x\n", a, tiles[a], record[8 + 0xc000 + a]);
+        }
+    return !shown;
+}
+
+/* --keep-going with a trace: step over a handler the native build cannot run
+ * by taking the reference state before the next call. The next actor is the
+ * skipped actor's link in that state; a wrong guess shows up as a mismatch. */
+static unsigned trace_skips, trace_mismatches, trace_calls_checked;
+static int trace_resync(WorldDispatch *d, unsigned pass, unsigned call)
+{
+    if (!trace_load(pass, call)) return 0;
+    uint16_t actor = d->actor;
+    memcpy(ram, trace_record + 8, 0xc000);
+    memcpy(tiles, trace_record + 8 + 0xc000, 65536);
+    d->actor = (uint16_t)(ram[actor + 4] | ram[(uint16_t)(actor + 5)] << 8);
+    switch (d->phase) {
+    case WORLD_FRAME_HEAD: d->phase = WORLD_PLAYER_ONE; break;
+    case WORLD_PLAYER_ONE: d->phase = WORLD_BEFORE_PLAYER_TWO; break;
+    case WORLD_BEFORE_PLAYER_TWO:
+        if (d->actor == (uint16_t)(ram[0x92] | ram[0x93] << 8)) d->phase = WORLD_PLAYER_TWO;
+        break;
+    case WORLD_PLAYER_TWO: d->phase = WORLD_AFTER_PLAYER_TWO; break;
+    case WORLD_AFTER_PLAYER_TWO: break;
     }
-    return -1;
+    return 1;
 }
 
 static unsigned word(const uint8_t *p) { return p[0] | (unsigned)p[1] << 8; }
@@ -143,13 +220,35 @@ static int run_pass(unsigned pass, uint32_t *stop_address, uint16_t *stop_actor,
 {
     WorldDispatch d;
     world_dispatch_begin(&d, ram);
-    unsigned calls = 0;
+    unsigned calls = 0, skipped_here = 0;
+    pass_call_count = 0;
+    pass_whole = 0;
     uint32_t address;
     uint32_t previous = 0;
     while (world_dispatch_target(&d, ram, &address)) {
-        if (!trace_check(pass, calls, previous)) { *stop_address = previous; *calls_out = calls; return 5; }
+        int traced = trace_check(pass, calls, previous);
+        if (traced > 0) { ++trace_calls_checked; if (previous) credit(previous, 0); }
+        if (!traced) {
+            if (!resync_calls) { *stop_address = previous; *calls_out = calls; return 5; }
+            ++trace_mismatches;
+            memcpy(ram, trace_record + 8, 0xc000);
+            memcpy(tiles, trace_record + 8 + 0xc000, 65536);
+        }
         previous = address;
+        if (pass_call_count < PASS_CALLS_MAX) pass_calls[pass_call_count++] = address;
+        WorldDispatch before = d;
         if (!world_dispatch_native_video(&d, ram, rom, tiles)) {
+            d = before;
+            if (resync_calls && trace_resync(&d, pass, calls + 1)) {
+                note_missing(address, pass);
+                ++trace_skips;
+                ++skipped_here;
+                ++calls;
+                previous = 0;
+                /* A busy VBlank inside the skipped call is already in the reference state. */
+                while (irq_pass == pass && irq_call == calls) next_irq();
+                continue;
+            }
             *stop_address = address;
             *stop_actor = d.actor;
             *calls_out = calls;
@@ -164,6 +263,8 @@ static int run_pass(unsigned pass, uint32_t *stop_address, uint16_t *stop_actor,
     }
     while (irq_pass && irq_pass <= pass) next_irq();
     *calls_out = calls;
+    if (skipped_here) ++trace_skipped_passes;
+    else pass_whole = 1;
     return 0;
 }
 
@@ -206,7 +307,7 @@ int main(int argc, char **argv)
 {
     const char *dir = NULL, *rom_path = NULL, *dump_dir = NULL;
     unsigned from = 1, limit = 0;
-    int keep_going = 0;
+    int keep_going = 0, verified = 0;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--from") && i + 1 < argc) from = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--passes") && i + 1 < argc) limit = (unsigned)strtoul(argv[++i], NULL, 10);
@@ -215,6 +316,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--keep-going")) keep_going = 1;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) { trace = fopen(argv[++i], "rb"); if (!trace) { fprintf(stderr, "cannot open trace\n"); return 1; } }
         else if (!strcmp(argv[i], "--quiet")) quiet = 1;
+        else if (!strcmp(argv[i], "--verified")) verified = 1;
         else if (!dir && argv[i][0] != '-') dir = argv[i];
         else { fprintf(stderr, "usage: check_replay REFDIR [--from PASS] [--passes N] [--rom FILE] [--dump-on-stop DIR] [--keep-going]\n"); return 1; }
     }
@@ -236,6 +338,7 @@ int main(int argc, char **argv)
     for (unsigned p = 1; p < from; ++p) if (run_events(p, 0)) { fprintf(stderr, "recording ends before pass %u\n", from); return 1; }
     next_irq();
     while (irq_pass && irq_pass < from) next_irq();
+    resync_calls = keep_going && trace;
     unsigned pass = from, matched = 0, mismatches = 0, boundary_stops = 0;
     int status = 0;
     for (;;) {
@@ -244,6 +347,9 @@ int main(int argc, char **argv)
         WorldDispatch d;
         world_dispatch_begin(&d, ram);
         size_t diff = compare(pass, !quiet || !keep_going);
+        if (!diff && pass_whole)
+            for (unsigned i = 0; i < pass_call_count; ++i) credit(pass_calls[i], 1);
+        pass_whole = 0;
         if (diff) {
             ++mismatches;
             if (!keep_going) { status = 3; break; }
@@ -304,7 +410,15 @@ int main(int argc, char **argv)
                missing[i].count, missing[i].first_pass);
         skipped += missing[i].count;
     }
+    if (verified)
+        for (unsigned i = 0; i < tally_count; ++i)
+            printf("verified %05lX: %u calls in matching whole passes, %u by trace\n",
+                   (unsigned long)tally[i].address, tally[i].whole, tally[i].traced);
+    if (resync_calls)
+        printf("trace: %u handler results compared, %u differed, %u missing handler calls stepped over in %u passes\n",
+               trace_calls_checked, trace_mismatches, trace_skips, trace_skipped_passes);
     printf("%s: compared passes %u..%u, %u matched, %u mismatched, %u stopped at missing handlers, %u at boundaries\n",
-           dir, from, pass, matched, mismatches, skipped, boundary_stops);
-    return status ? status : (mismatches ? 3 : skipped || boundary_stops ? 2 : 0);
+           dir, from, pass, matched, mismatches, skipped - trace_skips, boundary_stops);
+    skipped -= trace_skips;
+    return status ? status : (mismatches || trace_mismatches ? 3 : skipped || boundary_stops ? 2 : 0);
 }

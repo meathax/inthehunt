@@ -146,12 +146,20 @@ end
 -- Dispatcher calls run with SS:SP = E000:0000, so each far call pushes its
 -- return offset at E000:FFFC. Watching that word is far cheaper than a read
 -- tap over the actor area. The push happens before the handler runs.
+-- trace_pass=P[, trace_count=M] traces one range; trace={{P,M},{P,M},...} several.
+local function traced(p)
+    if cfg.trace_pass and p >= cfg.trace_pass and p < cfg.trace_pass + (cfg.trace_count or 1) then return true end
+    for _, range in ipairs(cfg.trace or {}) do
+        if p >= range[1] and p < range[1] + (range[2] or 1) then return true end
+    end
+    return false
+end
 local returns = {[0x897]=true, [0x8ae]=true, [0x8cc]=true, [0x907]=true, [0x925]=true}
 tap_stack = memory:install_write_tap(0xefffc, 0xefffd, "ref_stack", function(addr, data, mask)
     if finished or saving or addr ~= 0xefffc or not returns[data & 0xffff] then return end
     if data == 0x897 and armed then armed = false; on_pass_start() end
     if not recording or not in_pass then return end
-    if cfg.trace_pass and pass >= cfg.trace_pass and pass < cfg.trace_pass + (cfg.trace_count or 1) then
+    if traced(pass) then
         -- State before each handler call (and before the terminal actor).
         saving = true
         trace = trace or open("trace.bin", "wb")
@@ -252,6 +260,20 @@ frame_sub = emu.add_machine_frame_notifier(function()
                 down = t < sink
                 up = t >= sink and t < sink + attempt * rise
             end
+        end
+        -- steer_from=FRAME, steer_x=X: from that frame on keep P1 near X
+        -- instead of pushing right (a boss that must be fought from the left).
+        if play and cfg.steer_from and frame >= cfg.steer_from then
+            local x = word(word(0x90) + 0x21)
+            right, left = x < cfg.steer_x - 8, x > cfg.steer_x + 8
+        end
+        -- follow=true: steer through a vertical scroll section. RAM[270] is 2
+        -- while the camera waits for a player low on the screen (actor Y grows
+        -- upwards) and 4 while it waits for one high on the screen.
+        if cfg.follow and word(0x80) == 0xb2e then
+            local vertical = word(0x270)
+            up = vertical == 4 or (up and vertical ~= 2)
+            down = vertical == 2 or (down and vertical ~= 4)
         end
         local aim = play and aim_at()
         if aim then right, left, up, down = aim.right, aim.left, aim.up, aim.down end

@@ -10,16 +10,17 @@ program. Everything here is a development aid; none of it ships.
 | `tools/ref/run_capture.sh DIR 'opts'` | Run the World set in MAME headless and record a reference into `DIR` (keep it under `.local/ref/`). |
 | `make -f tools/ref/Makefile` | Build `.local/bin/check_replay` from the native core. Add `CFLAGS='-std=c99 -O1 -g -Wall -Wextra'` for faster builds. |
 | `.local/bin/check_replay DIR [--from P] [--passes N] [--keep-going --quiet] [--trace DIR/trace.bin]` | Run the native handlers over a recording. Exit 0 = every compared pass matches the original byte for byte. |
+| `... --keep-going --quiet --verified --trace DIR/trace.bin` | Inside traced passes a missing handler is stepped over using the reference state before the next call, so the handlers after it are still compared one by one. `--verified` lists per handler how many calls were compared and matched. |
 | `tools/ref/dasm.sh ADDR LEN` | Disassemble main-CPU code (hex linear address and length) with MAME's NEC V33 disassembler. |
 | `python3 tools/ref/ledger.py` | Rebuild `docs/COVERAGE.md` from all recordings under `.local/ref/`. |
 
 Capture options (Lua table body): `frames=N` (stop frame), `start=N` (first
 recorded frame, default 600), `stage=N` (start the campaign at stage index N),
 `refill=true` (top up P1 lives), `passes=false` (call log only, tiny output),
-`trace_pass=P, trace_count=M` (dump state before every handler call of those
-passes), `snap_every=N` (PNG every N passes), `bot=false`, `unstick=N` (when the
-camera stalls the bot stops weaving and holds one of N depths in turn; stage
-index 1 needs `unstick=6` to break through the buildings), `verbose=true`. One pass with full
+`trace_pass=P, trace_count=M` or `trace={{P,M},{P,M}}` (dump state before every
+handler call of those passes; about 11 MB per pass in a busy stage), `snap_every=N` (PNG every N passes), `bot=false`, `follow=true` (the bot holds
+up or down through vertical scroll sections), `steer_from=F, steer_x=X` (from
+frame F the bot keeps P1 near actor X instead of pushing right). One pass with full
 state costs 135 KB, so keep a recording to a few thousand passes and delete
 recordings you no longer need.
 
@@ -35,6 +36,12 @@ recordings you no longer need.
    `--from P --passes 1 --trace REC/trace.bin`.
 4. A handler counts as recovered only when the passes that execute it match.
    Never weaken the comparison or special-case the checker.
+5. When a pass also runs handlers that are still missing (another stage's
+   work), capture sparse trace windows over the passes of interest
+   (`trace={{P,M},...}`) and check with `--keep-going --verified --trace`.
+   A sound reply that arrives inside a stepped-over multi-frame routine is
+   already part of the reference state and is then applied a second time at
+   the boundary; expect one false mismatch after such a routine.
 
 ## Conventions in the recovered code
 
