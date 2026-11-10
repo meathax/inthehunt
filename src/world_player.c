@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "world_tile_address.h"
 #include "world_torpedo.h"
+#include "world_stage5.h"
 
 static uint16_t word(const uint8_t *p) { return p[0] | ((uint16_t)p[1] << 8); }
 static void put(uint8_t *p, uint16_t value) { p[0] = (uint8_t)value; p[1] = value >> 8; }
@@ -242,7 +243,8 @@ void world_sub_entry_step(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
     int16_t ceiling = (int16_t)word(ram + 0x25c);
     put(a + 0x21, x > 0x188 ? 0x188 : x < 0x70 ? 0x70 : x);
     put(a + 0x24, y < 0xa0 ? 0xa0 : y > ceiling ? ceiling : y);
-    update_water_medium(ram, rom, a, cfg[10], cfg[14] & 8 ? 3 : 0);
+    const uint8_t *medium = ram + world_stage5_sub_entry_walls(ram, rom, tiles, sub);
+    update_water_medium(ram, rom, a, medium[10], medium[14] & 8 ? 3 : 0);
     put(a + 0x6c, 0);
     if (delay == 1) {
         put(a + 0x26, word(a + 0x6e) ? 0 : 1);
@@ -280,6 +282,7 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
         right |= 1u << (row_material(map, cell, 4) & 15);
         rows[i] = cell;
     }
+    world_stage5_sub_side_walls(ram, rom, tiles, sub, x, rows);
     unsigned x_fraction = (uint8_t)(a[0x20] + word(predicted + 0x38));
     uint16_t health = word(a + 0x26);
     unsigned horizontal_scroll = word(ram + 0xb70a) & 7;
@@ -308,6 +311,7 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
     }
     unsigned center = row_material(map, probe_address(ram, x, y - 4), 0);
     unsigned above = row_material(map, probe_address(ram, x, y + 16), 0);
+    world_stage5_sub_row_walls(ram, rom, tiles, sub, x, y, vertical[0], vertical[2]);
     uint16_t medium = 0;
     unsigned y_fraction = (uint8_t)(a[0x23] + word(predicted + 0x3a));
     unsigned vertical_scroll = word(ram + 0xb70c) & 7;

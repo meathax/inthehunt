@@ -1558,8 +1558,10 @@ void update_standard_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t *te
         write_word(ram, actor + 0x21, shot.x);
         write_word(ram, actor + 0x24, shot.y);
         impact = (world_terrain_mask(ram, terrain, shot.x, shot.y) & 0x5502) != 0;
-        if (impact)
+        if (impact) {
+            world_stage5_wall_hit(ram, rom, terrain, actor);
             write_word(ram, actor + 0x40, 0);
+        }
     }
     if (impact || shot.x < 0x40 || shot.x > 0x1c0) {
         if (impact) {
@@ -2567,7 +2569,7 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
 {
     int rising = handler != 0xa0a9;
     int surface = handler == 0x9fcd || handler == 0x9fda;
-    if ((ram[actor + 0x0b] & 0x80) || read_word(ram, 0x84) == 4)
+    if (ram[actor + 0x0b] & 0x80)
         return 0;
     uint16_t velocity = read_word(ram, actor + 0x3a);
     int accelerate = (handler == 0x9eb2 || handler == 0x9fcd) &&
@@ -2618,7 +2620,10 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
         uint16_t limit = (ram[0x26e] & 2) ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
         int impact = (mask & 0x5502) || (y <= limit && !read_word(ram, actor + 0x26));
         if (impact || y > limit) {
-            if (impact) spawn_impact(ram, rom, actor);
+            if (impact) {
+                world_stage5_wall_hit(ram, rom, terrain, actor);
+                spawn_impact(ram, rom, actor);
+            }
             write_word(ram, parent + 0x46, read_word(ram, parent + 0x46) + 1);
             finish_animation(ram, actor);
         } else if (read_word(ram, actor + 0x3c) != 0xffff) {
@@ -2642,8 +2647,10 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
         if (impact || y > top || material == 3) {
             if (material == 3) {
                 spawn_surface_splash(ram, rom, actor, x, y);
-            } else if (impact)
+            } else if (impact) {
+                world_stage5_wall_hit(ram, rom, terrain, actor);
                 spawn_impact(ram, rom, actor);
+            }
             write_word(ram, parent + 0x46, read_word(ram, parent + 0x46) + 1);
             finish_animation(ram, actor);
             return 1;
@@ -2655,6 +2662,7 @@ int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
             uint16_t count = read_word(ram, parent + 0x48);
             write_word(ram, parent + 0x48, (int16_t)count > 0 ? count - 1 : 0);
             if (impact) {
+                world_stage5_wall_hit(ram, rom, terrain, actor);
                 release_actor_resources(ram, actor);
                 write_word(ram, actor + 0x36, 0x20);
                 write_word(ram, actor, 0xa199);

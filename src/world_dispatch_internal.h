@@ -7,6 +7,7 @@
 #include "world_title.h"
 #include "world_torpedo.h"
 #include "world_tile_address.h"
+#include "world_stage5.h"
 
 /* Result of a handler group for one actor call. */
 enum {

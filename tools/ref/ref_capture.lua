@@ -8,6 +8,11 @@
 --                  + work RAM 64K + video RAM 64K + OAM 2K + palette 2K
 --   trace.bin      with trace_pass=N[, trace_count=M]: state before every handler
 --                  call of those passes (8-byte header, work 48K, video 64K)
+--   patches.bin    with patch={addr,...}: for every call of a listed handler, the
+--                  256-byte blocks of work/video RAM that differ after it returned
+--                  (pass u32, call u32, count u16, then region u8 + offset u16 + block).
+--                  check_replay replays these for handlers that are not recovered yet,
+--                  so the rest of the pass can still be compared.
 --   stages.txt     stage, first pass, frame for each stage reached
 --   calls.txt      per pass: handler address sequence (linear) for the coverage ledger
 --   sound.txt      outgoing sound commands per pass
@@ -31,6 +36,29 @@ local polls, system_port, last_irq, calls, in_pass = 0, 0xffff, 0, 0, false
 local pending, current, seen_ports, handlers = {}, nil, {}, {}
 local stages_seen = {}
 local trace = nil
+local patch_set, patch_file, patch_before, patch_call = nil, nil, nil, 0
+if cfg.patch then
+    patch_set = {}
+    for _, a in ipairs(cfg.patch) do patch_set[a] = true end
+    patch_file = open("patches.bin", "wb")
+end
+local function patch_state()
+    return { memory:read_range(0xe0000, 0xebfff, 8), memory:read_range(0xd0000, 0xdffff, 8) }
+end
+local function write_patch()
+    local now, blocks = patch_state(), {}
+    for region = 1, 2 do
+        local a, b = patch_before[region], now[region]
+        for offset = 1, #a, 256 do
+            local chunk = b:sub(offset, offset + 255)
+            if a:sub(offset, offset + 255) ~= chunk then
+                blocks[#blocks + 1] = string.pack("<I1I2", region - 1, offset - 1) .. chunk
+            end
+        end
+    end
+    patch_file:write(string.pack("<I4I4I2", pass, patch_call, #blocks), table.concat(blocks))
+    patch_before = nil
+end
 local regions = { {"work", 0xe0000, 0xeffff}, {"video", 0xd0000, 0xdffff},
                   {"oam", 0xf8000, 0xf87ff}, {"palette", 0xf8800, 0xf8fff} }
 local function dump(label)
@@ -170,6 +198,12 @@ tap_stack = memory:install_write_tap(0xefffc, 0xefffd, "ref_stack", function(add
     end
     local actor = cpu.state.BP.value
     local target = ((word(actor + 2) << 4) + word(actor)) & 0xfffff
+    if patch_set then
+        saving = true
+        if patch_before then write_patch() end
+        if patch_set[target] then patch_before, patch_call = patch_state(), calls end
+        saving = false
+    end
     if target == 0x96a then
         in_pass = false
         calls_log:write("\n")
@@ -184,6 +218,7 @@ local function finish(reason)
     emit_interval()
     for _, f in ipairs({hardware, irq_log, sounds, calls_log, passes, stage_log}) do f:close() end
     if trace then trace:close() end
+    if patch_file then patch_file:close() end
     print(("ref_capture=%s passes=%d frame=%d"):format(reason, pass, frame))
     machine:exit()
 end
@@ -274,6 +309,12 @@ frame_sub = emu.add_machine_frame_notifier(function()
             local vertical = word(0x270)
             up = vertical == 4 or (up and vertical ~= 2)
             down = vertical == 2 or (down and vertical ~= 4)
+        end
+        if cfg.climb then
+            -- climb=true: upward stages. Stay near the top of the view and
+            -- sweep sideways every climb_period frames.
+            local sweep = (frame // (cfg.climb_period or 150)) % 2
+            right, left, up, down = sweep == 0, sweep == 1, true, false
         end
         local aim = play and aim_at()
         if aim then right, left, up, down = aim.right, aim.left, aim.up, aim.down end
