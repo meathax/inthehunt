@@ -1400,13 +1400,19 @@ static void boss_appendage(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
     queue_sprite(ram, rom, actor, 0);
 }
 
-static void warship_blast_sequence(uint8_t *ram, uint16_t actor, uint16_t table, uint16_t delay)
+/* 0:7036: a 7056 actor that plays the blast list at segment:table. */
+static void blast_sequence(uint8_t *ram, uint16_t actor, uint16_t segment, uint16_t table, uint16_t delay)
 {
     uint16_t child = effect_slot(ram, actor, 0x7056);
     write_word(ram, child + 0x60, table);
-    write_word(ram, child + 0x62, 0xb000);
+    write_word(ram, child + 0x62, segment);
     write_word(ram, child + 0x4c, delay);
     write_word(ram, child + 0x42, 1);
+}
+
+static void warship_blast_sequence(uint8_t *ram, uint16_t actor, uint16_t table, uint16_t delay)
+{
+    blast_sequence(ram, actor, 0xb000, table, delay);
 }
 
 static int spawn_warship_parts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
@@ -5067,6 +5073,104 @@ stage2_jumper_terrain:
         ram[actor + 0x2d] = 0x3e;
         write_word(ram, actor + 0x3c, 0xfb4b);
         write_word(ram, actor, 0xe828);
+        break;
+    }
+    /* 1000:E552 (init) and E561: four 8A cues on the second sound queue,
+       42 ticks apart. */
+    case 0x1e552:
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor + 0x40, 4);
+        write_word(ram, actor, 0xe561);
+        /* fall through */
+    case 0x1e561:
+        keep_si();
+        if (decrement(ram, actor + 0x42)) break;
+        write_word(ram, actor + 0x42, 0x2a);
+        {
+            unsigned tail = (read_word(ram, 0xa6d8) + 2) & 14;
+            if (tail != read_word(ram, 0xa6d6)) {
+                write_word(ram, 0xa6d8, tail);
+                write_word(ram, 0xa6a2 + tail, 0x8a);
+            }
+        }
+        if (!decrement(ram, actor + 0x40)) finish_animation(ram, actor);
+        break;
+    /* 1000:E58C (init) and E5C6: a floating target bobbing on a sine. When
+       destroyed it scores, bursts (E62D), then rises (E66B) until it meets
+       solid ground and leaves the E6D9 wreck. */
+    case 0x1e58c:
+    case 0x1e5c6: {
+        if (address == 0x1e58c) {
+            world_acquire_resource(ram, actor, 0xd9);
+            write_word(ram, actor + 0x0e, 0x3a);
+            ram[actor + 0x2d] = 0x30;
+            write_word(ram, actor + 0x26, 0x100);
+            write_word(ram, actor + 0x36, 0x100);
+            write_word(ram, actor + 0x3c, 0xf9b3);
+            write_word(ram, actor + 0x2a, read_word(main_rom + 0x10000, 0xe4ec + (read_word(ram, actor + 0x1e) & 2)));
+            write_word(ram, actor + 0x34, read_word(ram, actor + 0x24));
+            write_word(ram, actor, 0xe5c6);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        uint16_t phase = read_word(ram, actor + 0x31);
+        write_word(ram, actor + 0x31, phase + 4);
+        /* 6761 with BX = 100h, CX = 2. */
+        int32_t wave = (int16_t)read_word(main_rom + 0xa0000, 0x9d92 + 2 * (phase & 255)) * 2;
+        uint32_t height = (ram[actor + 0x33] | ((uint32_t)read_word(ram, actor + 0x34) << 8)) + ((uint32_t)wave & 0xffffff);
+        ram[actor + 0x23] = (uint8_t)height;
+        write_word(ram, actor + 0x24, (uint16_t)(height >> 8));
+        queue_sprite(ram, main_rom, actor, 0);
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_projectile_contact(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x26)) break;
+        if (!hit) {
+            world_dispatch_detail = "target destroyed without a projectile; 6237 reads leftover BX";
+            return 0;
+        }
+        world_award_score(ram, main_rom, actor, hit);
+        blast_sequence(ram, actor, 0x1000, 0xe4f0, 4);
+        write_word(ram, actor + 0x42, 0x10);
+        write_word(ram, actor, 0xe62d);
+        break;
+    }
+    case 0x1e62d:
+    case 0x1e66b: {
+        if (!tiles) return 0;
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (address == 0x1e62d) {
+            queue_sprite(ram, main_rom, actor, 0);
+            if (!decrement(ram, actor + 0x42)) {
+                write_word(ram, actor + 0x2a, 0x24bb);
+                write_word(ram, actor + 0x3a, 0xffd0);
+                write_word(ram, actor + 0x42, 0x20);
+                write_word(ram, actor, 0xe66b);
+            }
+            break;
+        }
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) blast_sequence(ram, actor, 0x1000, 0xe510, 0x20);
+        if (world_terrain_mask(ram, tiles + 0x4000, read_word(ram, actor + 0x21),
+                               read_word(ram, actor + 0x24) - 8) & 0xff02) {
+            blast_sequence(ram, actor, 0x1000, 0xe52a, 4);
+            /* 6EDC, then E6CE lifts the blast eight pixels. */
+            uint16_t blast = effect_slot(ram, actor, 0x6efe);
+            write_word(ram, blast + 0x44, 0x7b);
+            write_word(ram, blast + 0x4c, 0x762d);
+            write_word(ram, blast + 0x4a, 0x7706);
+            ram[blast + 0x2d] = 0x20;
+            write_word(ram, blast + 0x34, 0xfff8);
+            write_word(ram, actor, 0xe6d9);
+        }
         break;
     }
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
