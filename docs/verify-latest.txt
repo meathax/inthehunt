@@ -1,0 +1,29 @@
+stage 0 frames 1400-7400: compared passes 1..5807, 5806 matched, 0 mismatched, 1 stopped at missing handlers, 0 at boundaries
+    missing handler B2B03: 1 passes, first pass 4466
+stage 0 frames 7400-13300: compared passes 1..5859, 5853 matched, 5 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 1 frames 1400-7400: compared passes 1..5966, 5965 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 1 frames 7400-13400: compared passes 1..6001, 6000 matched, 0 mismatched, 1 stopped at missing handlers, 0 at boundaries
+    missing handler B9601: 1 passes, first pass 666
+stage 1 frames 13400-16200: compared passes 1..2758, 2752 matched, 5 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 2 frames 1400-5700: compared passes 1..4267, 4266 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 2 frames 5600-10450: compared passes 1..4821, 4815 matched, 5 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 3 frames 1400-7400: compared passes 1..5968, 5967 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 3 frames 7400-13400: compared passes 1..6001, 6000 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 3 frames 13400-19400: compared passes 1..6001, 6000 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 3 frames 19400-22900: compared passes 1..3501, 3500 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 3 frames 22900-27400: compared passes 1..4461, 4455 matched, 5 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 4 frames 1400-6200: compared passes 1..4765, 4764 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 4 frames 6200-11000: compared passes 1..4801, 4800 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 4 frames 11000-15800: compared passes 1..4762, 4757 matched, 4 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 5 frames 1400-7400: compared passes 1..5956, 5955 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 5 frames 7400-13400: compared passes 1..5995, 5994 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 5 frames 13400-19400: compared passes 1..6001, 6000 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 5 frames 19400-26450: compared passes 1..7051, 7050 matched, 0 mismatched, 0 stopped at missing handlers, 0 at boundaries
+stage 5 frames 26200-31950: compared passes 1..5707, 5706 matched, 0 mismatched, 4342 stopped at missing handlers, 0 at boundaries
+    missing handler 01AF7: 1 passes, first pass 1143
+    missing handler 0977B: 1 passes, first pass 1144
+    missing handler 097A7: 3193 passes, first pass 1145
+    missing handler 055DF: 585 passes, first pass 4338
+    missing handler 056A3: 259 passes, first pass 4923
+    missing handler 0CA03: 1 passes, first pass 5352
+    missing handler 0CA3E: 302 passes, first pass 5353
