@@ -6293,6 +6293,87 @@ static int stage_two_towers(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     return 1;
 }
 
+/* Stage two: palette cycler B000:88E1 (88EF) and the breakable block
+   B000:8939 (8965 89FD). */
+static int stage_two_block(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    switch (address) {
+    case 0xb88e1:
+        ram[actor + 0x2c] = 0x16;
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor, 0x88ef);
+        /* fall through */
+    case 0xb88ef:
+        if (read_word(ram, 0xb700) >= 0xf00 || (read_word(ram, 0x262) & 0x800)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            queue_palette(ram, ram[actor + 0x2c] & 63, read_word(bank, 0x8104 + (read_word(ram, actor + 0x40) & 2)), 6);
+            write_word(ram, actor + 0x42, 0x51);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        }
+        break;
+    case 0xb8939:
+        world_acquire_resource(ram, actor, 0x2c);
+        ram[actor + 0x2d] = 0x1f;
+        write_word(ram, actor + 0x3c, 0xf52b);
+        write_word(ram, actor + 0x2a, 0xa7ba);
+        write_word(ram, actor + 0x26, 0x90);
+        write_word(ram, actor + 0x36, 0x90);
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x21));
+        write_word(ram, actor, 0x8965);
+        break;
+    case 0xb8965:
+    case 0xb89fd: {
+        /* 0:432B scrolls the anchor at 31 / 34 and returns the y step. */
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
+        if (address == 0xb8965 && read_word(ram, actor + 0x31) < 0x10) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (ram[actor + 0x19]) --ram[actor + 0x19];
+        write_word(ram, actor + 0x21, (ram[actor + 0x19] & 2) + read_word(ram, actor + 0x31));
+        queue_sprite(ram, rom, actor, 0);
+        if (address == 0xb89fd) {
+            if (!decrement(ram, actor + 0x42)) finish_animation(ram, actor);
+            break;
+        }
+        ram[actor + 0x0d] = 1;
+        uint16_t hit = world_projectile_contact(ram, rom, actor);
+        if (hit) {
+            int16_t left = (int16_t)(read_word(ram, actor + 0x26) - read_word(ram, hit + 0x36));
+            write_word(ram, actor + 0x26, left > 0 ? (uint16_t)left : 0);
+            if (!ram[actor + 0x19]) {
+                uint16_t chips = effect_slot(ram, actor, 0x7056);       /* 0:7036 */
+                write_word(ram, chips + 0x60, 0x8138);
+                write_word(ram, chips + 0x62, 0xb000);
+                write_word(ram, chips + 0x4c, 2);
+                write_word(ram, chips + 0x42, 1);
+                ram[chips + 0x2d] = 0xfe;
+                ram[actor + 0x19] = (ram[actor + 0x19] & 1) + 0x18;
+            }
+        }
+        if (read_word(ram, actor + 0x26)) break;
+        uint16_t burst = effect_slot(ram, actor, 0x7056);
+        write_word(ram, burst + 0x60, 0x8158);
+        write_word(ram, burst + 0x62, 0xb000);
+        write_word(ram, burst + 0x4c, 4);
+        write_word(ram, burst + 0x42, 1);
+        ram[burst + 0x2d] = 0xff;
+        write_word(ram, actor + 0x42, 0x20);
+        write_word(ram, actor, 0x89fd);
+        break;
+    }
+    default:
+        return 0;
+    }
+    return 1;
+}
+
 int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles)
 {
     uint32_t address;
@@ -14931,6 +15012,10 @@ stage2_jumper_terrain:
     case 0xb84d6: case 0xb84f9: case 0xb85eb: case 0xb8646: case 0xb865a: case 0xb86b5:
     case 0xb8706:
         if (!stage_two_towers(ram, main_rom, tiles, actor, address)) return 0;
+        break;
+    /* Stage-two palette cycler B000:88E1 and breakable block B000:8939. */
+    case 0xb88e1: case 0xb88ef: case 0xb8939: case 0xb8965: case 0xb89fd:
+        if (!stage_two_block(ram, main_rom, actor, address)) return 0;
         break;
     /* Stage-five ice boss: hull 7FFE, core 8337, arms 8A19, tentacle 8EB5. */
     case 0x77ffe: case 0x78085: case 0x780c9: case 0x781ed: case 0x7826a: case 0x78295:
