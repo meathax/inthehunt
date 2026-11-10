@@ -5463,6 +5463,249 @@ static int stage_two_gunboat(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, u
     return 1;
 }
 
+/* Stage-two patrol craft B000:F308 (states F379 F51B F5C6 F5F7 F63B F646)
+   lobs the existing shot B000:F70A. */
+static void s2_patrol_death(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t hit)
+{
+    world_award_score(ram, rom, actor, hit);
+    uint16_t blast = effect_slot(ram, actor, 0x6efe);      /* 0:6C1E */
+    write_word(ram, blast + 0x4c, 0x7533);
+    write_word(ram, blast + 0x4a, 0x7675);
+    write_word(ram, blast + 0x44, 0x57);
+    ram[blast + 0x2d] = 0x20;
+    write_word(ram, blast + 0x56, 0x40);
+    write_word(ram, blast + 0x58, 0);
+    finish_animation(ram, actor);
+}
+
+static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    uint16_t hit, x;
+    if (!tiles) return 0;
+    switch (address) {
+    case 0xbf308:
+        world_acquire_resource(ram, actor, 0x5f);
+        world_acquire_resource(ram, actor, 0x56);
+        world_acquire_resource(ram, actor, 0x5d);
+        world_acquire_resource(ram, actor, 0xff);
+        write_word(ram, actor + 0x0e, 0x23);
+        write_word(ram, actor + 0x26, 0x110);
+        write_word(ram, actor + 0x36, 0x80);
+        write_word(ram, actor + 0x3c, 0xf27b);
+        ram[actor + 0x2d] = 0x20;
+        ram[actor + 0x0c] = 8;
+        write_word(ram, actor + 0x2e, 0x200);
+        write_word(ram, actor + 0x38, 0xfe00);
+        write_word(ram, actor + 0x50, 0x20);
+        write_word(ram, actor + 0x52, 0x20);
+        write_word(ram, actor + 0x46, (read_word(ram, actor + 0x1e) & 2) ? 2 : 0);
+        write_word(ram, actor + 0x56, 2);
+        write_word(ram, actor + 0x4a, 1);
+        write_word(ram, actor, 0xf379);
+        return 1;
+    case 0xbf379: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        x = read_word(ram, actor + 0x21);
+        if (x > 0x1c0 || x < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        int turn = 0;
+        uint16_t mode = read_word(ram, actor + 0x46);
+        if (mode == 1) turn = !decrement(ram, actor + 0x42);
+        else if (mode) {
+            unsigned players = read_word(ram, 0x264) & 3;
+            if (players == 3) {
+                world_dispatch_detail = "two-player target; SI after 65B1 not recovered";
+                return 0;
+            }
+            /* 65B1 leaves the borrow of player x - actor x in SI bit 1. */
+            if (players) turn = read_word(ram, world_enemy_target(ram, actor) + 0x21) >= x;
+        }
+        if (turn) {
+            write_word(ram, actor, 0xf5c6);
+            decrement(ram, actor + 0x46);
+        } else if (world_terrain_mask(ram, tiles + 0x4000,
+                       (uint16_t)(x + read_word(bank, 0xf304 + 2 * (ram[actor + 0x29] & 1))),
+                       read_word(ram, actor + 0x24)) & 0xff02)
+            write_word(ram, actor, 0xf5c6);
+        break;
+    }
+    case 0xbf5f7:
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x2e, read_word(ram, actor + 0x2e) + 0x10);
+        if ((int16_t)read_word(ram, actor + 0x2e) >= 0x200) {
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor, 0xf379);
+        }
+        if (!decrement(ram, actor + 0x5a)) {
+            write_word(ram, actor + 0x5a, 2);
+            write_word(ram, actor + 0x58, read_word(ram, actor + 0x58) + 2);
+        }
+        write_word(ram, actor + 0x2a, read_word(bank, 0xf298 + (read_word(ram, actor + 0x58) & 0x0e)));
+        ram[actor + 0x2c] = ram[actor + 0x16];
+        queue_sprite(ram, rom, actor, 0);
+        goto drift;
+    case 0xbf5c6:
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x2e, read_word(ram, actor + 0x2e) - 0x10);
+        if (!read_word(ram, actor + 0x2e)) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x42, 1);
+            write_word(ram, actor, 0xf63b);
+        }
+    drift: {
+        uint16_t speed = read_word(ram, actor + 0x2e);
+        if (!(ram[actor + 0x29] & 1)) speed = -speed;
+        write_word(ram, actor + 0x38, speed);
+        move_actor_axis(ram, actor + 0x20, speed);
+        break;
+    }
+    case 0xbf51b: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        unsigned frame = 2 * ram[actor + 0x41];
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 0x40);
+        uint16_t sprite = read_word(bank, 0xf2b2 + (frame < 10 ? frame : 8));
+        if (sprite == 0xffff) {
+            write_word(ram, actor, read_word(ram, actor + 0x60));
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            write_word(ram, actor + 0x54, 0);
+        } else
+            write_word(ram, actor + 0x2a, sprite);
+        queue_sprite(ram, rom, actor, 1);
+        ram[actor + 0x0d] = 0;
+        hit = world_player_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) {
+            ram[actor + 0x0d] = 0;
+            hit = world_projectile_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) {
+                ram[actor + 0x0d] = 0;
+                hit = world_surface_contact(ram, rom, actor);
+                if (read_word(ram, actor + 0x26)) return 1;
+            }
+        }
+        goto dead;
+    }
+    case 0xbf63b:
+        ram[actor + 0x2c] = ram[actor + 0x14];
+        write_word(ram, actor, 0xf646);
+        /* fall through */
+    case 0xbf646: {
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 6);
+            uint16_t frame = read_word(ram, actor + 0x40);
+            if (frame >= 0x14) frame = 0x12;
+            uint16_t sprite = read_word(bank, 0xf252 + frame);
+            if (sprite == 0xffff) {
+                write_word(ram, actor + 0x2a, 0x45c6);
+                write_word(ram, actor + 0x58, 0);
+                write_word(ram, actor + 0x5a, 2);
+                write_word(ram, actor, 0xf5f7);
+            } else {
+                write_word(ram, actor + 0x2a, sprite);
+                write_word(ram, actor + 0x3c, read_word(bank, 0xf266 + frame));
+                if (frame == 0x0a) ram[actor + 0x29] ^= 1;
+                write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+            }
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        x = read_word(ram, actor + 0x21);
+        if (x > 0x1c0 || x < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        queue_sprite(ram, rom, actor, 1);
+        ram[actor + 0x0d] = 2;
+        hit = world_player_contact(ram, rom, actor);
+        if (!hit) {
+            ram[actor + 0x0d] = 0;
+            hit = world_projectile_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) {
+                ram[actor + 0x0d] = 0;
+                hit = world_surface_contact(ram, rom, actor);
+                if (read_word(ram, actor + 0x26)) return 1;
+            }
+        }
+        goto dead;
+    }
+    default:
+        return 0;
+    }
+
+    /* B000:F3FB: fire control, hull and wake sprites, contacts. */
+    if (!read_word(ram, actor + 0x50)) {
+        unsigned frame = 2 * ram[actor + 0x55];
+        write_word(ram, actor + 0x54, read_word(ram, actor + 0x54) + 0x40);
+        uint16_t sprite = read_word(bank, 0xf2a8 + (frame < 10 ? frame : 8));
+        if (sprite != 0xffff) {
+            write_word(ram, actor + 0x2a, sprite);
+            goto hull;
+        }
+        write_word(ram, actor + 0x54, 0);
+        if (!decrement(ram, actor + 0x56)) {
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            write_word(ram, actor + 0x56, 2);
+            goto idle;
+        }
+    } else if (decrement(ram, actor + 0x50))
+        goto idle;
+    {
+        uint16_t shell = world_spawn_child(ram, actor, 0xf70a);
+        if (shell) {
+            write_word(ram, shell + 2, 0xb000);
+            ram[shell + 0x29] = ram[actor + 0x29];
+            write_word(ram, shell + 0x21, read_word(ram, actor + 0x21) +
+                       read_word(bank, 0xf2fc + 2 * (ram[actor + 0x29] & 1)));
+            write_word(ram, shell + 0x24, read_word(ram, actor + 0x24) + 0x10);
+            ram[shell + 0x2c] = ram[actor + 0x17];
+            world_queue_sound(ram, 0x61);
+        }
+    }
+idle:
+    write_word(ram, actor + 0x2a, 0x45c6);
+hull:
+    ram[actor + 0x2c] = ram[actor + 0x14];
+    queue_sprite(ram, rom, actor, 1);
+    if (!decrement(ram, actor + 0x4a)) {
+        write_word(ram, actor + 0x48, read_word(ram, actor + 0x48) + 2);
+        write_word(ram, actor + 0x4a, read_word(bank, 0xf288 + (read_word(ram, actor + 0x48) & 0x0e)));
+    }
+    write_word(ram, actor + 0x2a, read_word(bank, 0xf278 + (read_word(ram, actor + 0x48) & 0x0e)));
+    ram[actor + 0x2c] = ram[actor + 0x15];
+    queue_sprite(ram, rom, actor, 0);
+    ram[actor + 0x0d] = 2;
+    hit = world_player_contact(ram, rom, actor);
+    if (!hit) {
+        ram[actor + 0x0d] = 0;
+        hit = world_projectile_contact(ram, rom, actor);
+        if (!hit) {
+            ram[actor + 0x0d] = 0;
+            hit = world_surface_contact(ram, rom, actor);
+        }
+        if (hit) {
+            write_word(ram, actor + 0x60, read_word(ram, actor));
+            write_word(ram, actor + 0x40, 0);
+            ram[actor + 0x2c] = ram[actor + 0x14];
+            write_word(ram, actor, 0xf51b);
+        }
+        if (read_word(ram, actor + 0x26)) return 1;
+    }
+dead:
+    if (!hit) {
+        world_dispatch_detail = "patrol craft died without a hit this tick; 0:6237 reads leftover BX";
+        return 0;
+    }
+    s2_patrol_death(ram, rom, actor, hit);
+    return 1;
+}
+
 int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles)
 {
     uint32_t address;
@@ -14079,6 +14322,11 @@ stage2_jumper_terrain:
     case 0xb4113: case 0xb41b6: case 0xb4226: case 0xb4262: case 0xb4285: case 0xb433e:
     case 0xb43c8: case 0xb44c4: case 0xb451c: case 0xb4583:
         if (!stage_two_gunboat(ram, main_rom, tiles, actor, address)) return 0;
+        break;
+    /* Stage-two patrol craft B000:F308. */
+    case 0xbf308: case 0xbf379: case 0xbf51b: case 0xbf5c6: case 0xbf5f7: case 0xbf63b:
+    case 0xbf646:
+        if (!stage_two_patrol(ram, main_rom, tiles, actor, address)) return 0;
         break;
     /* Stage-five ice boss: hull 7FFE, core 8337, arms 8A19, tentacle 8EB5. */
     case 0x77ffe: case 0x78085: case 0x780c9: case 0x781ed: case 0x7826a: case 0x78295:
