@@ -24,6 +24,9 @@ int world_dispatch_native_video(WorldDispatch *, uint8_t *ram, const uint8_t *ma
 /* Supply BP as returned by the actor handler, including after a list mutation. */
 void world_dispatch_return(WorldDispatch *, uint8_t *ram, uint16_t actor);
 
+/* Names the untranslated branch when a recovered handler stops. */
+extern const char *world_dispatch_detail;
+
 #endif
 
 

@@ -165,8 +165,9 @@ static int tick(uint16_t pads, uint16_t system)
                 return 0;
             }
             if (!world_dispatch_native_video(&pass, ram, rom, tiles)) {
-                snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.",
-                         (unsigned long)addr, pass.actor, word(ram + 0x80));
+                snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.%s%s",
+                         (unsigned long)addr, pass.actor, word(ram + 0x80),
+                         *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
             }
         }
