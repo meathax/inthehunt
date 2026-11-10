@@ -6950,6 +6950,18 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* A000:FDFF/FE08: alternate two palettes in slot 1Fh every tick. */
+    case 0xafdff:
+        ram[actor + 0x2c] = 0x1f;
+        write_word(ram, actor, 0xfe08);
+        /* fall through */
+    case 0xafe08: {
+        uint16_t frame = read_word(ram, actor + 0x40);
+        queue_palette(ram, ram[actor + 0x2c] & 63, read_word(main_rom + 0xa0000, 0xfdfb + (frame & 2)), 0);
+        write_word(ram, actor + 0x40, frame + 2);
+        keep_si();
+        break;
+    }
     /* A000:F4A2 (init), F4B9 (wait for the camera) and F4C7: releases F52F
        swimmers from the left edge at random intervals. */
     case 0xaf4a2:
