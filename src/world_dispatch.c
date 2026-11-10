@@ -11681,6 +11681,25 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* B000:B8E0: stamp the thirty material words at B8A4 onto a 5 x 6 block
+       of map cells at 2A98, then retire. */
+    case 0xbb8e0: {
+        if (!tiles) return 0;
+        uint8_t *map = tiles + 0x4000;
+        uint16_t table = 0xb8a4, row = 0x2a98;
+        for (unsigned y = 0; y < 6; ++y) {
+            uint16_t cell = row;
+            for (unsigned x = 0; x < 5; ++x) {
+                write_word(map, (uint16_t)(cell + 2), (read_word(map, (uint16_t)(cell + 2)) & 0x7ff) |
+                           read_word(main_rom + 0xb0000, table));
+                table += 2;
+                if (x != 4) cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+            }
+            row = (row + 0x100) & 0x3fff;
+        }
+        finish_animation(ram, actor);
+        break;
+    }
     /* B000:D13B/D149: a second sprite drawn on its parent, sharing the
        parent's hit flash. */
     case 0xbd13b:
@@ -12548,6 +12567,71 @@ stage2_jumper_terrain:
         scenery_init_si = read_word(ram, actor + 0x1e) & 6;
         update_scenery(ram, main_rom, tiles, actor, 1);
         break;
+    /* 0:DAA9 (init) and DACD: far-layer scenery two blocks wide, animated
+       from the list at 1188h. */
+    case 0xdaa9:
+    case 0xdacd: {
+        if (!tiles) return 0;
+        if (address == 0xdaa9) {
+            uint16_t flags = read_word(ram, actor + 0x1e);
+            write_word(ram, actor + 0x50, read_word(main_rom, 0xfea7 + (flags & 0x0e)));
+            write_word(ram, actor + 0x52, read_word(main_rom, 0xdd0f + ((flags >> 8) & 2)));
+            write_word(ram, actor, 0xdacd);
+            leave_si(flags & 0x0e);         /* DAAC mov ix,bw; and ix,0Eh */
+        } else
+            keep_si();
+        scroll_actor(ram, actor, 0xb72a);
+        uint16_t bottom = read_word(ram, 0x26e) & 2 ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
+        if (read_word(ram, actor + 0x21) < 0x3f || read_word(ram, actor + 0x24) > bottom) {
+            finish_animation(ram, actor);
+            break;
+        }
+        uint16_t tick = read_word(ram, 0x274);
+        if (tick & 7) break;
+        uint16_t sequence = (tick & 0x38) + read_word(ram, actor + 0x52) + 0x1188;
+        uint16_t dest = read_word(ram, actor + 0x50);
+        write_word(ram, 0xb89a, 0x0201);
+        write_word(ram, 0xb89c, dest);
+        for (unsigned strip = 0; strip < 2; strip++) {
+            unsigned segment = read_word(main_rom + 0xa0000, (uint16_t)(sequence + 2 * strip)) & 0xfffc;
+            const uint8_t *source = main_rom + ((uint32_t)segment << 4);
+            uint16_t row_dest = dest;
+            for (unsigned row = 0; row < 4; row++) {
+                for (unsigned col = 0; col < 16; col += 4)
+                    write_word(tiles, 0x4000 + row_dest + col, read_word(source, 16 * row + col));
+                row_dest = (row_dest + 0x100) & 0x3fff;
+            }
+            if (strip != 1) {
+                dest = (dest & 0xff00) | ((dest + 16) & 0xff);
+                write_word(ram, 0xb89c, dest);
+            }
+        }
+        leave_si(0x40);
+        break;
+    }
+    /* 0:DB28 (init) and DB64: DA4F scenery that drops its animation offset
+       once its parent's byte 0A has bit 1 set. */
+    case 0xdb28: {
+        if (!tiles) return 0;
+        unsigned stage = 2 * read_word(ram, 0x84);
+        uint16_t list = read_word(main_rom, 0xfe5f + stage);
+        write_word(ram, actor + 0x50, read_word(main_rom, (uint16_t)(list + (ram[actor + 0x1e] & 6))));
+        write_word(ram, actor + 0x52, read_word(main_rom, 0xfe87 + (ram[actor + 0x1f] & 30)));
+        write_word(ram, actor + 0x54, read_word(main_rom, 0xdcff + stage));
+        write_word(ram, actor, 0xdb64);
+    }
+        /* fall through */
+    case 0xdb64: {
+        if (!tiles) return 0;
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        if (ram[parent + 0x0a] & 2) {
+            write_word(ram, actor + 0x52, 0);
+            write_word(ram, actor, 0xda4f);
+        }
+        update_scenery(ram, main_rom, tiles, actor, 0);
+        si_known = 0;                       /* not verified for this entry */
+        break;
+    }
     /* 0:DBF3 (init) and DBFD: every seventh tick redraw a row of sixteen
        blocks on the first layer from an eight-frame animation. */
     case 0xdbf3:
