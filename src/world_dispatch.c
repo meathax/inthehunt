@@ -11060,6 +11060,214 @@ stage2_jumper_terrain:
         finish_animation(ram, actor);
         break;
     }
+    /* B000:A3BA (init) and A3E7: a timed animation whose frames carry a
+       contact shape; B000:A466 is its second shape, read through the 8500
+       slot of its own depth exactly as the original does. */
+    case 0xba3ba:
+    case 0xba3e7: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (address == 0xba3ba) {
+            ram[actor + 0x2d] = 0x28;
+            write_word(ram, actor + 0x26, 0x7f00);
+            write_word(ram, actor + 0x36, 0x180);
+            uint16_t second = bank_b_effect(ram, actor, 0xa466);
+            write_word(ram, second + 0x26, 0x7f00);
+            write_word(ram, second + 0x36, 0x180);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0xa3e7);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(bank, (uint16_t)(0x9fd0 + frame));
+            if (sprite == 0xffff) {
+                finish_animation(ram, actor);
+                break;
+            }
+            write_word(ram, actor + 0x2a, sprite);
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0x9ff2 + frame)));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        uint16_t shape = read_word(bank, (uint16_t)(0xa044 + 2 * (uint16_t)(read_word(ram, actor + 0x40) - 2)));
+        if (shape) {
+            write_word(ram, actor + 0x3c, shape);
+            ram[actor + 0x0d] = 1;
+            world_player_contact(ram, main_rom, actor);
+            if (shape != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+        }
+        break;
+    }
+    case 0xba466: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        uint16_t owner = read_word(ram, (uint16_t)(0x8500 + read_word(ram, actor + 8)));
+        if (ram[owner + 0x0a]) {
+            finish_animation(ram, actor);
+            break;
+        }
+        write_word(ram, actor + 0x21, read_word(ram, owner + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, owner + 0x24));
+        uint16_t shape = read_word(bank, (uint16_t)(0xa046 + 2 * (uint16_t)(read_word(ram, owner + 0x40) - 2)));
+        if (shape) {
+            write_word(ram, actor + 0x3c, shape);
+            ram[actor + 0x0d] = 1;
+            world_player_contact(ram, main_rom, actor);
+            if (shape != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+        }
+        break;
+    }
+    /* B000:B92B (init), B99D (approach), B9D4 (open), BA49 (armed), BAF8
+       (wreck), BB1D/BB51 (firing) and BB9F (sustain): a launcher that
+       releases a BD06 child. The BBE6 state it enters afterwards is not
+       recovered yet. */
+    case 0xbb92b: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        uint16_t flags = read_word(ram, actor + 0x1e);
+        uint16_t type = flags & 0x0e;
+        uint16_t cfg = read_word(bank, (uint16_t)(0xb854 + (flags & 0x20) + read_word(ram, 0x8c)));
+        write_word(ram, actor + 0x60, type);
+        world_acquire_resource(ram, actor, read_word(bank, 0xae66 + type));
+        write_word(ram, actor + 0x0e, 0x16);
+        ram[actor + 0x2d] = 0x3f;
+        write_word(ram, actor + 0x3c, 0xf5d3);
+        write_word(ram, actor + 0x26, read_word(bank, (uint16_t)(0xb894 + cfg)));
+        write_word(ram, actor + 0x36, read_word(bank, (uint16_t)(0xb894 + cfg)));
+        write_word(ram, actor + 0x52, read_word(bank, (uint16_t)(0xb896 + cfg)));
+        write_word(ram, actor + 0x50, 1);
+        write_word(ram, actor + 0x2a, read_word(bank, 0xae56 + type));
+        write_word(ram, actor + 0x46, read_word(bank, 0xafa6 + type));
+        write_word(ram, actor + 0x42, read_word(bank, 0xb844 + (ram[actor + 0x1f] & 0x0e)));
+        write_word(ram, actor, 0xb99d);
+        break;
+    }
+    case 0xbb99d:
+    case 0xbb9d4:
+    case 0xbba49:
+    case 0xbbaf8:
+    case 0xbbb1d:
+    case 0xbbb51:
+    case 0xbbb9f: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        uint16_t type = read_word(ram, actor + 0x60);
+        uint32_t state = address;
+        int check = 0, probe = 0;
+        if (state == 0xbbb1d) {
+            if (type == 6) write_word(ram, 0xb8b4, read_word(ram, 0xb8b4) & ~1u);
+            write_word(ram, actor + 0x66, 0);
+            write_word(ram, actor + 0x64, 0);
+            uint16_t child = bank_b_effect(ram, actor, 0xbd06);
+            write_word(ram, child + 0x60, type);
+            world_queue_sound(ram, 0x79);
+            write_word(ram, actor, 0xbb51);
+            state = 0xbbb51;
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if ((state == 0xbb99d || state == 0xbba49 || state == 0xbbaf8) && read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (state == 0xbb99d) {
+            queue_sprite(ram, main_rom, actor, 0);
+            if (read_word(ram, actor + 0x42) >= read_word(ram, actor + 0x21)) {
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0xb9d4);
+            }
+            break;
+        }
+        if (state == 0xbbaf8) {
+            queue_sprite(ram, main_rom, actor, 0);
+            break;
+        }
+        if (state == 0xbb9d4) {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t frame = read_word(ram, actor + 0x40);
+                uint16_t sprite = read_word(bank, (uint16_t)(frame + read_word(ram, actor + 0x46)));
+                if (sprite == 0xffff)
+                    write_word(ram, actor, 0xba49);
+                else {
+                    write_word(ram, actor + 0x2a, sprite);
+                    write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0xb022 + frame)));
+                    write_word(ram, actor + 0x40, frame + 2);
+                }
+            }
+            queue_sprite(ram, main_rom, actor, 0);
+            check = read_word(ram, actor + 0x40) >= 8;
+        } else if (state == 0xbba49) {
+            queue_sprite(ram, main_rom, actor, 0);
+            uint16_t gate = read_word(ram, 0xb8b4);
+            int fire;
+            if (type == 0x0e && !(gate & 0x8000))
+                fire = gate & 1;
+            else {
+                fire = !decrement(ram, actor + 0x50);
+                if (fire) write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            }
+            if (fire) {
+                write_word(ram, actor + 0x46, read_word(bank, 0xb042 + type));
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                if (type == 6) write_word(ram, 0xb8b4, read_word(ram, 0xb8b4) | 1);
+                write_word(ram, 0xb8b4, read_word(ram, 0xb8b4) & ~2u);
+                write_word(ram, actor, 0xbb1d);
+            }
+            check = 1;
+        } else if (state == 0xbbb51) {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t frame = read_word(ram, actor + 0x40);
+                uint16_t hold = read_word(bank, (uint16_t)(0xb0b6 + frame));
+                if (hold == 0xffff) {
+                    write_word(ram, actor + 0x40, 0);
+                    write_word(ram, actor, 0xbb9f);
+                } else {
+                    write_word(ram, actor + 0x44, hold);
+                    write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)((frame & 2) + read_word(ram, actor + 0x46))));
+                    write_word(ram, actor + 0x40, frame + 2);
+                }
+            }
+            queue_sprite(ram, main_rom, actor, 0);
+            probe = 1;
+        } else {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)((frame & 2) + read_word(ram, actor + 0x46))));
+            write_word(ram, actor + 0x40, frame + 2);
+            queue_sprite(ram, main_rom, actor, 0);
+            if (read_word(ram, actor + 0x64)) {
+                write_word(ram, actor + 0x3c, read_word(bank, 0xb6fe + type));
+                write_word(ram, actor + 0x4e, read_word(ram, actor + 0x26));
+                write_word(ram, actor + 0x26, 0x300);
+                write_word(ram, actor + 0x66, read_word(ram, actor + 0x66) | 2);
+                write_word(ram, actor, 0xbbe6);
+            }
+            probe = 1;
+        }
+        if (probe) {
+            /* BB8E: any shot touching the open launcher is cancelled. */
+            ram[actor + 0x0d] = 3;
+            uint16_t shot = world_projectile_contact(ram, main_rom, actor);
+            if (shot) write_word(ram, shot + 0x26, 0);
+        }
+        if (check) {
+            ram[actor + 0x0d] = 0;
+            uint16_t hit = world_projectile_contact(ram, main_rom, actor);
+            if (!read_word(ram, actor + 0x26)) {
+                if (!hit) {
+                    world_dispatch_detail = "launcher destroyed without a projectile; 6237 reads leftover BX";
+                    return 0;
+                }
+                world_award_score(ram, main_rom, actor, hit);
+                spawn_kill_blast(ram, actor);
+                write_word(ram, actor + 0x2a, read_word(bank, 0xb032 + type));
+                ram[actor + 0x0a] = 2;
+                if (type == 6) write_word(ram, 0xb8b4, read_word(ram, 0xb8b4) | 0x8000);
+                write_word(ram, actor, 0xbaf8);
+            }
+        }
+        break;
+    }
     case 0xb921a: {
         const uint8_t *bank = main_rom + 0xb0000;
         uint16_t variant = read_word(ram, actor + 0x1e);
