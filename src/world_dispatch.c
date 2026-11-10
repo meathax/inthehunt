@@ -650,6 +650,25 @@ static uint8_t aim_angle(const uint8_t *rom, int16_t dx, int16_t dy)
     return angle + (((dx < 0) != (dy < 0)) ? (uint8_t)-octant : octant);
 }
 
+/* 0:ADF0. A type-121 blast throws the enemy toward 0:AE2A, which destroys
+   it seven ticks later. Returns 1 when the attacker was such a blast. */
+static int blast_knockback(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t attacker)
+{
+    if (!attacker || read_word(ram, attacker + 0x0e) != 0x121) return 0;
+    ram[actor + 0x28] = aim_angle(rom,
+        read_word(ram, attacker + 0x21) - read_word(ram, actor + 0x21),
+        read_word(ram, attacker + 0x24) - read_word(ram, actor + 0x24));
+    write_word(ram, actor + 0x2e, 0x400);
+    for (unsigned axis = 0; axis < 2; ++axis) {
+        int16_t unit = read_word(rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
+        write_word(ram, actor + 0x38 + 2 * axis, (unit * 0x400) >> 8);
+    }
+    write_word(ram, actor + 0x42, 7);
+    write_word(ram, actor, 0xae2a);
+    write_word(ram, actor + 2, 0);
+    return 1;
+}
+
 /* B000:96F3..9741, shared by the cruising and turning states. */
 static void cruiser_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
@@ -657,22 +676,7 @@ static void cruiser_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     uint16_t attacker = world_player_contact(ram, rom, actor);
     if (read_word(ram, actor + 0x26)) {
         attacker = world_projectile_contact(ram, rom, actor);
-        /* 0:ADF0. A type-121 blast throws the enemy toward 0:AE2A, which
-           destroys it seven ticks later. */
-        if (attacker && read_word(ram, attacker + 0x0e) == 0x121) {
-            ram[actor + 0x28] = aim_angle(rom,
-                read_word(ram, attacker + 0x21) - read_word(ram, actor + 0x21),
-                read_word(ram, attacker + 0x24) - read_word(ram, actor + 0x24));
-            write_word(ram, actor + 0x2e, 0x400);
-            for (unsigned axis = 0; axis < 2; ++axis) {
-                int16_t unit = read_word(rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
-                write_word(ram, actor + 0x38 + 2 * axis, (unit * 0x400) >> 8);
-            }
-            write_word(ram, actor + 0x42, 7);
-            write_word(ram, actor, 0xae2a);
-            write_word(ram, actor + 2, 0);
-            return;
-        }
+        if (blast_knockback(ram, rom, actor, attacker)) return;
         if (read_word(ram, actor + 0x26)) {
             /* D2B7 loaded SI with the collision shape and nothing follows. */
             leave_si(read_word(ram, actor + 0x3c));
@@ -698,6 +702,51 @@ static void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16
     }
     write_word(ram, actor + 0x3c, 0xf723);
     cruiser_contacts(ram, rom, actor);
+}
+
+/* B000:9C9F: the paired submarine's guns. Shots are linked after the 9C
+   anchor (1812) and marked as type 1B so siblings ignore them. */
+static void paired_sub_fire(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    uint8_t facing = ram[actor + 0x29];
+    if (!decrement(ram, actor + 0x50)) {
+        uint16_t dx = read_word(bank, 0x8d78 + 2 * (facing & 1));
+        write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+        uint16_t shot = effect_slot(ram, read_word(ram, 0x9c), 0x97ee);
+        if (shot != 0x8480) write_word(ram, shot + 2, 0xb000);
+        ram[shot + 0x29] = facing;
+        write_word(ram, shot + 0x21, read_word(ram, actor + 0x21) + dx);
+        write_word(ram, shot + 0x24, read_word(ram, actor + 0x24));
+        write_word(ram, shot + 0x38, read_word(ram, actor + 0x60));
+        write_word(ram, shot + 0x72, 1);
+        write_word(ram, shot + 0x0e, 0x1b);
+        uint16_t flash = effect_slot(ram, actor, 0xa268);
+        ram[flash + 0x29] = facing;
+        write_word(ram, flash + 0x31, dx);
+        ram[flash + 0x2d] = 3;
+    }
+    if (read_word(ram, actor + 0x74)) {
+        decrement(ram, actor + 0x74);
+        return;
+    }
+    if (!above_cruiser(ram, actor, read_word(ram, 0x90)) && !above_cruiser(ram, actor, read_word(ram, 0x92)))
+        return;
+    uint16_t dx = read_word(bank, 0x8d7c + 2 * (facing & 1));
+    uint16_t shot = effect_slot(ram, read_word(ram, 0x9c), 0x98e4);
+    if (shot != 0x8480) write_word(ram, shot + 2, 0xb000);
+    ram[shot + 0x29] = facing;
+    write_word(ram, shot + 0x21, read_word(ram, actor + 0x21) + dx);
+    write_word(ram, shot + 0x24, read_word(ram, actor + 0x24) + 4);
+    write_word(ram, shot + 0x3a, read_word(ram, actor + 0x62));
+    write_word(ram, shot + 0x72, 1);
+    write_word(ram, shot + 0x0e, 0x1b);
+    uint16_t flash = effect_slot(ram, actor, 0xa2c0);
+    ram[flash + 0x29] = facing;
+    write_word(ram, flash + 0x31, dx);
+    write_word(ram, flash + 0x34, 4);
+    ram[flash + 0x2d] = 3;
+    write_word(ram, actor + 0x74, read_word(ram, actor + 0x5e));
 }
 
 /* The cruising branch. Check branches still handled by the guest before
@@ -11037,6 +11086,144 @@ stage2_jumper_terrain:
         queue_surface_enemy(ram, main_rom, actor);
         register_surface_enemy(ram, actor);
         surface_enemy_hit(ram, main_rom, actor);
+        break;
+    }
+    /* B000:92F7 (init) and 930F: releases two 9380 submarines, one per
+       lane, 128 ticks apart, and retires once the camera passes word 1E. */
+    case 0xb92f7:
+        world_acquire_resource(ram, actor, 0x60);
+        write_word(ram, actor + 0x40, 2);
+        write_word(ram, actor + 0x42, 0x80);
+        write_word(ram, actor, 0x930f);
+        break;
+    case 0xb930f:
+        if (read_word(ram, actor + 0x40) && !decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 0x80);
+            uint16_t sub = world_spawn_child(ram, actor, 0x9380);
+            if (sub) {
+                unsigned lane = (read_word(ram, actor + 0x4a) & 1) ? 2 : 0;
+                write_word(ram, sub + 2, 0xb000);
+                write_word(ram, sub + 0x21, 0x1c0);
+                write_word(ram, actor + 0x4a, read_word(ram, actor + 0x4a) | (1u << lane));
+                write_word(ram, sub + 0x4a, lane);
+                write_word(ram, 0xb8b2, read_word(ram, 0xb8b2) & ~(1u << (lane + 4)));
+                write_word(ram, sub + 0x24, read_word(main_rom + 0xb0000, 0x8d74 + lane));
+                ram[sub + 0x2c] = ram[actor + 0x2c];
+                decrement(ram, actor + 0x40);
+            }
+        }
+        if (read_word(ram, 0xb700) >= read_word(ram, actor + 0x1e)) finish_animation(ram, actor);
+        break;
+    /* B000:9380 (init), 93D2 (cruise), 94D6 (held by B8B2) and 950E (against
+       terrain): one of the paired submarines. Its slot at B8B8 + lane and
+       the spawner's count and lane bit are released when it goes. */
+    case 0xb9380:
+        write_word(ram, actor + 0x0e, 0x1b);
+        write_word(ram, actor + 0x26, 0x20);
+        write_word(ram, actor + 0x36, 0x20);
+        write_word(ram, actor + 0x3c, 0xf723);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x2a, 0x4032);
+        write_word(ram, actor + 0x38, 0xff40);
+        write_word(ram, actor + 0x50, 0x40);
+        write_word(ram, actor + 0x52, 0x60);
+        write_word(ram, actor + 0x60, 0x200);
+        write_word(ram, actor + 0x74, 0x80);
+        write_word(ram, actor + 0x5e, 0x80);
+        write_word(ram, actor + 0x62, 0xe0);
+        write_word(ram, (uint16_t)(0xb8b8 + read_word(ram, actor + 0x4a)), actor);
+        write_word(ram, actor + 0x48, 1);
+        write_word(ram, actor, 0x93d2);
+        break;
+    case 0xb93d2:
+    case 0xb94d6:
+    case 0xb950e: {
+        if (!tiles) return 0;
+        uint16_t lane = read_word(ram, actor + 0x4a);
+        uint16_t spawner = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        int release = 0, kill = 0, contacts = address != 0xb94d6;
+        uint16_t attacker = 0;
+        scroll_actor(ram, actor, 0xb71a);
+        if (address == 0xb93d2) move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        uint16_t x = read_word(ram, actor + 0x21);
+        if (x < 0x40) {
+            release = 1;
+            contacts = 0;
+        } else {
+            queue_sprite(ram, main_rom, actor, 1);
+            if (address == 0xb93d2 && !decrement(ram, actor + 0x48)) {
+                /* B000:9DBF wake. */
+                write_word(ram, actor + 0x48, 8);
+                uint16_t wake = effect_slot(ram, read_word(ram, 0x9a), 0x7f73);
+                uint8_t facing = ram[actor + 0x29] ^ 1;
+                ram[wake + 0x29] = facing;
+                write_word(ram, wake + 0x21, x + read_word(main_rom + 0xb0000, 0x902e + 2 * (facing & 1)));
+                write_word(ram, wake + 0x24, read_word(ram, actor + 0x24));
+            }
+            paired_sub_fire(ram, main_rom, actor);
+            int wall = !!(world_terrain_mask(ram, tiles + 0x4000, x - 0x18, read_word(ram, actor + 0x24)) & 0xff02);
+            if (address == 0xb93d2) {
+                if ((int16_t)x > 0x60 && wall) write_word(ram, actor, 0x950e);
+            } else if (address == 0xb950e) {
+                if (!wall) write_word(ram, actor, 0x93d2);
+            } else if (read_word(ram, actor + 0x42)) {
+                if (!decrement(ram, actor + 0x42)) write_word(ram, actor, 0x93d2);
+            } else if (!(read_word(ram, 0xb8b2) & (1u << ((lane + 4) & 15))))
+                write_word(ram, actor + 0x42, 3);
+        }
+        if (contacts) {
+            int hold = 1;
+            ram[actor + 0x0d] = 0;
+            attacker = world_player_contact(ram, main_rom, actor);
+            if (attacker)
+                kill = 1;
+            else {
+                ram[actor + 0x0d] = 3;
+                attacker = world_projectile_contact(ram, main_rom, actor);
+                if (attacker) {
+                    if (blast_knockback(ram, main_rom, actor, attacker)) {
+                        /* B000:9436: thrown; release the lane but stay alive. */
+                        write_word(ram, spawner + 0x40, read_word(ram, spawner + 0x40) + 1);
+                        write_word(ram, spawner + 0x4a, read_word(ram, spawner + 0x4a) & ~(1u << (lane & 15)));
+                        write_word(ram, (uint16_t)(0xb8b8 + lane), 0);
+                        break;
+                    }
+                    if (read_word(ram, attacker + 0x0e) != 0x1b) {
+                        int16_t theirs = (int16_t)(read_word(ram, attacker + 0x26) - read_word(ram, actor + 0x36));
+                        write_word(ram, attacker + 0x26, theirs > 0 ? (uint16_t)theirs : 0);
+                        int16_t mine = (int16_t)(read_word(ram, actor + 0x26) - read_word(ram, attacker + 0x36));
+                        write_word(ram, actor + 0x26, (uint16_t)mine);
+                        if (mine <= 0) {
+                            kill = 1;
+                            hold = 0;
+                        } else
+                            ram[actor + 0x19] = (ram[actor + 0x19] & 1) + 10;
+                    }
+                }
+            }
+            if (!kill && hold && (read_word(ram, 0xb8b2) & (1u << ((lane + 4) & 15))))
+                write_word(ram, actor, 0x94d6);
+        }
+        if (kill) {
+            world_award_score(ram, main_rom, actor, attacker);
+            /* 6B36: the 6B2E blast without its sound. */
+            uint16_t blast = effect_slot(ram, actor, 0x6efe);
+            write_word(ram, blast + 0x4c, 0x74c3);
+            write_word(ram, blast + 0x4a, 0x7675);
+            ram[blast + 0x2c] = 0x0a;
+            ram[blast + 0x2d] = 0x20;
+            write_word(ram, blast + 0x56, 0x30);
+            write_word(ram, blast + 0x58, 0x80);
+            if (!(blast & 0x300)) write_word(ram, blast + 0x44, 0x5d);
+            world_queue_sound(ram, 0x98);
+            release = 1;
+        }
+        if (release) {
+            write_word(ram, spawner + 0x40, read_word(ram, spawner + 0x40) + 1);
+            write_word(ram, spawner + 0x4a, read_word(ram, spawner + 0x4a) & ~(1u << (lane & 15)));
+            write_word(ram, (uint16_t)(0xb8b8 + lane), 0);
+            finish_animation(ram, actor);
+        }
         break;
     }
     /* B000:9036: spawn a formation from the six-byte rows selected by the
