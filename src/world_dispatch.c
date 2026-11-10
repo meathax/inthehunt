@@ -14221,10 +14221,16 @@ stage2_jumper_terrain:
         }
         queue_sprite(ram, main_rom, actor, 0);
         break;
+    /* 7000:DCEE..DDEF: fifteen generator inits of one shape (handler, bank
+       B000, kind), all joining 7000:DBAA; DD00 alone also sets word 46. */
+    case 0x7dcee: case 0x7dd00: case 0x7dd17: case 0x7dd29: case 0x7dd4d: case 0x7dd5f:
+    case 0x7dd83: case 0x7dd95: case 0x7dda7: case 0x7ddb9: case 0x7ddcb: case 0x7dddd:
+    case 0x7ddef:
     case 0x7dd3b:
     case 0x7dd71: {
         const uint8_t *bank = main_rom + 0x70000;
         unsigned flags = ram[actor + 0x1f];
+        if (address == 0x7dd00) write_word(ram, actor + 0x46, 1);
         unsigned schedule = read_word(bank, 0xdb7a + ((flags >> 1) & 14));
         unsigned kind = read_word(bank, (uint16_t)(address + 13));
         write_word(ram, actor + 0x60, read_word(bank, (uint16_t)(address + 3)));
