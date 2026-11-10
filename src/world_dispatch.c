@@ -5889,7 +5889,11 @@ stage2_jumper_terrain:
     case 0x7b6f: {
         unsigned owner = ram[actor + 0x0b] & 3;
         if (!tiles || !owner || owner > 2 || read_word(ram, 0x84) == 4 ||
-            (ram[0x262] & 0x40) || (ram[0xb8b2] & (1u << (owner & 2)))) return 0;
+            (ram[0x262] & 0x40) || (ram[0xb8b2] & (1u << (owner & 2)))) {
+            world_dispatch_detail = !tiles ? "no tile memory" : !owner || owner > 2 ? "sub owner"
+                : read_word(ram, 0x84) == 4 ? "word 84 = 4" : (ram[0x262] & 0x40) ? "262h bit 6" : "B8B2 owner bit";
+            return 0;
+        }
         uint16_t config = read_word(ram, actor + 0x70);
         unsigned side = 2 * (owner & 2);
         int16_t y = (int16_t)read_word(ram, 0xb736 + side);
