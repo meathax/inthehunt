@@ -630,6 +630,14 @@ static void update_cruiser_fire(uint8_t *ram, const uint8_t *rom, uint16_t actor
     }
 }
 
+/* 68DF's CX result: the five-bit material of the map cell under (x, y). */
+static unsigned terrain_material(const uint8_t *ram, const uint8_t *terrain, uint16_t x, uint16_t y)
+{
+    uint16_t map_x = x - 0x60 + read_word(ram, 0xb70a);
+    uint16_t map_y = 0x177 - y + read_word(ram, 0xb70c);
+    return terrain[world_tile_address(map_x, map_y) + 3] >> 3;
+}
+
 /* 0:D459. Direction of (dx, dy) as a 256-step angle. */
 static uint8_t aim_angle(const uint8_t *rom, int16_t dx, int16_t dy)
 {
@@ -2035,6 +2043,75 @@ static void fire_secondary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t a
     write_word(ram, actor + 0x4a, 32);
 }
 
+/* A2C0 flash shared by the secondary launchers (A7C4, A89B, A94F). */
+static void secondary_launch_flash(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    uint16_t flash = effect_slot(ram, actor, 0xa2c0);
+    ram[flash + 0x29] = ram[actor + 0x29];
+    write_word(ram, flash + 0x31, read_word(rom, 0x78c7 + 2 * (ram[actor + 0x29] & 1)));
+    write_word(ram, flash + 0x34, 4);
+    ram[flash + 0x2d] = ram[actor + 0x2d];
+    write_word(ram, flash + 0x60, read_word(ram, actor + 0x60));
+}
+
+/* 0:A7FD: secondary launcher mode 4. Level 3 releases one BAA5 shot and
+   reloads from the A9A3 table; lower levels release BC73 shots while fewer
+   than level + 1 are out. */
+static void fire_secondary_spread(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    unsigned input = ram[0xb73e] & 3;
+    uint8_t angle = ram[actor + 0x28];
+    if (!input) {
+        if (angle < 0x40) angle += 2;
+        else if (angle > 0x40) angle -= 2;
+    } else if (input & 1) {
+        if (angle > 0x28) angle -= 2;
+    } else if (angle < 0x58)
+        angle += 2;
+    ram[actor + 0x28] = angle;
+    if (read_word(ram, actor + 0x4c)) {
+        decrement(ram, actor + 0x4c);
+        return;
+    }
+    if (!(ram[0xb742] & 0x40)) {
+        if (!read_word(ram, actor + 0x48)) write_word(ram, actor + 0x46, 0);
+        return;
+    }
+    unsigned owner = ((ram[actor + 0x0b] & 3) - 1) & 15;
+    uint16_t level = read_word(ram, actor + 0x7a);
+    if (read_word(ram, actor + 0x60) == 3) {
+        uint16_t shot = world_spawn_child(ram, actor, 0xbaa5);
+        if (!shot) return;
+        ram[shot + 0x2d] = ram[actor + 0x2d];
+        ram[shot + 0x0b] = ram[actor + 0x0b];
+        write_word(ram, 0xb8a2, read_word(ram, 0xb8a2) | (1u << owner));
+        write_word(ram, shot + 0x60, read_word(ram, actor + 0x60));
+        write_word(ram, shot + 0x7a, level + 1);
+        write_word(ram, actor + 0x4c, read_word(rom, 0xa9a3 + 2 * ((level - 1) & 3)));
+        secondary_launch_flash(ram, rom, actor);
+        return;
+    }
+    if ((int16_t)read_word(ram, actor + 0x48) >= (int16_t)(level + 1)) return;
+    uint16_t shot = world_spawn_child(ram, actor, 0xbc73);
+    if (!shot) return;
+    world_queue_sound(ram, 0x38);
+    ram[shot + 0x29] = ram[actor + 0x29];
+    write_word(ram, shot + 0x21, read_word(ram, actor + 0x21) + read_word(rom, 0xa99f + 2 * (ram[actor + 0x29] & 1)));
+    write_word(ram, shot + 0x24, read_word(ram, actor + 0x24) + 6);
+    ram[shot + 0x2d] = ram[actor + 0x2d] + 1;
+    ram[shot + 0x0b] = ram[actor + 0x0b];
+    write_word(ram, 0xb8a2, read_word(ram, 0xb8a2) | (1u << owner));
+    write_word(ram, shot + 0x60, read_word(ram, actor + 0x60));
+    ram[shot + 0x28] = (angle + 4) & 0xf8;
+    write_word(ram, shot + 0x46, read_word(ram, actor + 0x46));
+    write_word(ram, shot + 0x54, read_word(ram, actor + 0x54) & 3);
+    write_word(ram, actor + 0x54, read_word(ram, actor + 0x54) + 1);
+    write_word(ram, actor + 0x46, read_word(ram, actor + 0x46) + 1);
+    secondary_launch_flash(ram, rom, actor);
+    write_word(ram, actor + 0x48, read_word(ram, actor + 0x48) + 1);
+    write_word(ram, actor + 0x4c, 8);
+}
+
 /* A480/A535/A5EA launch the three powered primary weapons. */
 static void fire_primary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t mode)
 {
@@ -2075,7 +2152,8 @@ static int update_idle_equipment(uint8_t *ram, const uint8_t *rom, uint16_t acto
     uint16_t sub = read_word(ram, 0x8500 + read_word(ram, actor + 8) - 2);
     uint16_t config = read_word(ram, sub + 0x70);
     if (secondary) {
-        if (read_word(ram, config + 0x16) && read_word(ram, config + 0x14) != 2)
+        uint16_t launcher = read_word(ram, config + 0x14);
+        if (read_word(ram, config + 0x16) && launcher != 2 && launcher != 4)
             return 0;
         write_word(ram, actor + 0x7c, sub);
         write_word(ram, actor + 0x60, read_word(ram, sub + 0x60));
@@ -2098,11 +2176,15 @@ static int update_idle_equipment(uint8_t *ram, const uint8_t *rom, uint16_t acto
     if (secondary && read_word(ram, config + 0x16)) {
         write_word(ram, actor + 0x7a, read_word(ram, config + 0x16));
         write_word(ram, actor + 0x40, 2 * (int8_t)ram[sub + 0x41]);
-        if (read_word(ram, actor + 0x78) != 2) {
-            write_word(ram, actor + 0x78, 2);
+        /* A993 start routines for modes 2 and 4 both centre the aim; A999
+           selects A70D or A7FD. */
+        uint16_t launcher = read_word(ram, config + 0x14);
+        if (read_word(ram, actor + 0x78) != launcher) {
+            write_word(ram, actor + 0x78, launcher);
             ram[actor + 0x28] = 0x40;
         }
-        fire_secondary_launcher(ram, rom, actor);
+        if (launcher == 2) fire_secondary_launcher(ram, rom, actor);
+        else fire_secondary_spread(ram, rom, actor);
     }
     return 1;
 }
@@ -7207,6 +7289,53 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, !offset);
         break;
     }
+    /* B000:75B6 (init) and 75E9: a released bomb decelerates upward, bursts
+       on solid ground, and becomes the 76A6 floater on reaching water. */
+    case 0xb75b6:
+    case 0xb75e9: {
+        if (!tiles) return 0;
+        if (address == 0xb75b6) {
+            uint16_t x = read_word(ram, actor + 0x21);
+            if (x >= 0x198) write_word(ram, actor + 0x21, 0x198);
+            else if ((int16_t)x < 0x68) write_word(ram, actor + 0x21, 0x68);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x3a, 0);
+            write_word(ram, actor + 0x42, 0x20);
+            write_word(ram, actor, 0x75e9);
+        }
+        if (read_word(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x10);
+            decrement(ram, actor + 0x42);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if (x > 0x1c0 || (int16_t)y < top || x < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        unsigned material = terrain_material(ram, tiles + 0x4000, x, y);
+        if (0x5502 & (1u << (material & 15))) {
+            surface_enemy_death_blast(ram, main_rom, actor);
+            finish_animation(ram, actor);
+            break;
+        }
+        if (material == 4) {
+            water_entry_splash(ram, main_rom, actor, x, y);
+            write_word(ram, actor + 0x3a, 0xffc0);
+            write_word(ram, actor, 0x76a6);
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(main_rom + 0xb0000, 0x728a + frame));
+            write_word(ram, actor + 0x44, 6);
+            write_word(ram, actor + 0x40, frame + 2 < 0x0c ? frame + 2 : 0);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
     case 0xb76a6: {
         const uint8_t *bank = main_rom + 0xb0000;
         ram[actor + 0x2c] = 8;
@@ -7886,6 +8015,102 @@ stage2_jumper_terrain:
         }
         si_after_sprite();
         break;
+    /* 0:BC73 (init), BCB3 (launch), BCF3 (flight) and BD9A (floating): the
+       mode-4 secondary shot. It ends as the A199 burst and returns its slot
+       to the launcher at parent + 48. */
+    case 0xbc73:
+        world_acquire_resource(ram, actor, 0x8f);
+        write_word(ram, actor + 0x3c, 0xba85);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x90);
+        write_word(ram, actor + 0x2e, 0x300);
+        ram[actor + 0x28] = main_rom[0xbaa1 + (read_word(ram, actor + 0x46) & 3)];
+        for (unsigned axis = 0; axis < 2; ++axis) {
+            int16_t unit = read_word(main_rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
+            write_word(ram, actor + 0x38 + 2 * axis, (unit * 0x300) >> 8);
+        }
+        write_word(ram, actor + 0x5a, 0x80);
+        write_word(ram, actor + 0x58, 1);
+        write_word(ram, actor, 0xbcb3);
+        break;
+    case 0xbcb3:
+    case 0xbcf3:
+    case 0xbd9a: {
+        if (!tiles) return 0;
+        int expire = 0;
+        uint16_t frame = read_word(ram, actor + 0x40);
+        if (address == 0xbcb3 && !decrement(ram, actor + 0x58)) {
+            uint16_t sprite = read_word(main_rom, (uint16_t)(0xba2b + frame));
+            if (sprite == 0xffff) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x58, 1);
+                write_word(ram, actor + 0x38, 0);
+                write_word(ram, actor + 0x3a, 0x100);
+                write_word(ram, actor, 0xbcf3);
+            } else {
+                write_word(ram, actor + 0x2a, sprite);
+                write_word(ram, actor + 0x58, read_word(main_rom, (uint16_t)(0xba41 + frame)));
+                write_word(ram, actor + 0x40, frame + 2);
+            }
+        } else if (address == 0xbcf3 && !decrement(ram, actor + 0x58)) {
+            write_word(ram, actor + 0x2a, read_word(main_rom, (uint16_t)(0xba55 + frame)));
+            write_word(ram, actor + 0x58, 8);
+            write_word(ram, actor + 0x40, frame + 2 < 0x14 ? frame + 2 : 0);
+        }
+        if (address != 0xbd9a) {
+            scroll_actor(ram, actor, 0xb716);
+            move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+            if (!read_word(ram, actor + 0x26))
+                expire = 1;
+            else {
+                uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+                if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+                unsigned material = terrain_material(ram, tiles + 0x4000, x, y + 8);
+                if (0x5502 & (1u << (material & 15))) {
+                    /* A3B7 calls 7000:9D93 for this stage-five material. */
+                    if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                    expire = 1;
+                } else if (material == 3) {
+                    write_word(ram, actor + 0x31, x);
+                    write_word(ram, actor + 0x34, y - 2);
+                    write_word(ram, actor + 0x40, 0);
+                    write_word(ram, actor + 0x58, 1);
+                    write_word(ram, actor, 0xbd9a);
+                }
+            }
+        } else {
+            /* 435F, then 675C: bob on a sine of the distance drifted. */
+            uint16_t dx = read_word(ram, 0xb71a);
+            write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + dx);
+            write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+            write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + dx);
+            uint16_t drift = read_word(ram, actor + 0x21) - read_word(ram, actor + 0x31);
+            uint8_t angle = (uint8_t)(((uint32_t)drift * 0x400) >> 8);
+            int32_t wave = (int16_t)read_word(main_rom + 0xa0000, 0x9d92 + 2 * angle) * 3;
+            uint32_t height = (ram[actor + 0x33] | ((uint32_t)read_word(ram, actor + 0x34) << 8)) + ((uint32_t)wave & 0xffffff);
+            ram[actor + 0x23] = (uint8_t)height;
+            write_word(ram, actor + 0x24, (uint16_t)(height >> 8));
+            decrement(ram, actor + 0x31);
+            if (!read_word(ram, actor + 0x26)) expire = 1;
+            else if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+        }
+        if (expire) {
+            uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            decrement(ram, parent + 0x48);
+            write_word(ram, actor + 0x36, 0x0c);
+            write_word(ram, actor, 0xa199);
+        }
+        if (address == 0xbd9a && !decrement(ram, actor + 0x58)) {
+            frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(main_rom, (uint16_t)(0xba69 + frame)));
+            write_word(ram, actor + 0x58, 8);
+            write_word(ram, actor + 0x40, frame + 2 < 0x14 ? frame + 2 : 0);
+        }
+        if (!decrement(ram, actor + 0x5a)) write_word(ram, actor + 0x26, 0);
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
     /* 0:AE2A: an enemy thrown by a type-121 blast. */
     case 0xae2a:
         scroll_actor(ram, actor, 0xb71a);
