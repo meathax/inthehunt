@@ -5028,6 +5028,56 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
+    /* 7000:A54C (init), A588 (idle), A5D0 (delay) and A619 (play): a
+       background animation that replays whenever the map has scrolled. */
+    case 0x7a54c: {
+        const uint8_t *bank = main_rom + 0x70000;
+        unsigned variant = read_word(ram, actor + 0x1e) & 2;
+        write_word(ram, actor + 0x46, read_word(bank, 0x99a0 + variant));
+        write_word(ram, actor + 0x48, read_word(bank, 0x99a4 + variant));
+        world_acquire_resource(ram, actor, read_word(bank, 0x99a8 + variant));
+        ram[actor + 0x2c] |= 0x80;
+        write_word(ram, actor + 0x56, read_word(ram, actor + 0x21) < 0x100 ? 0x1a : 1);
+        write_word(ram, actor, 0xa588);
+        break;
+    }
+    case 0x7a588:
+    case 0x7a5d0:
+    case 0x7a619: {
+        const uint8_t *bank = main_rom + 0x70000;
+        scroll_actor(ram, actor, 0xb71a);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if ((int16_t)read_word(ram, actor + 0x24) < top) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (address == 0x7a588) {
+            if (read_word(ram, 0xb70a)) {
+                write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+                write_word(ram, actor, 0xa5d0);
+            }
+        } else if (address == 0x7a5d0) {
+            if (!decrement(ram, actor + 0x54)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0xa619);
+            }
+        } else {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t frame = read_word(ram, actor + 0x40);
+                uint16_t sprite = read_word(bank, (uint16_t)(frame + read_word(ram, actor + 0x46)));
+                if (sprite == 0xffff) {
+                    write_word(ram, actor, 0xa588);
+                    break;
+                }
+                write_word(ram, actor + 0x2a, sprite);
+                write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(frame + read_word(ram, actor + 0x48))));
+                write_word(ram, actor + 0x40, frame + 2);
+            }
+            queue_sprite(ram, main_rom, actor, 0);
+        }
+        break;
+    }
     /* 1000:E720/E769 and its 1000:E7A1/E7C8 companion: paired scenery
        pieces that loop a flight script. 1000:E800/E828 is a fixed piece. */
     case 0x1e720:
