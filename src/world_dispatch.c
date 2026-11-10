@@ -573,13 +573,24 @@ int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t *terra
     unsigned probe_direction = 0;
     uint16_t burst = read_word(ram, actor + 0x50) ? 0x50 : 0x54;
     unsigned players = read_word(ram, 0x264) & 3;
-    if (read_word(ram, actor + 0x46) || (players == 3 && read_word(ram, actor + 0x4a) == 1 &&
+    const int avoiding = read_word(ram, actor + 0x46) != 0;
+    int wall = -1;
+    if ((!avoiding && players == 3 && read_word(ram, actor + 0x4a) == 1 &&
         !world_enemy_target_mode_supported(ram[actor + 0x0c])) ||
         !read_word(ram, actor + 0x26))
         return 0;
     uint16_t x = read_word(ram, actor + 0x21) + read_word(ram, 0xb71a);
     x += read_word(rom + 0xb0000, 0x8d58 + 2 * (ram[actor + 0x29] & 1));
     uint16_t y = read_word(ram, actor + 0x24) + read_word(ram, 0xb71c);
+    /* B9A2C: the tile ahead, then the rows above and below it. */
+    for (unsigned i = 0; !avoiding && wall < 0 && i < 3; ++i) {
+        unsigned mask = world_terrain_mask(ram, terrain, x, (uint16_t)(y + (i == 1 ? -8 : i == 2 ? 8 : 0)));
+        if (mask & 0xff02)
+            for (wall = 0; !(mask & 1); mask >>= 1) ++wall;
+    }
+    /* With neither player active a turn reads IX as an earlier handler left it. */
+    if (turns && !players && (avoiding || wall >= 0) && read_word(ram, actor + 0x6e))
+        return 0;
     if (turns && !players && ((ram[actor + 0x64] & 1) || read_word(ram, actor + 0x66) != 1)) {
         unsigned turn = read_word(ram, actor + 0x6e);
         int32_t fixed_x = ((int32_t)read_word(ram, actor + 0x21) + (int16_t)read_word(ram, 0xb71a)) * 256
@@ -589,13 +600,28 @@ int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t *terra
             (turn > 1 && px <= (int16_t)read_word(ram, actor + 0x6c)))
             return 0;
     }
-    for (int row = -1; row <= 1; row++)
-        if (world_terrain_mask(ram, terrain, x, y + 8 * row) & 0xff02)
-            return 0;
 
     scroll_actor(ram, actor, 0xb71a);
     if (read_word(ram, actor + 0x4e) && !decrement(ram, actor + 0x4e))
         write_word(ram, actor + 0x3a, 0);
+    if (avoiding) {
+        /* B99F8: steering away from a wall; resume cruising when the count runs out. */
+        if (!decrement(ram, actor + 0x46)) {
+            uint16_t speed = read_word(ram, actor + 0x2e);
+            write_word(ram, actor + 0x38, (ram[actor + 0x29] & 1) ? (uint16_t)-speed : speed);
+            write_word(ram, actor + 0x3a, 0);
+            write_word(ram, actor + 0x4a, (world_random_byte(ram) & 15) + 0x30);
+            write_word(ram, actor + 0x4c, 0);
+            ram[actor + 0x64] &= 0xfe;
+        }
+    } else if (wall >= 0) {
+        /* B9A9D: pick the escape velocities from the kind of the blocking tile. */
+        unsigned index = (unsigned)(wall - 8) & 6;
+        write_word(ram, actor + 0x3a, read_word(rom + 0xb0000, 0x8d6c + index));
+        write_word(ram, actor + 0x38, read_word(rom + 0xb0000, 0x8d64 + (index & 4) + 2 * (ram[actor + 0x29] & 1)));
+        write_word(ram, actor + 0x46, 10);
+        write_word(ram, actor + 0x4e, 0);
+    } else {
     if (!turns && !read_word(ram, actor + 0x4a)) {
         if (!decrement(ram, actor + 0x4c)) {
             write_word(ram, actor + 0x4a, 48);
@@ -628,6 +654,7 @@ int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t *terra
             write_word(ram, actor + 0x3a, read_word(rom + 0xb0000, 0x8d6c + ((dy >> 14) & 2)));
             write_word(ram, actor + 0x4e, 16);
         }
+    }
     }
     world_kind11_move(ram, rom, terrain, actor);
     if (read_word(ram, actor + 0x21) < 0x40) {

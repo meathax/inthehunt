@@ -25,6 +25,7 @@ local ports = machine.ioport.ports
 local coin = ports[":COINS_DSW3"].fields
 local pad = ports[":P1_P2"].fields
 local frame, pass = 0, 0
+local game_passes = 0
 local bot_camera, bot_still = nil, 0
 local recording, finished, saving = false, false, false
 local function open(name, mode) return assert(io.open(out .. "/" .. name, mode or "w")) end
@@ -168,6 +169,7 @@ local function on_pass_start()
         end
     end
     if cfg.stage and not cfg.stage_done and word(0x80) == 0x2218 then poke(0x84, cfg.stage, 2); cfg.stage_done = true end
+    if game_passes > 0 or (word(0x80) == 0xb2e and word(0x274) + 580 >= 1286) then game_passes = game_passes + 1 end
     -- pokes={{frame=F, addr=A, value=V, size=1|2, master=M}, ...}: one recorded poke each, at the
     -- first pass start at or after frame F (and, with master=M, while that master runs).
     for _, p in ipairs(cfg.pokes or {}) do
@@ -251,6 +253,19 @@ tap_stack = memory:install_write_tap(0xefffc, 0xefffd, "ref_stack", function(add
         calls_log:write((" %05x"):format(target))
     end
 end)
+-- regtap={[RETURN_OFFSET]=true,...}: log the registers at near calls made directly from a
+-- handler (return offset pushed at E000:FFFA), to study values left over by earlier handlers.
+if cfg.regtap then
+    local reg_log = open("regs.txt")
+    tap_regs = memory:install_write_tap(0xefffa, 0xefffb, "ref_regs", function(addr, data)
+        if recording and not saving and addr == 0xefffa and cfg.regtap[data & 0xffff] then
+            local st = cpu.state
+            reg_log:write(("%d %d %04x aw=%04x bw=%04x cw=%04x dw=%04x ix=%04x iy=%04x bp=%04x\n"):format(
+                pass, calls, data & 0xffff, st.AW.value, st.BW.value, st.CW.value, st.DW.value, st.IX.value, st.IY.value, st.BP.value))
+            reg_log:flush()
+        end
+    end)
+end
 local function finish(reason)
     if finished then return end
     finished = true
@@ -303,6 +318,12 @@ frame_sub = emu.add_machine_frame_notifier(function()
     if cfg.verbose and frame % 500 == 0 then print(("frame %d pass %d master %04x stage %d lives %d camera %04x sub %d,%d"):format(frame, pass, word(0x80), word(0x84), memory:read_u8(0xe0118), word(0xb700), word(word(0x90) + 0x21), word(word(0x90) + 0x24))) end
     if cfg.stop_stage and word(0x84) >= cfg.stop_stage and word(0x80) == 0xb2e then finish("stage"); return end
     if cfg.bot ~= false then
+        -- pk=true: key the whole bot on a count of actor passes instead of the
+        -- video frame, so tools/ref/native_fuzz.c (same bot in C) plays the same game.
+        local frame = frame
+        if cfg.pk then
+            frame = game_passes > 0 and 1454 + game_passes or math.min(word(0x274) + 580, 1399)
+        end
         set(coin["Coin 1"], frame >= 1200 and frame < 1206)
         set(pad["P1 Start"] or coin["1 Player Start"], frame >= 1280 and frame < 1286)
         local play = frame >= 1400
@@ -373,6 +394,8 @@ frame_sub = emu.add_machine_frame_notifier(function()
             fire1 = (rnd >> 5) % 4 ~= 0 and frame % 12 < 6
             fire2 = (rnd >> 7) % 4 ~= 0 and frame % 16 < 8
         end
+        -- still_from=K (with pk): from key K on no direction is held (time-out play).
+        if cfg.pk and cfg.still_from and frame >= cfg.still_from then right, left, up, down = false, false, false, false end
         set(pad["P1 Right"], play and right)
         set(pad["P1 Left"], play and left)
         set(pad["P1 Up"], play and up)

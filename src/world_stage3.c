@@ -2404,9 +2404,10 @@ static int cluster(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t ac
             /* B07F -> A3B7 with the probed cell. The second probe leaves CW != 1. */
             if (burst && material == 1) world_stage5_wall_hit_cell(ram, rom, tiles + 0x4000, actor, cell);
             if (!burst) {
+                /* The second probe leaves CW = material * 256 + material - 1, never 1. */
                 cell = (cell & 0xff00) | ((cell - 0x10) & 0xff);
                 material = tiles[0x4000 + cell + 3] >> 3;
-                checked = burst = ((1u << ((material - 1) & 15)) & 0xff02) != 0;
+                burst = ((1u << ((material - 1) & 15)) & 0xff02) != 0;
             }
             if (!burst) {
                 if (AW(0x21) > 0x1c0 || AW(0x21) < 0x40) {

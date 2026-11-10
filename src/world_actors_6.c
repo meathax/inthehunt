@@ -472,7 +472,8 @@ int world_actors_6(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
                     int angle = read_word(ram, actor + 0x48);
                     if (target != (unsigned)angle) {
                         unsigned side = read_word(ram, actor + 0x1e) & 4;
-                        if ((uint8_t)(target - angle) < (uint8_t)(angle - target)) {
+                        /* BCF06 compares words: the angle's high byte stays in AH. */
+                        if ((uint8_t)(target - angle) < (((unsigned)angle & 0xff00) | (uint8_t)(angle - target))) {
                             int high = (int16_t)read_word(bank, 0xcb88 + side);
                             angle += 16;
                             if (angle > high) angle = high;
