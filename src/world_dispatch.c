@@ -6686,6 +6686,108 @@ stage2_jumper_terrain:
             si_after_sprite();
         }
         break;
+    /* A000:F4A2 (init), F4B9 (wait for the camera) and F4C7: releases F52F
+       swimmers from the left edge at random intervals. */
+    case 0xaf4a2:
+    case 0xaf4b9:
+    case 0xaf4c7: {
+        if (address == 0xaf4a2) {
+            world_acquire_resource(ram, actor, 0x6d);
+            write_word(ram, actor + 0x42, 0x64);
+            write_word(ram, actor + 0x50, 0x1720);
+            write_word(ram, actor, 0xf4b9);
+        }
+        if (address != 0xaf4c7) {
+            if (read_word(ram, 0xb700) < read_word(ram, actor + 0x50)) break;
+            write_word(ram, actor, 0xf4c7);
+        }
+        if (read_word(ram, 0x262) & 0x8000) finish_animation(ram, actor);
+        if (decrement(ram, actor + 0x42)) break;
+        uint16_t delay = (world_random_byte(ram) & 0x7f) + 0x20;
+        write_word(ram, actor + 0x42, delay);
+        uint16_t swimmer = effect_slot(ram, actor, 0xf52f);
+        if (swimmer != 0x8480) write_word(ram, swimmer + 2, 0xa000);
+        write_word(ram, swimmer + 0x21, 0x50);
+        write_word(ram, swimmer + 0x24, (delay & 0x1f) + read_word(main_rom + 0xa0000, 0xef6a + (delay & 0x0e)));
+        ram[swimmer + 0x2c] = ram[actor + 0x2c];
+        write_word(ram, swimmer + 0x1e, delay & 0x0f);
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        break;
+    }
+    /* A000:F52F (init) and F56D: a swimmer crossing left to right. Touching
+       a submarine shoves it (words 5A and 5E); touched or shot, it turns
+       into the F5F1/F61B scatter animation. */
+    case 0xaf52f:
+    case 0xaf56d: {
+        const uint8_t *bank = main_rom + 0xa0000;
+        if (address == 0xaf52f) {
+            uint16_t kind = 2 * read_word(ram, actor + 0x1e);
+            ram[actor + 0x2d] = 0x20;
+            write_word(ram, actor + 0x3c, 0xfaeb);
+            write_word(ram, actor + 0x26, 1);
+            write_word(ram, actor + 0x36, 0x80);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x48, read_word(bank, (uint16_t)(0xef9a + kind)));
+            write_word(ram, actor + 0x38, read_word(bank, (uint16_t)(0xef7a + kind)));
+            write_word(ram, actor + 0x4c, read_word(bank, 0xefba + (kind & 2)));
+            write_word(ram, actor, 0xf56d);
+        }
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        if (read_word(ram, actor + 0x21) > 0x1c0) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(read_word(ram, actor + 0x4c) + (frame & 0x0e))));
+            write_word(ram, actor + 0x44, read_word(ram, actor + 0x48));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        ram[actor + 0x0d] = 1;
+        uint16_t sub = world_player_contact(ram, main_rom, actor);
+        if (sub) {
+            write_word(ram, sub + 0x5a, 0xc0);
+            write_word(ram, sub + 0x5e, 0xc0);
+        } else {
+            ram[actor + 0x0d] = 0;
+            world_projectile_contact(ram, main_rom, actor);
+            if (read_word(ram, actor + 0x26)) {
+                if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+                break;
+            }
+        }
+        write_word(ram, actor + 0x1e, (read_word(ram, actor + 0x1e) & 1) << 1);
+        write_word(ram, actor, 0xf5f1);
+        break;
+    }
+    case 0xaf5f1:
+    case 0xaf61b: {
+        const uint8_t *bank = main_rom + 0xa0000;
+        if (address == 0xaf5f1) {
+            unsigned kind = read_word(ram, actor + 0x1e) & 2;
+            ram[actor + 0x2d] = 0x20;
+            write_word(ram, actor + 0x4c, read_word(bank, 0xefde + kind));
+            write_word(ram, actor + 0x48, read_word(bank, 0xf00e + kind));
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0xf61b);
+        }
+        scroll_actor(ram, actor, 0xb716);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(bank, (uint16_t)(frame + read_word(ram, actor + 0x4c)));
+            if (sprite == 0xffff) {
+                finish_animation(ram, actor);
+                break;
+            }
+            write_word(ram, actor + 0x2a, sprite);
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(frame + read_word(ram, actor + 0x48))));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
     /* A000:EC7E (init) and ECAE: a scripted swimmer that faces along its
        horizontal velocity and cycles a per-leg animation. */
     case 0xaec7e:
