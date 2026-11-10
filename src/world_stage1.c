@@ -1042,7 +1042,10 @@ int world_stage1_handlers(WorldDispatch *pass, uint8_t *ram, const uint8_t *main
                 if (W(actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
                 unsigned material = terrain_material(ram, tiles, W(actor + 0x21), W(actor + 0x24) + 8);
                 if ((1u << (material & 15)) & 0x5502) {
-                    if (W(0x84) == 4 && material == 1) return WORLD_HANDLER_STOP;
+                    /* BD6C -> A3B7 with the probed cell. */
+                    if (material == 1)
+                        world_stage5_wall_hit_cell(ram, main_rom, tiles + 0x4000, actor,
+                            world_tile_address(W(actor + 0x21) - 0x60 + W(0xb70a), 0x177 - (W(actor + 0x24) + 8) + W(0xb70c)));
                     live = 0;
                 } else if (material == 3) {
                     SW(actor + 0x31, W(actor + 0x21));

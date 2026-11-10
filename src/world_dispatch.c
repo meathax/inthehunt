@@ -1644,9 +1644,9 @@ int update_powered_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
                                       0x177 - y + read_word(ram, 0xb70c));
     unsigned material = terrain[cell + 3] >> 3;
     int solid = !!(0x5502 & (1u << (material & 15)));
-    if (solid && read_word(ram, 0x84) == 4 && material == 1) return 0;
     if (solid || x > 0x1c0 || x < 0x40) {
         if (solid) {
+            world_stage5_wall_hit(ram, rom, terrain, actor); /* A35F */
             spawn_impact(ram, rom, actor);
             write_word(ram, actor + 0x40, 0);
         }

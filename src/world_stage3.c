@@ -2396,11 +2396,13 @@ static int cluster(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t ac
         move_x(ram, actor);
         queue_sprite(ram, rom, actor, 1);
         cluster_trail(ram, actor);
-        int burst = !decrement(ram, actor + 0x42), checked = burst;
+        int burst = !decrement(ram, actor + 0x42), checked = burst, timed_out = burst;
         if (!burst && AW(0x26)) {
             uint16_t cell;
             unsigned material = terrain_cell(ram, tiles, AW(0x21) + 0x20, AW(0x24), &cell);
             checked = burst = ((1u << (material & 15)) & 0xff02) != 0;
+            /* B07F -> A3B7 with the probed cell. The second probe leaves CW != 1. */
+            if (burst && material == 1) world_stage5_wall_hit_cell(ram, rom, tiles + 0x4000, actor, cell);
             if (!burst) {
                 cell = (cell & 0xff00) | ((cell - 0x10) & 0xff);
                 material = tiles[0x4000 + cell + 3] >> 3;
@@ -2415,7 +2417,10 @@ static int cluster(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t ac
                 break;
             }
         }
-        if (checked && read_word(ram, 0x84) == 4) return WORLD_HANDLER_STOP;
+        /* B016 -> B07F: at the end of its run A3B7 is called with whatever BW and
+         * CW the code before this handler left. Not modelled for stage index 4. */
+        (void)checked;
+        if (timed_out && read_word(ram, 0x84) == 4) return WORLD_HANDLER_STOP;
         SET(0x40, 0);
         SET(0x58, 1);
         SET(0x42, 10);
@@ -2503,7 +2508,7 @@ static int cluster(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t ac
                 else shot_candidate(ram, actor);
                 break;
             }
-            if (read_word(ram, 0x84) == 4) return WORLD_HANDLER_STOP;
+            world_stage5_wall_hit(ram, rom, tiles + 0x4000, actor); /* B31E */
         }
         release_actor_resources(ram, actor);
         SET(0x36, 0x20);

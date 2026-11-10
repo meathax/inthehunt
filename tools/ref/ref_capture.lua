@@ -217,8 +217,8 @@ tap_stack = memory:install_write_tap(0xefffc, 0xefffd, "ref_stack", function(add
     if watch_set and (watch_set[target] or word(0x80) == cfg.watch_master or (cfg.watch_idle and (word(0x264) & 3) == 0 and word(0x80) == 0xb2e)) then
         -- watch={addr,...}: registers a listed handler inherits from the code before it.
         local r = cpu.state
-        watch_file:write(("%d %d %05x prev %05x bp %04x aw %04x bw %04x cw %04x dw %04x ix %04x iy %04x ds1 %04x clock %04x active %04x v3a %04x\n"):format(
-            pass, calls + 1, target, last_target, actor, r.AW.value, r.BW.value, r.CW.value, r.DW.value, r.IX.value, r.IY.value, r.DS1.value, word(0x274), word(0x264), word(actor + 0x3a)))
+        watch_file:write(("%d %d %05x prev %05x bp %04x aw %04x bw %04x cw %04x dw %04x ix %04x iy %04x ds1 %04x clock %04x active %04x v3a %04x v42 %04x\n"):format(
+            pass, calls + 1, target, last_target, actor, r.AW.value, r.BW.value, r.CW.value, r.DW.value, r.IX.value, r.IY.value, r.DS1.value, word(0x274), word(0x264), word(actor + 0x3a), word(actor + 0x42)))
     end
     last_target = target
     if patch_set then
