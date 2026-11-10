@@ -24,6 +24,13 @@ foreach ($mode in $Modes) {
             if ($mode -match 'steer') { $held = $held -bor $dirs[[int][math]::Floor(($f - $PlayFrom) / 90) % $dirs.Count] }
             # 'adv' pushes right with a little weaving; 'coin' keeps buying credits and continuing.
             if ($mode -match 'adv') { $held = $held -bor (0x01, 0x01, 0x09, 0x01, 0x05, 0x01)[[int][math]::Floor(($f - $PlayFrom) / 40) % 6] }
+            # 'sweep' pushes right while crossing the whole screen height, to get past solid scenery.
+            # 'dive' is 'adv' until frame 15000 (stage two's first building), then 'sweep'.
+            if ($mode -match 'dive') {
+                if ($f -lt 15000) { $held = $held -bor (0x01, 0x01, 0x09, 0x01, 0x05, 0x01)[[int][math]::Floor(($f - $PlayFrom) / 40) % 6] }
+                else { $held = $held -bor (0x05, 0x01, 0x09, 0x01)[[int][math]::Floor(($f - $PlayFrom) / 150) % 4] }
+            }
+            if ($mode -match 'sweep') { $held = $held -bor (0x05, 0x01, 0x09, 0x01)[[int][math]::Floor(($f - $PlayFrom) / 150) % 4] }
             if ($mode -match 'coin') {
                 if ($f % 1500 -lt 6) { $buttons = 4 }
                 if ($f % 300 -ge 150 -and $f % 300 -lt 156) { $buttons = 1 }
