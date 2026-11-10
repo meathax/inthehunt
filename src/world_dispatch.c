@@ -8015,6 +8015,213 @@ stage2_jumper_terrain:
         }
         si_after_sprite();
         break;
+    /* 0:B4CE (init), B52F (launch), B553 (pick target), B57B (homing) and
+       B5EB (free flight): the homing missile released by B482. Targets come
+       from the surface-enemy list at B6EE. */
+    case 0xb4ce:
+    case 0xb52f:
+    case 0xb553:
+    case 0xb57b:
+    case 0xb5eb: {
+        if (!tiles) return 0;
+        uint32_t state = address;
+        if (state == 0xb4ce) {
+            world_acquire_resource(ram, actor, 0x5b);
+            world_acquire_resource(ram, actor, read_word(main_rom, 0x9bb1 + (ram[actor + 0x0b] & 2)));
+            write_word(ram, actor + 0x3c, 0xb3c3);
+            write_word(ram, actor + 0x26, 4);
+            write_word(ram, actor + 0x36, 0xa0);
+            write_word(ram, actor + 0x2e, 0x200);
+            write_word(ram, actor + 0x42, 4);
+            write_word(ram, actor + 0x5a, 0x10);
+            write_word(ram, actor + 0x4a, 0);
+            ram[actor + 0x28] += main_rom[(uint16_t)(0xb3d7 + read_word(ram, actor + 0x78))];
+            write_word(ram, actor + 0x2a, read_word(main_rom, 0xb337 + (ram[actor + 0x28] >> 2)));
+            write_word(ram, actor, 0xb52f);
+            state = 0xb52f;
+        }
+        int retarget = state == 0xb4ce;
+        if (address == 0xb4ce) retarget = 1;
+        if (state == 0xb52f) {
+            if (!decrement(ram, actor + 0x5a)) {
+                write_word(ram, actor + 0x4a, 1);
+                write_word(ram, actor + 0x2e, 0x400);
+                write_word(ram, actor, 0xb553);
+                write_word(ram, actor + 0x5a, 1);
+                retarget = 1;
+            }
+        } else if (state == 0xb553 || state == 0xb57b) {
+            if (state == 0xb553) {
+                uint16_t count = read_word(ram, 0xb6ea), target = 0;
+                if (count) {
+                    uint16_t cursor = read_word(ram, 0xb6ec);
+                    if (cursor >= count) cursor = 0;
+                    target = read_word(ram, (uint16_t)(0xb6ee + cursor));
+                    write_word(ram, 0xb6ec, cursor + 2);
+                }
+                write_word(ram, actor + 0x4e, target);
+                write_word(ram, actor, 0xb57b);
+            }
+            uint16_t target = read_word(ram, actor + 0x4e);
+            if (!target || (ram[target + 0x0a] & 1))
+                write_word(ram, actor, 0xb5eb);
+            else if (!decrement(ram, actor + 0x5a)) {
+                write_word(ram, actor + 0x5a, 2);
+                uint8_t heading = ram[actor + 0x28];
+                uint8_t wanted = (aim_angle(main_rom,
+                                            read_word(ram, target + 0x21) - read_word(ram, actor + 0x21),
+                                            read_word(ram, target + 0x24) - read_word(ram, actor + 0x24)) + 4) & 0xf8;
+                if (wanted != heading)
+                    wanted = ((uint8_t)(wanted - heading) < (uint8_t)(heading - wanted) ? heading + 8 : heading - 8) & 0xf8;
+                ram[actor + 0x28] = wanted;
+                write_word(ram, actor + 0x2a, read_word(main_rom, 0xb337 + (wanted >> 2)));
+                retarget = 1;
+            }
+        }
+        if (retarget)
+            for (unsigned axis = 0; axis < 2; ++axis) {
+                int16_t unit = read_word(main_rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
+                write_word(ram, actor + 0x38 + 2 * axis, (unit * (int16_t)read_word(ram, actor + 0x2e)) >> 8);
+            }
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        queue_sprite(ram, main_rom, actor, 1);
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 4);
+            uint16_t trail = effect_slot(ram, read_word(ram, 0x9a), 0x9e17);
+            unsigned offset = (ram[actor + 0x28] & 0xf8) >> 1;
+            write_word(ram, trail + 0x21, x + read_word(main_rom, 0xb3e1 + offset));
+            write_word(ram, trail + 0x24, y + read_word(main_rom, 0xb3e3 + offset));
+            ram[trail + 0x2c] = ram[actor + 0x14];
+            write_word(ram, trail + 0x56, 0x60);
+            write_word(ram, trail + 0x58, 0x11);
+        }
+        unsigned material = terrain_material(ram, tiles + 0x4000, x, y);
+        int impact = !!(0x5502 & (1u << (material & 15))), gone = impact;
+        if (!impact) {
+            int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+            uint16_t bottom = (read_word(ram, 0x26e) & 2) ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
+            if (read_word(ram, actor + 0x4a) && material == 4) {
+                spawn_surface_splash_effect(ram, main_rom, actor, x, y);
+                gone = 1;
+            } else if (x > 0x1c0 || x < 0x40 || y > bottom || (int16_t)y < top)
+                gone = 1;
+            else if (!read_word(ram, actor + 0x26))
+                impact = gone = 1;
+        }
+        if (impact) spawn_impact(ram, main_rom, actor);
+        if (gone) {
+            uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            decrement(ram, parent + 0x44);
+            finish_animation(ram, actor);
+        } else if (read_word(ram, actor + 0x3c) != 0xffff)
+            world_append_candidate(ram + 0xaee6, actor);
+        break;
+    }
+    /* 0:BAA5 (init) and BAAF: the level-3 salvo. Every fourth tick it
+       releases one BB40 missile from the launcher above it, 7A times. */
+    case 0xbaa5:
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor, 0xbaaf);
+        /* fall through */
+    case 0xbaaf: {
+        if (decrement(ram, actor + 0x42)) break;
+        uint16_t missile = world_spawn_child(ram, actor, 0xbb40);
+        if (missile) {
+            uint16_t launcher = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            world_queue_sound(ram, 0x3b);
+            ram[missile + 0x29] = ram[launcher + 0x29];
+            write_word(ram, missile + 0x21, read_word(ram, launcher + 0x21) +
+                       read_word(main_rom, 0xba95 + 2 * (ram[launcher + 0x29] & 1)));
+            write_word(ram, missile + 0x24, read_word(ram, launcher + 0x24) + 4);
+            ram[missile + 0x28] = (ram[launcher + 0x28] + 4) & 0xf8;
+            ram[missile + 0x2d] = ram[actor + 0x2d];
+            ram[missile + 0x0b] = ram[actor + 0x0b];
+            write_word(ram, missile + 0x7a, read_word(ram, actor + 0x58));
+            write_word(ram, missile + 0x54, read_word(ram, actor + 0x54));
+            write_word(ram, actor + 0x58, read_word(ram, actor + 0x58) + 1);
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x54) + 1);
+        }
+        if (!decrement(ram, actor + 0x7a)) finish_animation(ram, actor);
+        else write_word(ram, actor + 0x42, 4);
+        break;
+    }
+    /* 0:BB40 (init) and BB7E: a salvo missile. It bursts (BC14) when hit,
+       on solid ground, or above its per-missile height once armed. */
+    case 0xbb40:
+    case 0xbb7e: {
+        if (!tiles) return 0;
+        if (address == 0xbb40) {
+            world_acquire_resource(ram, actor, 0x5a);
+            write_word(ram, actor + 0x3c, 0xba7d);
+            write_word(ram, actor + 0x26, 1);
+            write_word(ram, actor + 0x36, 0x60);
+            write_word(ram, actor + 0x2e, 0x600);
+            for (unsigned axis = 0; axis < 2; ++axis) {
+                int16_t unit = read_word(main_rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
+                write_word(ram, actor + 0x38 + 2 * axis, (unit * 0x600) >> 8);
+            }
+            write_word(ram, actor + 0x4e, (uint8_t)(ram[actor + 0x28] - 0x28) & 0xf8);
+            write_word(ram, actor + 0x58, 1);
+            write_word(ram, actor + 0x42, 0x0c);
+            write_word(ram, actor, 0xbb7e);
+        } else
+            scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (!decrement(ram, actor + 0x58)) {
+            uint16_t frame = read_word(ram, actor + 0x40) & 6;
+            write_word(ram, actor + 0x58, read_word(main_rom, 0xb9cb + frame));
+            write_word(ram, actor + 0x2a, read_word(main_rom, (uint16_t)(0xb993 + frame + read_word(ram, actor + 0x4e))));
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 1);
+        int burst = !read_word(ram, actor + 0x26);
+        if (!burst) {
+            if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xaee6, actor);
+            if (read_word(ram, actor + 0x42))
+                decrement(ram, actor + 0x42);
+            else if ((int16_t)read_word(ram, actor + 0x24) >=
+                     (int16_t)read_word(main_rom, 0xba99 + 2 * (read_word(ram, actor + 0x7a) & 3)))
+                burst = 1;
+            if (!burst)
+                burst = !!(world_terrain_mask(ram, tiles + 0x4000, read_word(ram, actor + 0x21),
+                                              read_word(ram, actor + 0x24)) & 0x5502);
+        }
+        if (burst) {
+            write_word(ram, actor + 0x36, 0x0c);
+            write_word(ram, actor + 0x3c, 0xba8d);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x58, 1);
+            write_word(ram, actor + 0x42, 0x29);
+            write_word(ram, actor, 0xbc14);
+        }
+        break;
+    }
+    case 0xbc14:
+        scroll_actor(ram, actor, 0xb71a);
+        if (!decrement(ram, actor + 0x58)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            uint16_t sprite = read_word(main_rom, (uint16_t)(0xb9d3 + frame));
+            if (sprite == 0xffff) {
+                finish_animation(ram, actor);
+                break;
+            }
+            write_word(ram, actor + 0x2a, sprite);
+            write_word(ram, actor + 0x58, read_word(main_rom, (uint16_t)(0xb9ff + frame)));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 1);
+        if (read_word(ram, actor + 0x42)) {
+            decrement(ram, actor + 0x42);
+            write_word(ram, actor + 0x26, 0x7f00);
+            if ((read_word(ram, 0x274) & 3) == read_word(ram, actor + 0x54) &&
+                read_word(ram, actor + 0x3c) != 0xffff)
+                world_append_candidate(ram + 0xaee6, actor);
+        }
+        break;
     /* 0:BC73 (init), BCB3 (launch), BCF3 (flight) and BD9A (floating): the
        mode-4 secondary shot. It ends as the A199 burst and returns its slot
        to the launcher at parent + 48. */
