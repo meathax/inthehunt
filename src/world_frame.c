@@ -3,6 +3,7 @@
 #include "world_stage.h"
 #include "world_title.h"
 #include "world_title_master.h"
+#include "world_stale.h"
 #include <string.h>
 
 void world_latch_cabinet(uint8_t *ram, uint16_t raw);
@@ -118,6 +119,9 @@ static int valid_sprite_list(const uint8_t *ram, const uint8_t *rom)
 static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
 {
     unsigned priority, out = 0;
+    unsigned master = word(ram + 0x80);
+    int pieces = 0;      /* DX after the walk, for world_stale.h */
+    uint16_t dx = 0;
     for (priority = 0; priority < 128; priority += 2) {
         uint16_t actor = word(ram + 0x9c00 + priority);
         if (!actor) break;
@@ -138,16 +142,21 @@ static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
                 index += 6;
                 if (sprite[9] & 1) x = (uint16_t)(-x - 16);
                 x += word(sprite + 4);
+                pieces = 1;
+                dx = (uint16_t)distance_from_center(x);
                 if (distance_from_center(x) > 0xb1) continue;
                 put(oam + out + 6, x);
                 if (sprite[9] & 2) y = (uint16_t)(-y - word(rom + 0xd55 + (attr & 7)));
                 y += word(sprite + 6);
+                dx = (uint16_t)distance_from_center(y);
                 if (distance_from_center(y) > 0xf9) continue;
+                dx = attr ^ (uint16_t)(sprite[9] << 8);
                 put(oam + out, y | ((attr & 255) << 8));
                 put(oam + out + 4, sprite[8] | ((attr ^ (sprite[9] << 8)) & 0xff00));
                 out += 8;
                 if (out == 210 * 8) {
                     put(ram + 0x8b26, -210);
+                    world_stale_dx_boundary(pieces, dx, master);
                     return;
                 }
             }
@@ -156,6 +165,7 @@ static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
     }
     put(ram + 0x8b26, 0u - out / 8);
     ram[0x8b28] = (uint8_t)((ram[0x8b28] & 0x7f) | (out ? 0 : 0x80));
+    world_stale_dx_boundary(pieces, dx, master);
 }
 
 static int pop_ring(uint8_t *ram, unsigned head, unsigned buffer)

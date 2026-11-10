@@ -627,6 +627,8 @@ int world_actors_5(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         }
         write_word(ram, actor + 0x48, earned);
         if (!(ram[0x264] & (1u << side))) {
+            /* 2ABB runs on with the handler offset of the last 1769 call in DX. */
+            world_stale_dx_set(read_word(ram, 0x124 + 64*side) & ((1u << (stage - 1)) - 1) ? 0x2e60 : 0x2b18);
             write_word(ram, actor, 0x2abb);
             address = 0x2abb;
         } else {
@@ -651,7 +653,9 @@ int world_actors_5(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         if (address == 0x2abb) {
             uint16_t clock = read_word(ram, 0x274);
             if (clock & 31) break;
-            uint16_t label = 0xc2f6;
+            uint16_t label = 0xc2f6, attr = 0x106;
+            /* C234 draws the blank label with whatever DX holds (world_stale.h). */
+            if (!(clock & 32) && !world_stale_dx(&attr)) return WORLD_HANDLER_STOP;
             if (clock & 32) {
                 unsigned credits = read_word(ram, 0x2b8);
                 if (ram[0x264] & (1u << side)) label = read_word(main_rom, 0xc253 + 2*side);
@@ -659,7 +663,8 @@ int world_actors_5(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
                 else if (!credits || ((ram[0x289] & 128) && credits < 2)) label = 0xc290;
                 else label = read_word(main_rom, 0xc24f + 2*side);
             }
-            tally_large_label(tiles, main_rom, read_word(main_rom, 0xc25b + 2*side), label, 0x106);
+            tally_large_label(tiles, main_rom, read_word(main_rom, 0xc25b + 2*side), label, attr);
+            world_stale_dx_set(attr);
         } else {
             if (!decrement(ram, actor + 0x42)) {
                 write_word(ram, actor + 0x42, 1);
@@ -850,7 +855,10 @@ int world_actors_5(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         for (unsigned i = 0; i < 2; ++i) {
             uint16_t pos = actor + 0x20 + 3*i, center = pos + 16;
             int16_t unit = read_word(main_rom + 0xa0000, (i ? 0x9d92 : 0x9e12) + 2*(phase >> 8));
-            uint32_t coord = ram[center] + 256u*read_word(ram, center + 1) + unit*(int16_t)read_word(ram, actor + 0x1c);
+            int32_t product = unit*(int16_t)read_word(ram, actor + 0x1c);
+            uint32_t coord = ram[center] + 256u*read_word(ram, center + 1) + product;
+            /* 67AC leaves the second product's high word, low byte carried, in DX. */
+            if (i) world_stale_dx_set((uint16_t)((((uint32_t)product >> 16) & 0xff00) | ((coord >> 16) & 0xff)));
             ram[pos] = coord;
             write_word(ram, pos + 1, coord >> 8);
         }

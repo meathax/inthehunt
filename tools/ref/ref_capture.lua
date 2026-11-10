@@ -42,6 +42,12 @@ if cfg.patch then
     for _, a in ipairs(cfg.patch) do patch_set[a] = true end
     patch_file = open("patches.bin", "wb")
 end
+local watch_set, watch_file, last_target = nil, nil, 0
+if cfg.watch or cfg.watch_master or cfg.watch_idle then
+    watch_set = {}
+    for _, a in ipairs(cfg.watch or {}) do watch_set[a] = true end
+    watch_file = open("regs.txt")
+end
 local function patch_state()
     return { memory:read_range(0xe0000, 0xebfff, 8), memory:read_range(0xd0000, 0xdffff, 8) }
 end
@@ -198,6 +204,13 @@ tap_stack = memory:install_write_tap(0xefffc, 0xefffd, "ref_stack", function(add
     end
     local actor = cpu.state.BP.value
     local target = ((word(actor + 2) << 4) + word(actor)) & 0xfffff
+    if watch_set and (watch_set[target] or word(0x80) == cfg.watch_master or (cfg.watch_idle and (word(0x264) & 3) == 0 and word(0x80) == 0xb2e)) then
+        -- watch={addr,...}: registers a listed handler inherits from the code before it.
+        local r = cpu.state
+        watch_file:write(("%d %d %05x prev %05x bp %04x aw %04x bw %04x cw %04x dw %04x ix %04x iy %04x ds1 %04x clock %04x active %04x v3a %04x\n"):format(
+            pass, calls + 1, target, last_target, actor, r.AW.value, r.BW.value, r.CW.value, r.DW.value, r.IX.value, r.IY.value, r.DS1.value, word(0x274), word(0x264), word(actor + 0x3a)))
+    end
+    last_target = target
     if patch_set then
         saving = true
         if patch_before then write_patch() end
@@ -219,6 +232,7 @@ local function finish(reason)
     for _, f in ipairs({hardware, irq_log, sounds, calls_log, passes, stage_log}) do f:close() end
     if trace then trace:close() end
     if patch_file then patch_file:close() end
+    if watch_file then watch_file:close() end
     print(("ref_capture=%s passes=%d frame=%d"):format(reason, pass, frame))
     machine:exit()
 end

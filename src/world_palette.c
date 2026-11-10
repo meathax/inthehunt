@@ -1,4 +1,5 @@
 #include "world_palette.h"
+#include "world_stale.h"
 
 static unsigned word(const uint8_t *p)
 {
@@ -64,5 +65,7 @@ void world_palette_step(uint8_t *work, uint8_t *palette, const uint8_t *rom)
             entry[0] = (uint8_t)result;
             entry[1] = (uint8_t)(result >> 8);
         }
+        /* The fade routines leave the bank's last colour in DX. */
+        if (animate) world_stale_dx_fade((uint16_t)word(palette + 32 * bank + 30));
     }
 }

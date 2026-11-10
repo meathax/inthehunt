@@ -3062,11 +3062,13 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
     if (!world_dispatch_target(pass, ram, &address))
         return 0;
     int result = WORLD_HANDLER_UNKNOWN;
+    world_stale_dx_call(address, 0);
     for (unsigned i = 0; i < sizeof handler_groups / sizeof handler_groups[0]; ++i) {
         result = handler_groups[i](pass, ram, main_rom, tiles, &actor, address);
         if (result != WORLD_HANDLER_UNKNOWN) break;
     }
     if (result != WORLD_HANDLER_DONE) return result == WORLD_HANDLER_UNKNOWN ? 0 : result;
+    world_stale_dx_call(address, 1);
     world_dispatch_return(pass, ram, actor);
     return 1;
 }

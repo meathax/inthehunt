@@ -2,6 +2,7 @@
 #include "world_dispatch.h"
 #include "world_frame.h"
 #include "world_title.h"
+#include "world_stale.h"
 #include <string.h>
 void world_queue_sound(uint8_t *, uint16_t);
 
@@ -145,6 +146,7 @@ int world_title_master(uint8_t *ram, uint8_t *tiles, uint8_t *oam,
             if (!word(ram + 0x86)) {
                 ram[0x263] |= 0x80;
                 fade_palette(ram, 0, 5);
+                world_stale_dx_set(5); /* 25CB */
                 put(ram + 0x86, 48);
                 put(ram + 0x80, 0x25ff);
             }

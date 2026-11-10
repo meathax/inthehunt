@@ -2,7 +2,40 @@
  * Add one case per handler entry (linear address). Return WORLD_HANDLER_STOP
  * from a path that is not recovered yet; break when the handler is done. */
 #include "world_dispatch_internal.h"
+#include "world_stale.h"
 #include <string.h>
+
+/* See world_stale.h. */
+static struct { int known, loaded, fade; uint16_t dx, fade_dx; } stale;
+
+void world_stale_dx_set(uint16_t value) { stale.dx = value; stale.known = stale.loaded = 1; }
+void world_stale_dx_forget(void) { stale.known = 0; stale.loaded = 1; }
+int world_stale_dx(uint16_t *value) { *value = stale.dx; return stale.known; }
+void world_stale_dx_fade(uint16_t value) { stale.fade_dx = value; stale.fade = 1; }
+
+void world_stale_dx_boundary(int pieces, uint16_t dx, unsigned master)
+{
+    if (pieces) world_stale_dx_set(dx);
+    if (stale.fade) world_stale_dx_set(stale.fade_dx);
+    stale.fade = 0;
+    /* Only the tally controllers are known to keep DX (25B5 loads it when it
+     * starts the fade-out; world_title_master.c records that). */
+    if (master != 0x25b5 && master != 0x25ff) world_stale_dx_forget();
+}
+
+void world_stale_dx_call(uint32_t handler, int done)
+{
+    if (!done) { stale.loaded = 0; return; }
+    if (stale.loaded) return;
+    switch (handler) {
+    /* Tally handlers that never load DX (0DA4 and 1067 keep it). */
+    case 0x1a39: case 0x2680: case 0x2b18: case 0x2b4c: case 0x2b68:
+    case 0x2b96: case 0x2bab: case 0x2bfe: case 0x2abb:
+        break;
+    default:
+        stale.known = 0;
+    }
+}
 
 #define W(a) read_word(ram, (uint16_t)(a))
 #define SW(a, v) write_word(ram, (uint16_t)(a), (uint16_t)(v))
