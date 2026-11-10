@@ -6714,6 +6714,147 @@ stage2_jumper_terrain:
         }
         break;
     }
+    /* B000:64F3 (init) and 653E: the gun exposed when a warship cover is
+       destroyed. It tracks a submarine, fires 665E shells, and when
+       destroyed becomes the 6928 wreck. */
+    case 0xb64f3:
+    case 0xb653e: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (address == 0xb64f3) {
+            uint16_t cfg = 0x55d2 + read_word(bank, 0x5512 + (read_word(ram, actor + 0x1e) & 32) + read_word(ram, 0x8c));
+            ram[actor + 0x0c] = 4;
+            write_word(ram, actor + 0x26, 0x300);
+            write_word(ram, actor + 0x36, 0x300);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x42, 0x40);
+            ram[actor + 0x28] = 0xc0;
+            write_word(ram, actor + 0x50, read_word(bank, cfg + 4));
+            write_word(ram, actor + 0x52, read_word(bank, cfg + 4));
+            write_word(ram, actor + 0x2e, read_word(bank, cfg + 6));
+            write_word(ram, actor, 0x653e);
+        }
+        if (!warship_attachment(ram, actor)) break;
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        aim_warship_turret(ram, main_rom, actor, ram[actor + 0x29] & 1);
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x5058 +
+                   read_word(bank, (uint16_t)(0x507c + read_word(ram, actor + 0x60))) + read_word(ram, actor + 0x40))));
+        queue_sprite(ram, main_rom, actor, 0);
+        uint16_t x = read_word(ram, actor + 0x21);
+        if (x >= 0x40 && x <= 0x1c0 && !decrement(ram, actor + 0x50)) {
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            write_word(ram, actor + 0x42, 0x20);
+            uint16_t barrel = read_word(bank, 0x4fea + ((ram[actor + 0x28] & 0xf0) >> 3));
+            write_word(ram, actor + 0x46, barrel);
+            write_word(ram, actor + 0x38, read_word(bank, (uint16_t)(0x5080 + 2 * barrel)));
+            write_word(ram, actor + 0x3a, read_word(bank, (uint16_t)(0x5082 + 2 * barrel)));
+            uint16_t shell = world_spawn_child(ram, actor, 0x665e);
+            if (shell) {
+                write_word(ram, shell + 2, 0xb000);
+                write_word(ram, shell + 0x21, x + read_word(ram, actor + 0x38));
+                write_word(ram, shell + 0x24, read_word(ram, actor + 0x24) + read_word(ram, actor + 0x3a));
+                ram[shell + 0x2c] = ram[actor + 0x2c];
+                write_word(ram, shell + 0x2e, read_word(ram, actor + 0x2e));
+                write_word(ram, shell + 0x46, barrel);
+                uint16_t flash = world_spawn_child(ram, actor, 0xa2c0);
+                if (flash) {
+                    write_word(ram, flash + 0x31, read_word(ram, actor + 0x38));
+                    write_word(ram, flash + 0x34, read_word(ram, actor + 0x3a));
+                    ram[flash + 0x29] = ram[actor + 0x29];
+                    ram[flash + 0x2d] = ram[actor + 0x2d];
+                    write_word(ram, flash + 0x60, 4);
+                }
+            }
+        }
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_player_contact(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x26)) {
+            hit = world_projectile_contact(ram, main_rom, actor);
+            if (hit) ram[parent + 0x19] = (ram[parent + 0x19] & 1) + 32;
+            if (read_word(ram, actor + 0x26)) break;
+        }
+        world_award_score(ram, main_rom, actor, hit);
+        spawn_kill_blast(ram, actor);
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x50a4 + read_word(ram, actor + 0x60))));
+        write_word(ram, actor, 0x6928);
+        break;
+    }
+    /* B000:6928: a destroyed gun. Further hits drain the hull pool at
+       parent + 48; emptying it kills the warship and records the attacker. */
+    case 0xb6928: {
+        if (!warship_attachment(ram, actor)) break;
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        queue_sprite(ram, main_rom, actor, 0);
+        ram[actor + 0x0d] = 2;
+        world_player_contact(ram, main_rom, actor);
+        write_word(ram, actor + 0x26, 0x7f00);
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_projectile_contact(ram, main_rom, actor);
+        if (hit) ram[parent + 0x19] = (ram[parent + 0x19] & 1) + 32;
+        int16_t pool = (int16_t)(read_word(ram, parent + 0x48) - (0x7f00 - read_word(ram, actor + 0x26)));
+        write_word(ram, parent + 0x48, (uint16_t)pool);
+        if (pool <= 0) {
+            if (!hit) {
+                world_dispatch_detail = "hull pool empty without a hit; B000:696A stores leftover BX";
+                return 0;
+            }
+            write_word(ram, parent + 0x26, 0);
+            write_word(ram, parent + 0x74, hit);
+        }
+        break;
+    }
+    /* B000:665E (init) and 66BB: the shell fired by the exposed gun. */
+    case 0xb665e:
+    case 0xb66bb: {
+        if (!tiles) return 0;
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (address == 0xb665e) {
+            uint16_t barrel = read_word(ram, actor + 0x46);
+            ram[actor + 0x2d] = 4;
+            write_word(ram, actor + 0x3c, 0xf47b);
+            write_word(ram, actor + 0x26, 1);
+            write_word(ram, actor + 0x36, 0x800);
+            write_word(ram, actor + 0x54, 4);
+            write_word(ram, actor + 0x56, 6);
+            write_word(ram, actor + 0x6e, 1);
+            ram[actor + 0x14] = 3;
+            write_word(ram, actor + 0x46, read_word(bank, (uint16_t)(0x5344 + barrel)));
+            ram[actor + 0x28] = bank[(uint16_t)(0x5703 + (barrel >> 1))];
+            for (unsigned axis = 0; axis < 2; ++axis) {
+                int16_t unit = read_word(main_rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + 2 * ram[actor + 0x28]);
+                write_word(ram, actor + 0x38 + 2 * axis, (unit * (int16_t)read_word(ram, actor + 0x2e)) >> 8);
+            }
+            write_word(ram, actor + 0x2a, read_word(bank, 0x4f2c + ((((uint8_t)(ram[actor + 0x28] + 8)) & 0xf0) >> 3)));
+            write_word(ram, actor, 0x66bb);
+        } else
+            scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if (x > 0x1c0 || (int16_t)y < top || x < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!decrement(ram, actor + 0x54)) {
+            /* B000:721D smoke trail. */
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+            uint16_t smoke = effect_slot(ram, read_word(ram, 0x9a), 0xbe45);
+            write_word(ram, smoke + 0x21, x);
+            write_word(ram, smoke + 0x24, y);
+            ram[smoke + 0x2c] = ram[actor + 0x14];
+            ram[smoke + 0x2d] = 0x28;
+            write_word(ram, smoke + 0x1e, read_word(ram, actor + 0x6e));
+        }
+        ram[actor + 0x0d] = 2;
+        if (world_player_contact(ram, main_rom, actor) ||
+            (world_terrain_mask(ram, tiles + 0x4000, x, y) & 0xff02)) {
+            spawn_impact(ram, main_rom, actor);
+            finish_animation(ram, actor);
+        }
+        break;
+    }
     case 0xb5ce6: {
         const uint8_t *bank = main_rom + 0xb0000;
         unsigned resource = 0x64;
