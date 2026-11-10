@@ -6,6 +6,11 @@ function Get-WorldFileHash {
     try { [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '') }
     finally { $stream.Dispose(); $hash.Dispose() }
 }
+function Get-WorldTar {
+    # Windows bsdtar reads zip and 7z; a GNU tar earlier in PATH (MSYS2) cannot.
+    $system = Join-Path $env:SystemRoot 'System32/tar.exe'
+    if (Test-Path -LiteralPath $system) { $system } else { 'tar.exe' }
+}
 function Open-WorldNativeImportLock {
     param([string]$World)
     New-Item -Force -ItemType Directory $World -ErrorAction Stop | Out-Null
@@ -109,7 +114,7 @@ function Import-WorldNativeRom {
         if ($cached -and $cached.archiveSha256 -eq $archiveHash) { return }
         $scratch = New-Item -ItemType Directory (Join-Path $world ('import-' + [guid]::NewGuid().ToString('N'))) -ErrorAction Stop
         $members = @($regions | ForEach-Object { $_.chips | ForEach-Object file })
-        & tar.exe -xf $archive.FullName -C $scratch.FullName @members
+        & (Get-WorldTar) -xf $archive.FullName -C $scratch.FullName @members
         if ($LASTEXITCODE) { throw "Cannot extract the required World chips from $($archive.FullName)." }
         $records = @()
         foreach ($region in $regions) {
@@ -188,7 +193,7 @@ function Build-WorldNative {
                 if ($LASTEXITCODE -or (Get-WorldFileHash "$archive.part" SHA256) -ne $hash) { throw 'Could not obtain the pinned Zig C compiler.' }
                 Move-Item -Force -LiteralPath "$archive.part" -Destination $archive
             }
-            & tar.exe -xf $archive -C $cache
+            & (Get-WorldTar) -xf $archive -C $cache
             if ($LASTEXITCODE) { throw 'Could not unpack Zig.' }
         }
     }
