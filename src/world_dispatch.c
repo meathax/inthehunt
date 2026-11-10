@@ -8037,7 +8037,17 @@ stage2_jumper_terrain:
         int column = scrolling && (int16_t)read_word(ram, actor + 0x6a) <= camera;
         int script = scrolling && (int16_t)read_word(ram, actor + 0x46) <= camera;
         uint16_t row = read_word(ram, actor + 0x40);
+        uint16_t limits = read_word(ram, actor + 0x68), trigger = read_word(ram, actor + 0x6a);
         update_camera_layers(ram, main_rom, tiles, actor, address == 0x3f68, address == 0x3ca1);
+        if (address == 0x3ca1) {
+            /* 3CA1: 46A5 always loads SI with the limits cursor it entered
+               with; 43AF never loads it; a 390B column copy then leaves 40h
+               and 4621 the advanced script cursor. The 46D9 call into 0:6015
+               is excluded above. */
+            if (read_word(ram, actor + 0x40) != row) leave_si(read_word(ram, actor + 0x40));
+            else if (read_word(ram, actor + 0x6a) != trigger) leave_si(0x40);
+            else leave_si(limits);
+        }
         if (address == 0x3f68) {
             /* 3F68: 4621 leaves the advanced script cursor in SI; otherwise
                each 390B block copy ends with SI = 40h; 459B never loads it. */
@@ -11843,10 +11853,13 @@ stage2_jumper_terrain:
         update_background_vertical(ram, actor);
         /* fall through */
     case 0x3fd0: {
+        /* 459B never loads SI; only 4621 does, with the next script row. */
         if (!(read_word(ram, 0x26e) & 0x4000)) {
             write_word(ram, 0xb71e, 0);
+            keep_si();
             break;
         }
+        uint16_t script_row = read_word(ram, actor + 0x40);
         int speed = (int16_t)read_word(ram, 0xa4) >> 1;
         uint16_t old_x = read_word(ram, actor + 0x52);
         unsigned frac = ram[actor + 0x51] + (speed & 255);
@@ -11857,6 +11870,8 @@ stage2_jumper_terrain:
         write_word(ram, 0xb70e, old_x + delta);
         write_word(ram, 0xb71e, -delta);
         if (read_word(ram, actor + 0x46)) advance_scroll_script(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x40) != script_row) leave_si(read_word(ram, actor + 0x40));
+        else keep_si();
         break;
     }
     case 0x3b45:
