@@ -22,6 +22,12 @@ foreach ($mode in $Modes) {
         if (($f -ge 420 -and $f -lt 426) -or ($f -ge 600 -and $f -lt 606)) { $buttons = 1 }
         if ($f -ge $PlayFrom) {
             if ($mode -match 'steer') { $held = $held -bor $dirs[[int][math]::Floor(($f - $PlayFrom) / 90) % $dirs.Count] }
+            # 'adv' pushes right with a little weaving; 'coin' keeps buying credits and continuing.
+            if ($mode -match 'adv') { $held = $held -bor (0x01, 0x01, 0x09, 0x01, 0x05, 0x01)[[int][math]::Floor(($f - $PlayFrom) / 40) % 6] }
+            if ($mode -match 'coin') {
+                if ($f % 1500 -lt 6) { $buttons = 4 }
+                if ($f % 300 -ge 150 -and $f % 300 -lt 156) { $buttons = 1 }
+            }
             $phase = ($f - $PlayFrom) % 24
             if ($mode -match 'z' -and $phase -lt 6) { $held = $held -bor 0x80 }
             if ($mode -match 'x' -and $phase -ge 12 -and $phase -lt 18) { $held = $held -bor 0x40 }

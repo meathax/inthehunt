@@ -5869,6 +5869,7 @@ stage2_jumper_terrain:
                 decrement(ram, actor + 0x42);
             }
         }
+    stage_timer_palette:
         if (!decrement(ram, actor + 0x44)) {
             write_word(ram, actor + 0x44, 64);
             if (!(ram[0x262] & 2)) {
@@ -5885,6 +5886,20 @@ stage2_jumper_terrain:
             }
         }
         break;
+    /* 0:FF00: after time runs out, wait 256 ticks (longer while 286 is
+       set), then restart the clock at 99 and resume 60CE at 6169. */
+    case 0xff00:
+        if (!tiles) return 0;
+        if (decrement(ram, actor + 0x42)) break;
+        if (read_word(ram, 0x286)) {
+            write_word(ram, actor + 0x42, 1);
+            break;
+        }
+        write_word(ram, actor + 0x42, 0x60);
+        write_word(ram, 0xb8a0, 0x63);
+        write_word(ram, actor, 0x60ce);
+        refresh_stage_time(ram, tiles, actor, 0x63);
+        goto stage_timer_palette;
     case 0x7b3c:
     case 0x7b6f: {
         unsigned owner = ram[actor + 0x0b] & 3;
@@ -9151,6 +9166,21 @@ stage2_jumper_terrain:
         break;
     }
     case 0x19e1:
+    /* 0:61B4 (init) and 61D1: a fixed centre-screen plate shown for 192
+       ticks. */
+    case 0x61b4:
+        ram[actor + 0x2c] = 0x85;
+        write_word(ram, actor + 0x2a, 0xa4c1);
+        write_word(ram, actor + 0x21, 0x100);
+        write_word(ram, actor + 0x24, 0x104);
+        write_word(ram, actor + 0x42, 0xc0);
+        write_word(ram, actor, 0x61d1);
+        /* fall through */
+    case 0x61d1:
+        queue_sprite(ram, main_rom, actor, 0);
+        if (address == 0x61d1) si_after_sprite();
+        if (!decrement(ram, actor + 0x42)) finish_animation(ram, actor);
+        break;
     /* 0:C99F/C9B2 and C9D1/C9E4: a three-piece banner row; 0:CA03/CA3E: a
        single plate chosen by 272 and the active player. */
     case 0xc99f:
