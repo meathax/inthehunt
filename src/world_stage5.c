@@ -434,6 +434,14 @@ void world_stage5_wall_hit(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
     break_wall_cell(ram, rom + 0x70000, (uint8_t *)terrain, actor, actor_cell(ram, actor));
 }
 
+/* 0A3B7 where the caller probed terrain away from the actor's own position:
+ * `cell` is the probed cell the original still holds in BW. */
+void world_stage5_wall_hit_cell(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor, uint16_t cell)
+{
+    if (RW(0x84) != 4) return;
+    break_wall_cell(ram, rom + 0x70000, (uint8_t *)terrain, actor, cell);
+}
+
 /* 08683. The submarine's own position is moved over each cell for the debris. */
 uint16_t world_stage5_sub_entry_walls(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t sub)
 {

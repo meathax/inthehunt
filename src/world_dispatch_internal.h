@@ -43,6 +43,10 @@ int world_sub_open_water(uint8_t *, const uint8_t *, uint8_t *, uint16_t);
 void world_sub_lives_hud(const uint8_t *, uint8_t *, unsigned, uint16_t);
 void world_sub_entry_step(uint8_t *, const uint8_t *, uint8_t *, uint16_t);
 
+/* ADF0 (world_gaps.c): a ring of the drilling shot (kind 121) knocks the actor
+ * away into state AE2A. Returns nonzero when it did. */
+int world_knocked_away(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t shot);
+
 /* Shared actor helpers defined in world_dispatch.c. */
 uint16_t read_word(const uint8_t *ram, uint16_t offset);
 void write_word(uint8_t *ram, uint16_t offset, uint16_t value);

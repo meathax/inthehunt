@@ -148,6 +148,16 @@ local function on_pass_start()
     -- They also run before the recording window opens, so a late window sees
     -- the same game as a recording started earlier.
     if cfg.refill and (memory:read_u8(0xe0264) & 1) ~= 0 and memory:read_u8(0xe0118) < 2 then poke(0x118, 3, 1) end
+    if cfg.arm and frame >= (cfg.arm.from or 1500) and word(0x80) == 0xb2e and (memory:read_u8(0xe0264) & 1) ~= 0 then
+        -- arm={mode=M, level=L, kind2=K, level2=L, from=FRAME}: keep P1 equipped with
+        -- primary weapon mode M (2, 4 or 6) and/or secondary kind K (2 or 4), as the
+        -- pickups would, so weapon paths can be recorded in any stage.
+        local config = word(word(0x90) + 0x70)
+        for _, f in ipairs({{"mode", 0x10}, {"level", 0x12}, {"kind2", 0x14}, {"level2", 0x16}}) do
+            local want = cfg.arm[f[1]]
+            if want and config ~= 0 and word(config + f[2]) ~= want then poke(config + f[2], want, 2) end
+        end
+    end
     if cfg.stage and not cfg.stage_done and word(0x80) == 0x2218 then poke(0x84, cfg.stage, 2); cfg.stage_done = true end
     if not recording and frame < start_frame then pending = {}; return end
     if not recording then

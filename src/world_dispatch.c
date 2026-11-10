@@ -529,7 +529,9 @@ void update_cruiser_fire(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint1
     }
 }
 
-void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+/* B91AD (award != 0) and B96DE tails. A ring of the drilling shot knocks the
+ * cruiser away; only the B91AD tail scores it (B9214). */
+static void cruiser_hits(uint8_t *ram, const uint8_t *rom, uint16_t actor, int award)
 {
     unsigned pose = read_word(ram, actor + 0x4e) & 14;
     write_word(ram, actor + 0x2a, read_word(rom + 0xb0000, 0x8cd4 + pose));
@@ -546,10 +548,20 @@ void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16_t acto
     write_word(ram, actor + 0x3c, 0xf723);
     ram[actor + 0x0d] = 0;
     uint16_t attacker = world_player_contact(ram, rom, actor);
-    if (read_word(ram, actor + 0x26))
+    if (read_word(ram, actor + 0x26)) {
         attacker = world_projectile_contact(ram, rom, actor);
+        if (attacker && world_knocked_away(ram, rom, actor, attacker)) {
+            if (award) world_award_score(ram, rom, actor, attacker);
+            return;
+        }
+    }
     if (!read_word(ram, actor + 0x26))
         world_kind11_death(ram, rom, actor, attacker);
+}
+
+void draw_cruiser_and_check_hits(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    cruiser_hits(ram, rom, actor, 1);
 }
 
 /* The cruising branch. Check branches still handled by the guest before
@@ -565,11 +577,6 @@ int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t *terra
         !world_enemy_target_mode_supported(ram[actor + 0x0c])) ||
         !read_word(ram, actor + 0x26))
         return 0;
-    for (unsigned i = 0; i < read_word(ram, 0xa6e2); i += 2) {
-        uint16_t shot = read_word(ram, 0xa6e6 + i);
-        if (shot && read_word(ram, shot + 14) == 0x121)
-            return 0;
-    }
     uint16_t x = read_word(ram, actor + 0x21) + read_word(ram, 0xb71a);
     x += read_word(rom + 0xb0000, 0x8d58 + 2 * (ram[actor + 0x29] & 1));
     uint16_t y = read_word(ram, actor + 0x24) + read_word(ram, 0xb71c);
@@ -658,7 +665,7 @@ int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t *terra
         }
     }
     update_cruiser_fire(ram, rom, actor, burst);
-    draw_cruiser_and_check_hits(ram, rom, actor);
+    cruiser_hits(ram, rom, actor, !turns);
     return 1;
 }
 

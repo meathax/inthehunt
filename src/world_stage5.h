@@ -7,6 +7,8 @@
 
 /* 0A3B7: a player weapon struck terrain at its own position. Stage index 4 only. */
 void world_stage5_wall_hit(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor);
+/* 0A3B7 after a probe away from the actor: `cell` is the probed terrain cell (BW). */
+void world_stage5_wall_hit_cell(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor, uint16_t cell);
 /* 08683: the entering submarine clears a 6x3 cell block around itself. Stage index 4 only.
  * Returns the pointer the original leaves in IX: the submarine's settings record, or,
  * once a cell was opened, whatever the wall routine left there. The caller reads its

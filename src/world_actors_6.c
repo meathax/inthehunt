@@ -598,10 +598,6 @@ int world_actors_6(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
     }
     case 0xb9742: {
         if (!tiles) return 0;
-        for (unsigned i = 0; i < read_word(ram, 0xa6e2); i += 2) {
-            uint16_t shot = read_word(ram, 0xa6e6 + i);
-            if (shot && read_word(ram, shot + 0x0e) == 0x121) return 0;
-        }
         const uint8_t *bank = main_rom + 0xb0000;
         if (!decrement(ram, actor + 0x44)) {
             write_word(ram, actor + 0x44, 6);
@@ -635,8 +631,11 @@ int world_actors_6(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom,
         queue_sprite(ram, main_rom, actor, 1);
         ram[actor + 0x0d] = 0;
         uint16_t attacker = world_player_contact(ram, main_rom, actor);
-        if (read_word(ram, actor + 0x26))
+        if (read_word(ram, actor + 0x26)) {
             attacker = world_projectile_contact(ram, main_rom, actor);
+            /* B96F3 tail: a ring knocks it away (ADF0), unscored. */
+            if (attacker && world_knocked_away(ram, main_rom, actor, attacker)) break;
+        }
         if (!read_word(ram, actor + 0x26))
             world_kind11_death(ram, main_rom, actor, attacker);
         break;
