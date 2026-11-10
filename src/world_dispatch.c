@@ -542,6 +542,13 @@ static void begin_linear_script(uint8_t *ram, const uint8_t *rom, uint16_t actor
         ram[actor + 0x20] = ram[actor + 0x23] = 0;
         return;
     }
+    if (kind == 0x14) {
+        /* D87D: a fixed velocity; fractions and accelerations stay as they were. */
+        write_word(ram, actor + 0x38, read_word(bank, offset + 4));
+        write_word(ram, actor + 0x3a, read_word(bank, offset + 6));
+        write_word(ram, actor + 0x7e, offset + 8);
+        return;
+    }
     ram[actor + 0x28] = bank[offset + 4];
     uint16_t speed = read_word(bank, offset + 6);
     if (speed) write_word(ram, actor + 0x2e, speed);
@@ -562,8 +569,8 @@ static int step_flight_script(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     uint16_t kind = read_word(ram, actor + 0x7a);
     uint16_t next = read_word(ram, actor + 0x7e);
     uint16_t next_kind = read_word(bank, next);
-    if ((kind & 1) || (kind > 6 && kind != 0x10) || (read_word(ram, actor + 0x7c) == 1 &&
-        next_kind != 0xffff && ((next_kind & 1) || (next_kind > 6 && next_kind != 0x10)))) return 0;
+    if ((kind & 1) || (kind > 6 && kind != 0x10 && kind != 0x14) || (read_word(ram, actor + 0x7c) == 1 &&
+        next_kind != 0xffff && ((next_kind & 1) || (next_kind > 6 && next_kind != 0x10 && next_kind != 0x14)))) return 0;
     if (!kind) {
         scroll_actor(ram, actor, 0xb71a);
     } else if (kind == 0x10) {
@@ -581,6 +588,11 @@ static int step_flight_script(uint8_t *ram, const uint8_t *rom, uint16_t actor)
         uint32_t height = (ram[actor + 0x33] | ((uint32_t)read_word(ram, actor + 0x34) << 8)) + ((uint32_t)wave & 0xffffff);
         ram[actor + 0x23] = (uint8_t)height;
         write_word(ram, actor + 0x24, (uint16_t)(height >> 8));
+    } else if (kind == 0x14) {
+        /* D70C. */
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
     } else if (kind != 6) {
         scroll_actor(ram, actor, 0xb71a);
         for (unsigned i = 0; i < 2; ++i) {
@@ -6592,6 +6604,1180 @@ static int stage_two_gunner(uint8_t *ram, const uint8_t *rom, uint16_t actor, ui
     return 1;
 }
 
+/* ---- Stage-two boss, 1000:289C..4023 ---- */
+
+/* The ancestor `levels` above the actor, from the depth table at 8500. */
+static uint16_t s2b_ancestor(const uint8_t *ram, uint16_t actor, unsigned levels)
+{
+    return read_word(ram, (uint16_t)(0x8500 + read_word(ram, actor + 8) - 2 * levels));
+}
+
+/* 0:3665: the second sound queue. */
+static void s2b_sound2(uint8_t *ram, uint16_t sound)
+{
+    uint16_t tail = (read_word(ram, 0xa6d8) + 2) & 14;
+    if (tail == read_word(ram, 0xa6d6)) return;
+    write_word(ram, 0xa6d8, tail);
+    write_word(ram, 0xa6a2 + tail, sound);
+}
+
+/* 0:68DF: material of the playfield cell under a screen position. */
+static unsigned s2b_material(const uint8_t *ram, const uint8_t *tiles, uint16_t x, uint16_t y)
+{
+    return tiles[0x4000 + (uint16_t)(s5_cell(ram, x, y) + 3)] >> 3;
+}
+
+/* 1000:3CE8 (levels 1) / 3CD7 (levels 2): ride an ancestor. Returns it;
+   *dead is the original carry (ancestor byte 0A set). */
+static uint16_t s2b_ride(uint8_t *ram, uint16_t actor, unsigned levels, int *dead)
+{
+    uint16_t host = s2b_ancestor(ram, actor, levels);
+    write_word(ram, actor + 0x21, read_word(ram, host + 0x21));
+    write_word(ram, actor + 0x24, read_word(ram, host + 0x24));
+    ram[actor + 0x19] = ram[host + 0x19] + 1;
+    *dead = ram[host + 0x0a] != 0;
+    return host;
+}
+
+/* 1000:3D25 (levels 1) / 3D14 (levels 2): ride an ancestor at offset 31/34,
+   mirrored with its facing; copies its facing and its state byte 0A. */
+static uint16_t s2b_attach(uint8_t *ram, uint16_t actor, unsigned levels)
+{
+    uint16_t host = s2b_ancestor(ram, actor, levels);
+    uint16_t dx = read_word(ram, actor + 0x31);
+    ram[actor + 0x29] = ram[host + 0x29];
+    if (ram[host + 0x29] & 1) dx = (uint16_t)-dx;
+    write_word(ram, actor + 0x21, dx + read_word(ram, host + 0x21));
+    write_word(ram, actor + 0x24, read_word(ram, actor + 0x34) + read_word(ram, host + 0x24));
+    ram[actor + 0x0a] = ram[host + 0x0a];
+    ram[actor + 0x19] = ram[host + 0x19] + 1;
+    return host;
+}
+
+/* 1000:3CB1: shake about 31/34 and draw. */
+static void s2b_shake(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    write_word(ram, actor + 0x21, read_word(ram, actor + 0x31) + (world_random_byte(ram) & 2) - 1);
+    write_word(ram, actor + 0x24, read_word(ram, actor + 0x34) + (world_random_byte(ram) & 2) - 1);
+    queue_sprite(ram, rom, actor, 0);
+}
+
+/* 1000:3E4F / 3E87 / 3EBF: two layered sprites from a five-step table. */
+static void s2b_beam_draw(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t table)
+{
+    const uint8_t *bank = rom + 0x10000;
+    uint16_t frame = read_word(ram, actor + 0x40);
+    write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(table + frame)));
+    ram[actor + 0x2d] = 7;
+    queue_sprite(ram, rom, actor, 0);
+    write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(table + 2 + frame)));
+    ram[actor + 0x2d] = 0x11;
+    queue_sprite(ram, rom, actor, 0);
+    frame += 4;
+    write_word(ram, actor + 0x40, frame < 0x14 ? frame : 0);
+}
+
+/* 1000:3F84: the beam pushes one overlapping actor. */
+static void s2b_push_one(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t target)
+{
+    const uint8_t *bank = rom + 0x10000;
+    if (!world_shape_overlap(ram, rom, actor, target, read_word(ram, actor + 0x3c), read_word(ram, target + 0x3c)))
+        return;
+    uint16_t group = read_word(ram, actor + 0x64);
+    write_word(ram, target + 0x21, read_word(ram, target + 0x21) +
+               read_word(bank, (uint16_t)(0x257e + 2 * read_word(ram, actor + 0x1e) + group)));
+    uint16_t push = read_word(bank, (uint16_t)(0x2586 + group));
+    uint16_t ty = read_word(ram, target + 0x24), ay = read_word(ram, actor + 0x24);
+    uint16_t gap = ty - ay;
+    if (ty >= ay) push = (uint16_t)-push;
+    if (gap & 0x8000) gap = (uint16_t)-gap;
+    if (gap >= 8) write_word(ram, target + 0x24, ty + push);
+}
+
+/* 1000:3F34: push the players, then every listed shot. */
+static void s2b_push(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    write_word(ram, actor + 0x64, 0);
+    if (!(read_word(ram, 0x274) & (1u << (ram[actor + 0x1e] & 15)))) return;
+    if (read_word(ram, 0x264) & 1) s2b_push_one(ram, rom, actor, read_word(ram, 0x90));
+    if (read_word(ram, 0x264) & 2) s2b_push_one(ram, rom, actor, read_word(ram, 0x92));
+    write_word(ram, actor + 0x64, 4);
+    for (uint16_t index = 0; index < read_word(ram, 0xa6e2); index += 2) {
+        uint16_t shot = read_word(ram, (uint16_t)(0xa6e6 + index));
+        if (shot) s2b_push_one(ram, rom, actor, shot);
+    }
+}
+
+/* 1000:4011. */
+static void s2b_hum(uint8_t *ram, uint16_t actor)
+{
+    if (decrement(ram, actor + 0x68)) return;
+    write_word(ram, actor + 0x68, 0x40);
+    world_queue_sound(ram, 0x47);
+}
+
+/* 1000:3DC8: launch a torpedo 362F with its muzzle flash 37F8. */
+static void s2b_fire(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    const uint8_t *bank = rom + 0x10000;
+    world_queue_sound(ram, 0x45);
+    uint16_t shot = spawn_boss_part(ram, actor, 0x362f);
+    uint16_t speed = read_word(ram, actor + 0x2e);
+    uint8_t facing = ram[actor + 0x29];
+    ram[shot + 0x29] = facing;
+    write_word(ram, shot + 0x38, (facing & 1) ? speed : (uint16_t)-speed);
+    uint16_t row = (uint16_t)(((facing & 1) << 1) + read_word(ram, actor + 0x6a));
+    uint16_t dx = read_word(bank, (uint16_t)(0x258e + row)), dy = read_word(bank, (uint16_t)(0x2596 + row));
+    write_word(ram, shot + 0x21, dx + read_word(ram, actor + 0x21));
+    write_word(ram, shot + 0x24, read_word(ram, actor + 0x24) + dy);
+    ram[shot + 0x2c] = ram[actor + 0x71];
+    uint16_t flash = spawn_boss_part(ram, actor, 0x37f8);
+    ram[flash + 0x2c] = ram[actor + 0x72];
+    ram[flash + 0x29] = facing;
+    write_word(ram, flash + 0x31, dx);
+    write_word(ram, flash + 0x34, dy);
+    write_word(ram, flash + 0x4c, 0x25c6);
+    write_word(ram, flash + 0x4e, 0x25de);
+}
+
+/* 1000:3D7A: the launcher's salvo timer. Returns the original carry. */
+static int s2b_salvo(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    uint16_t body = s2b_ancestor(ram, actor, 1);
+    if (!(read_word(ram, body + 0x4a) & 1)) {
+        if (decrement(ram, actor + 0x54)) return 0;
+        write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+        if (decrement(ram, actor + 0x58)) {
+            s2b_fire(ram, rom, actor);
+            return 0;
+        }
+    }
+    write_word(ram, actor + 0x54, 1);
+    write_word(ram, actor + 0x40, 0);
+    write_word(ram, actor + 0x44, 1);
+    write_word(ram, body + 0x60, read_word(ram, body + 0x60) & ~4);
+    return 1;
+}
+
+/* 1000:3EF7: four aimed shots 3935. */
+static void s2b_volley(uint8_t *ram, uint16_t actor)
+{
+    for (uint16_t left = 4;;) {
+        uint16_t shot = spawn_boss_part(ram, actor, 0x3935);
+        ram[shot + 0x29] = ram[actor + 0x29];
+        write_word(ram, shot + 0x48, read_word(ram, actor + 0x48) == read_word(ram, 0x90)
+                   ? read_word(ram, 0x92) : read_word(ram, 0x90));
+        if (!--left) break;
+        write_word(ram, shot + 0x46, left);
+    }
+    world_queue_sound(ram, 0x72);
+}
+
+/* 1000:3B5A: the aimed shot turns 8 angle steps toward its target. */
+static void s2b_home(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    const uint8_t *bank = rom + 0x10000;
+    uint16_t target = read_word(ram, actor + 0x48);
+    if (target) {
+        uint8_t want = (uint8_t)(aim_angle(rom, read_word(ram, target + 0x21) - read_word(ram, actor + 0x21),
+                                           read_word(ram, target + 0x24) - read_word(ram, actor + 0x24)) + 2) & 0xfc;
+        uint8_t angle = ram[actor + 0x28];
+        if (want != angle)
+            ram[actor + 0x28] = (uint8_t)(want - angle) < (uint8_t)(angle - want) ? angle + 8 : angle - 8;
+    }
+    s5_velocity(ram, rom, actor);
+    unsigned step = (ram[actor + 0x28] & 0xfc) >> 2;
+    ram[actor + 0x29] = bank[0x2748 + step];
+    write_word(ram, actor + 0x2a, read_word(bank, 0x2708 + 2 * (step & 0x1f)));
+}
+
+/* 0:17C3 with 0:BE45: a smoke puff after the actor at word 9A. */
+static uint16_t s2b_puff(uint8_t *ram, uint16_t actor)
+{
+    uint16_t puff = effect_slot(ram, read_word(ram, 0x9a), 0xbe45);
+    write_word(ram, puff + 0x21, read_word(ram, actor + 0x21));
+    write_word(ram, puff + 0x24, read_word(ram, actor + 0x24));
+    ram[puff + 0x2c] = 3;
+    return puff;
+}
+
+/* 0:6ACB and 0:6BF5. */
+static void s2b_blast(uint8_t *ram, uint16_t actor, int splash)
+{
+    uint16_t blast = effect_slot(ram, actor, 0x6efe);
+    write_word(ram, blast + 0x4c, splash ? 0x7511 : 0x747f);
+    write_word(ram, blast + 0x4a, splash ? 0x7675 : 0x76c8);
+    if (splash) write_word(ram, blast + 0x44, 0x57);
+    else ram[blast + 0x2c] = 0x0a;
+    ram[blast + 0x2d] = 0x20;
+    write_word(ram, blast + 0x56, splash ? 0x40 : 0x30);
+    write_word(ram, blast + 0x58, splash ? 0 : 0x80);
+}
+
+/* 1000:2B90: the body's ram trigger (3FC4), its three hit boxes and death. */
+static void s2b_body_tail(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    uint16_t flags = read_word(ram, actor + 0x60), mode = read_word(ram, actor + 0x4a);
+    if (read_word(ram, actor + 0x64)) {
+        decrement(ram, actor + 0x64);
+    } else if (!(flags & 2) && !(flags & 0x10)) {
+        if (mode & 2) {
+            write_word(ram, actor + 0x3c, 0xf7c3);
+            ram[actor + 0x0d] = 1;
+            if (world_player_contact(ram, rom, actor)) {
+                write_word(ram, actor + 0x64, read_word(ram, actor + 0x66));
+                write_word(ram, actor + 0x60, flags | 2);
+            }
+        } else if (mode & 0x10) {
+            write_word(ram, actor + 0x60, flags | 0x10);
+        }
+    }
+    static const uint16_t boxes[3] = { 0xf7ab, 0xf7a3, 0xf79b };
+    uint16_t bx = 0;
+    for (unsigned box = 0; box < 3; ++box) {
+        write_word(ram, actor + 0x3c, boxes[box]);
+        if (s5_contacts(ram, rom, actor, 0, &bx)) break;
+    }
+    if (read_word(ram, actor + 0x26)) return;
+    if (!(read_word(ram, 0x264) & 3)) {
+        write_word(ram, actor + 0x26, 0x100);
+        return;
+    }
+    uint16_t tally = (uint16_t)(0x124 + ((read_word(ram, (uint16_t)(bx + 0x0b)) & 2) << 5));
+    write_word(ram, tally, read_word(ram, tally) | 2);
+    world_award_score(ram, rom, actor, bx);
+    blast_sequence(ram, actor, 0x1000, 0x2788, 4);
+    write_word(ram, actor + 0x31, read_word(ram, actor + 0x21));
+    write_word(ram, actor + 0x34, read_word(ram, actor + 0x24));
+    write_word(ram, actor + 0x42, 0x18);
+    ram[actor + 0x0a] |= 2;
+    ram[actor + 0x19] = 0;
+    ram[actor + 0x2c] = ram[actor + 0x15];
+    write_word(ram, actor, 0x2d79);
+}
+
+/* 1000:3A27: terrain, player and shot tests of the aimed shot. */
+static void s2b_shot_tail(uint8_t *ram, const uint8_t *rom, const uint8_t *tiles, uint16_t actor)
+{
+    unsigned material = s2b_material(ram, tiles, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
+    if (!((1u << (material & 15)) & 0xff02)) {
+        if (material == 3) {
+            spawn_surface_splash_effect(ram, rom, actor, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
+            finish_animation(ram, actor);
+            return;
+        }
+        ram[actor + 0x0d] = 2;
+        if (!world_player_contact(ram, rom, actor)) {
+            ram[actor + 0x0d] = 0;
+            world_projectile_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) return;
+        }
+    }
+    s2_wreck_blast(ram, actor, 0);
+    finish_animation(ram, actor);
+}
+
+/* A timed sprite list: sprite table and duration table share index word 40.
+   Returns 0 when the list ended (FFFF), leaving the index alone. */
+static int s2b_frames(uint8_t *ram, const uint8_t *bank, uint16_t actor, uint16_t sprites, uint16_t durations)
+{
+    uint16_t index = read_word(ram, actor + 0x40);
+    uint16_t sprite = read_word(bank, (uint16_t)(sprites + index));
+    if (sprite == 0xffff) return 0;
+    write_word(ram, actor + 0x2a, sprite);
+    write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(durations + index)));
+    write_word(ram, actor + 0x40, index + 2);
+    return 1;
+}
+
+static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0x10000;
+    uint16_t host, part;
+    int dead;
+    switch (address) {
+    case 0x1289c: {
+        write_word(ram, 0x26e, read_word(ram, 0x26e) | 0x8000);
+        world_acquire_resource(ram, actor, 0x40);
+        world_acquire_resource(ram, actor, 0x1e);
+        world_acquire_resource(ram, actor, 0xa9);
+        world_acquire_resource(ram, actor, 0x1f);
+        part = spawn_boss_part(ram, actor, 0x29c9);
+        write_word(ram, part + 0x70, read_word(ram, actor + 0x14));
+        write_word(ram, part + 0x72, read_word(ram, actor + 0x16));
+        write_word(ram, part + 0x21, 0x1e0);
+        write_word(ram, part + 0x24, 0x60 + read_word(ram, 0xb732));
+        part = spawn_boss_part(ram, actor, 0x29c9);
+        write_word(ram, part + 0x70, read_word(ram, actor + 0x14));
+        write_word(ram, part + 0x72, read_word(ram, actor + 0x16));
+        write_word(ram, part + 0x21, 0x20);
+        write_word(ram, part + 0x24, 0xd8 + read_word(ram, 0xb732));
+        write_word(ram, part + 0x1e, 2);
+        ram[part + 0x29] = 1;
+        write_word(ram, actor + 0x40, 2);
+        part = spawn_boss_part(ram, actor, 0x3bbf);
+        write_word(ram, part + 0x21, 0xa0);
+        write_word(ram, part + 0x24, 0x118 + read_word(ram, 0xb732));
+        part = spawn_boss_part(ram, actor, 0x3bbf);
+        write_word(ram, part + 0x21, 0x160);
+        write_word(ram, part + 0x24, 0x118 + read_word(ram, 0xb732));
+        write_word(ram, part + 0x1e, 2);
+        write_word(ram, actor + 0x42, 0x20);
+        s2b_sound2(ram, 0x11);
+        write_word(ram, actor, 0x2968);
+        break;
+    }
+    case 0x12968:
+        if (!decrement(ram, actor + 0x42)) {
+            queue_palette(ram, 0x22, 0x149, 7);
+            queue_palette(ram, 0x23, 0x146, 7);
+            write_word(ram, actor, 0x298c);
+        }
+        /* fall through */
+    case 0x1298c:
+        if (!read_word(ram, actor + 0x40)) {
+            write_word(ram, 0x262, read_word(ram, 0x262) | 0x80);
+            write_word(ram, actor + 0x42, 0x100);
+            write_word(ram, actor, 0x29a4);
+        }
+        break;
+    case 0x129a4:
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, 0x262, read_word(ram, 0x262) | 0xc000);
+            finish_animation(ram, actor);
+        }
+        break;
+
+    /* ---- body ---- */
+    case 0x129c9: {
+        uint16_t side = read_word(ram, actor + 0x1e) & 2;
+        world_acquire_resource(ram, actor, 0x1f);
+        world_acquire_resource(ram, actor, read_word(bank, 0x2890 + side));
+        world_acquire_resource(ram, actor, 0x1a);
+        ram[actor + 0x2c] = ram[actor + 0x15];
+        write_word(ram, actor + 0x0e, 0x42);
+        ram[actor + 0x2d] = 0x30;
+        write_word(ram, actor + 0x0c, 4);
+        write_word(ram, actor + 0x2a, 0x9a57);
+        uint16_t rank = read_word(bank, (uint16_t)(0x2814 + read_word(ram, 0x8c)));
+        write_word(ram, actor + 0x26, read_word(bank, (uint16_t)(rank + 0x2834)));
+        write_word(ram, actor + 0x36, read_word(bank, (uint16_t)(rank + 0x2834)));
+        write_word(ram, actor + 0x50, read_word(bank, (uint16_t)(rank + 0x283a)));
+        write_word(ram, actor + 0x52, read_word(bank, (uint16_t)(rank + 0x283a)));
+        write_word(ram, actor + 0x58, read_word(bank, (uint16_t)(rank + 0x2838)));
+        write_word(ram, actor + 0x5a, read_word(bank, (uint16_t)(rank + 0x2838)));
+        write_word(ram, actor + 0x64, read_word(bank, (uint16_t)(rank + 0x2842)));
+        write_word(ram, actor + 0x66, read_word(bank, (uint16_t)(rank + 0x2842)));
+        part = spawn_boss_part(ram, actor, 0x3c40);
+        ram[part + 0x2c] = ram[actor + 0x2c];
+        write_word(ram, part + 0x1e, read_word(ram, actor + 0x1e));
+        write_word(ram, part + 0x42, 0x20);
+        part = spawn_boss_part(ram, actor, 0x336a);
+        write_word(ram, part + 0x15, read_word(ram, actor + 0x15));
+        ram[part + 0x2c] = ram[actor + 0x15];
+        write_word(ram, part + 0x71, read_word(ram, actor + 0x71));
+        ram[part + 0x29] = ram[actor + 0x29];
+        write_word(ram, part + 0x6a, 0);
+        part = spawn_boss_part(ram, actor, 0x2e09);
+        write_word(ram, part + 0x15, read_word(ram, actor + 0x15));
+        ram[part + 0x2c] = ram[actor + 0x15];
+        write_word(ram, part + 0x70, read_word(ram, actor + 0x70));
+        ram[part + 0x72] = ram[actor + 0x72];
+        ram[part + 0x29] = ram[actor + 0x29];
+        write_word(ram, part + 0x1e, side >> 1);
+        write_word(ram, part + 0x6a, 4);
+        part = spawn_boss_part(ram, actor, 0x3478);
+        write_word(ram, part + 0x15, read_word(ram, actor + 0x15));
+        ram[part + 0x2c] = ram[actor + 0x15];
+        write_word(ram, part + 0x72, read_word(ram, actor + 0x72));
+        ram[part + 0x29] = ram[actor + 0x29];
+        write_word(ram, actor + 0x6c, read_word(bank, 0x2254 + side));
+        write_word(ram, actor + 0x62, read_word(bank, 0x2298 + side));
+        begin_linear_script(ram, rom, actor, read_word(bank, 0x223c + side));
+        write_word(ram, actor, 0x2af6);
+        break;
+    }
+    case 0x12af6: {
+        int step = step_flight_script(ram, rom, actor);
+        if (!step) {
+            world_dispatch_detail = "stage-two boss flight script kind";
+            return 0;
+        }
+        if (step < 0) {
+            uint16_t index = read_word(ram, actor + 0x6e) & 0x1e;
+            write_word(ram, actor + 0x4a, read_word(bank, (uint16_t)(read_word(ram, actor + 0x62) + index)));
+            begin_linear_script(ram, rom, actor, read_word(bank, (uint16_t)(read_word(ram, actor + 0x6c) + index)));
+            write_word(ram, actor + 0x6e, read_word(ram, actor + 0x6e) + 2);
+            if (!(read_word(ram, actor + 0x4a) & 0x40)) {
+                write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
+            } else {
+                write_word(ram, actor + 0x50, 0x20);
+                write_word(ram, actor + 0x58, 0x13);
+            }
+        }
+        s5_core_draw(ram, rom, actor);
+        if (!(read_word(ram, actor + 0x4a) & 1) &&
+            read_word(ram, s2b_ancestor(ram, actor, 1) + 0x40) == 1) {
+            write_word(ram, actor + 0x2e, 0xc0);
+            write_word(ram, actor + 0x54, 0x80);
+            write_word(ram, actor + 0x56, 0x80);
+            write_word(ram, actor + 0x58, 3);
+            write_word(ram, actor + 0x5a, 4);
+            write_word(ram, actor, 0x2c3e);
+        }
+        if ((read_word(ram, actor + 0x4a) & 4) && !(read_word(ram, actor + 0x60) & 4) &&
+            !decrement(ram, actor + 0x50)) {
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            write_word(ram, actor + 0x60, read_word(ram, actor + 0x60) | 4);
+        }
+        s2b_body_tail(ram, rom, actor);
+        break;
+    }
+    case 0x12c3e:
+        write_word(ram, actor + 0x4a, 0x2a);
+        write_word(ram, actor + 0x5e, 1);
+        write_word(ram, actor + 0x68, 1);
+        write_word(ram, actor, 0x2c52);
+        /* fall through */
+    case 0x12c52: {
+        if (!tiles) return 0;
+        if (!decrement(ram, actor + 0x5e)) {
+            write_word(ram, actor + 0x5e, 0x20);
+            if (read_word(ram, actor + 0x68)) {
+                write_word(ram, actor + 0x68, 0);
+                uint16_t target = world_enemy_target(ram, actor);
+                if (target == 0x8480) target = read_word(ram, 0x90);
+                write_word(ram, actor + 0x48, target);
+            }
+            uint16_t target = read_word(ram, actor + 0x48);
+            uint16_t row = read_word(ram, actor + 0x1e) + ((read_word(ram, actor + 0x4a) & 1) ? 4 : 0);
+            uint16_t x = read_word(ram, target + 0x21) + read_word(bank, (uint16_t)(0x2234 + row));
+            uint16_t y = read_word(ram, target + 0x24);
+            x = x < 0xa0 ? 0xa0 : x >= 0x160 ? 0x160 : x;
+            y = y < 0xd0 ? 0xd0 : y >= 0x130 ? 0x130 : y;
+            ram[actor + 0x28] = aim_angle(rom, x - read_word(ram, actor + 0x21), y - read_word(ram, actor + 0x24));
+            s5_velocity(ram, rom, actor);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if (!(read_word(ram, actor + 0x6a) & 1)) {
+            move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        }
+        if (s2b_material(ram, tiles, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24) + 0x10) == 3) {
+            write_word(ram, actor + 0x3a, (uint16_t)-read_word(ram, actor + 0x3a));
+            write_word(ram, actor + 0x5e, 0x20);
+        }
+        s5_core_draw(ram, rom, actor);
+        if (!(read_word(ram, actor + 0x4a) & 1)) {
+            if (!read_word(ram, actor + 0x54)) {
+                if (!decrement(ram, actor + 0x42)) {
+                    write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+                    write_word(ram, actor + 0x6a, read_word(ram, actor + 0x6a) & ~1);
+                } else if (read_word(ram, actor + 0x42) == 0x20) {
+                    s2b_volley(ram, actor);
+                }
+            } else if (!decrement(ram, actor + 0x54)) {
+                if (decrement(ram, actor + 0x58)) {
+                    write_word(ram, actor + 0x42, 0x40);
+                    write_word(ram, actor + 0x6a, read_word(ram, actor + 0x6a) | 1);
+                } else {
+                    write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
+                    write_word(ram, actor + 0x2e, 0x80);
+                    write_word(ram, actor + 0x42, 0x120);
+                    write_word(ram, actor + 0x4a, read_word(ram, actor + 0x4a) | 1);
+                    write_word(ram, actor + 0x68, 1);
+                }
+            }
+        } else if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+            write_word(ram, actor + 0x2e, 0xc0);
+            write_word(ram, actor + 0x4a, read_word(ram, actor + 0x4a) & ~1);
+        }
+        s2b_body_tail(ram, rom, actor);
+        break;
+    }
+    case 0x12d79:
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        s2b_shake(ram, rom, actor);
+        if (decrement(ram, actor + 0x42)) break;
+        decrement(ram, s2b_ancestor(ram, actor, 1) + 0x40);
+        write_word(ram, actor + 0x3a, 0xff00);
+        ram[actor + 0x2d] += 0x0e;
+        queue_palette(ram, ram[actor + 0x15] & 0x3f, read_word(bank, 0x2898 + (read_word(ram, actor + 0x1e) & 2)), 5);
+        write_word(ram, actor, 0x2dbd);
+        break;
+    case 0x12dbd: {
+        if (!tiles) return 0;
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        move_actor_axis(ram, actor + 0x33, read_word(ram, actor + 0x3a));
+        s2b_shake(ram, rom, actor);
+        unsigned material = s2b_material(ram, tiles, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24) - 8);
+        if ((1u << (material & 15)) & 0xff02) {
+            begin_linear_script(ram, rom, actor, 0x243c);
+            write_word(ram, actor, 0x2dec);
+        }
+        break;
+    }
+    case 0x12dec: {
+        int step = step_flight_script(ram, rom, actor);
+        if (!step) {
+            world_dispatch_detail = "stage-two boss wreck script kind";
+            return 0;
+        }
+        if (step < 0) write_word(ram, actor, 0x2dfe);
+        queue_sprite(ram, rom, actor, 0);
+        break;
+    }
+    case 0x12dfe:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, rom, actor, 0);
+        break;
+
+    /* ---- shared wreck state of the riding parts ---- */
+    case 0x12f66:
+        ram[actor + 0x0a] = 2;
+        write_word(ram, actor, 0x2f6f);
+        /* fall through */
+    case 0x12f6f:
+        s2b_ride(ram, actor, 1, &dead);
+        s5_core_draw(ram, rom, actor);
+        break;
+
+    /* ---- lower launcher 2E09 ---- */
+    case 0x12e09:
+        ram[actor + 0x2d] = 0x31;
+        write_word(ram, actor + 0x2a, 0x9a91);
+        write_word(ram, actor + 0x2e, read_word(bank, (uint16_t)(read_word(bank, (uint16_t)(0x2814 + read_word(ram, 0x8c))) + 0x283c)));
+        part = spawn_boss_part(ram, actor, 0x2fc7);
+        write_word(ram, part + 0x15, read_word(ram, actor + 0x15));
+        ram[part + 0x2c] = ram[actor + 0x15];
+        ram[part + 0x70] = ram[actor + 0x70];
+        ram[part + 0x29] = ram[actor + 0x29];
+        write_word(ram, part + 0x1e, read_word(ram, actor + 0x1e));
+        write_word(ram, actor, 0x2e4f);
+        break;
+    case 0x12e4f: case 0x12e7f: case 0x12eed: case 0x12f20: {
+        host = s2b_ride(ram, actor, 1, &dead);
+        if (dead) {
+            ram[actor + 0x2d] += 0x0e;
+            write_word(ram, actor, 0x2f66);
+            s5_core_draw(ram, rom, actor);
+            break;
+        }
+        if (address == 0x12e4f) {
+            if (read_word(ram, host + 0x4a) & 1) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor + 0x66, read_word(ram, actor + 0x66) | 1);
+                write_word(ram, actor, 0x2e7f);
+            }
+            s5_core_draw(ram, rom, actor);
+        } else if (address == 0x12e7f || address == 0x12f20) {
+            int opening = address == 0x12e7f;
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t index = read_word(ram, actor + 0x40);
+                uint16_t pose = read_word(bank, (uint16_t)((opening ? 0x246a : 0x248e) + index));
+                if (pose == 0xffff) {
+                    if (opening) {
+                        if (read_word(ram, host + 0x4a) & 0x20) write_word(ram, actor + 0x42, 0x80);
+                        write_word(ram, actor, 0x2eed);
+                    } else {
+                        write_word(ram, actor, 0x2e4f);
+                    }
+                } else {
+                    write_word(ram, host + 0x40, pose);
+                    write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x24a2 + pose)));
+                    write_word(ram, actor + 0x44, read_word(bank, (uint16_t)((opening ? 0x24ba : 0x24dc) + index)));
+                    write_word(ram, actor + 0x40, index + 2);
+                    if (opening && index == 0x14) {
+                        part = spawn_boss_part(ram, actor, 0x2f76);
+                        ram[part + 0x2c] = ram[actor + 0x70];
+                        ram[part + 0x29] = ram[actor + 0x29];
+                    }
+                }
+            }
+            s5_core_draw(ram, rom, actor);
+        } else {
+            if (!(read_word(ram, actor + 0x66) & 1)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0x2f20);
+            }
+            s5_core_draw(ram, rom, actor);
+            if (!decrement(ram, actor + 0x42)) s2b_fire(ram, rom, actor);
+        }
+        break;
+    }
+    case 0x12f76:
+        ram[actor + 0x2d] = 0x2c;
+        write_word(ram, actor + 0x31, 0xffc0);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0x2f89);
+        /* fall through */
+    case 0x12f89:
+        s2b_attach(ram, actor, 1);
+        if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x24ee, 0x2500)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, rom, actor, 0);
+        break;
+
+    /* ---- beam emitter 2FC7 on the lower launcher ---- */
+    case 0x12fc7:
+        ram[actor + 0x2d] = 0x2d;
+        write_word(ram, actor, 0x2fd1);
+        break;
+    case 0x12fd1:
+        if (read_word(ram, s2b_ancestor(ram, actor, 1) + 0x66) & 1) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0x2ff6);
+        }
+        break;
+    case 0x12ff6: case 0x1305a: case 0x130aa: case 0x130f7: {
+        host = s2b_ride(ram, actor, 2, &dead);
+        if (dead) {
+            ram[actor + 0x2d] += 0x0e;
+            write_word(ram, actor, 0x2f66);
+            s5_core_draw(ram, rom, actor);
+            break;
+        }
+        if (address == 0x12ff6) {
+            if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x2510, 0x2528)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor + 0x42, 4);
+                part = spawn_boss_part(ram, actor, 0x3129);
+                ram[part + 0x2c] = ram[actor + 0x70];
+                write_word(ram, part + 0x1e, read_word(ram, actor + 0x1e));
+                write_word(ram, actor, 0x305a);
+            }
+            s5_core_draw(ram, rom, actor);
+        } else if (address == 0x1305a) {
+            for (;;) {
+                if (!(read_word(ram, host + 0x4a) & 1)) write_word(ram, actor, 0x30aa);
+                if (decrement(ram, actor + 0x44)) break;
+                uint16_t index = read_word(ram, actor + 0x40);
+                write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x251e + index)));
+                write_word(ram, actor + 0x44, read_word(ram, actor + 0x42));
+                write_word(ram, actor + 0x40, index + 2);
+                if ((uint16_t)(index + 2) < 0x0a) break;
+                write_word(ram, actor + 0x40, 0);
+                if (decrement(ram, actor + 0x42)) continue;
+                write_word(ram, actor + 0x42, 1);
+                break;
+            }
+            s5_core_draw(ram, rom, actor);
+        } else if (address == 0x130aa) {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t index = read_word(ram, actor + 0x40);
+                write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x251e + index)));
+                write_word(ram, actor + 0x44, read_word(ram, actor + 0x42));
+                write_word(ram, actor + 0x40, index + 2);
+                if ((uint16_t)(index + 2) >= 0x0a) {
+                    write_word(ram, actor + 0x40, 0);
+                    write_word(ram, actor + 0x42, read_word(ram, actor + 0x42) + 1);
+                    if (read_word(ram, actor + 0x42) >= 5) {
+                        write_word(ram, actor + 0x42, 0x10);
+                        write_word(ram, actor, 0x30f7);
+                    }
+                }
+            }
+            s5_core_draw(ram, rom, actor);
+        } else {
+            s5_core_draw(ram, rom, actor);
+            if (!decrement(ram, actor + 0x42)) {
+                host = s2b_ancestor(ram, actor, 1);
+                write_word(ram, host + 0x66, read_word(ram, host + 0x66) & ~1);
+                write_word(ram, actor, 0x2fd1);
+            }
+        }
+        break;
+    }
+
+    /* ---- beam 3129 with its head 32A3 and segments 3308 ---- */
+    case 0x13129:
+        write_word(ram, actor + 0x3c, 0xf7d3);
+        write_word(ram, actor + 0x31, read_word(bank, 0x2534));
+        write_word(ram, actor + 0x34, 0xffee);
+        write_word(ram, actor + 0x38, read_word(bank, 0x2538));
+        write_word(ram, actor + 0x42, 0x18);
+        write_word(ram, actor + 0x68, 1);
+        part = spawn_boss_part(ram, actor, 0x32a3);
+        write_word(ram, part + 0x31, read_word(ram, actor + 0x31));
+        write_word(ram, part + 0x34, read_word(ram, actor + 0x34));
+        ram[part + 0x2c] = ram[actor + 0x2c];
+        write_word(ram, part + 0x62, 0x0f);
+        write_word(ram, actor + 0x62, read_word(ram, actor + 0x62) | 0x8000);
+        write_word(ram, actor, 0x3177);
+        /* fall through */
+    case 0x13177: case 0x131fa: case 0x13248: {
+        host = s2b_attach(ram, actor, 1);
+        if (ram[host + 0x0a]) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (address == 0x131fa) {
+            s2b_push(ram, rom, actor);
+            s2b_beam_draw(ram, rom, actor, 0x2568);
+            if (!(read_word(ram, s2b_ancestor(ram, actor, 3) + 0x4a) & 1)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x42, 0);
+                write_word(ram, actor + 0x38, (uint16_t)-read_word(ram, actor + 0x38));
+                write_word(ram, actor, 0x3248);
+            }
+            s2b_hum(ram, actor);
+            break;
+        }
+        move_actor_axis(ram, actor + 0x30, read_word(ram, actor + 0x38));
+        s2b_push(ram, rom, actor);
+        s2b_beam_draw(ram, rom, actor, 0x2552);
+        if (address == 0x13248) {
+            uint16_t length = read_word(ram, actor + 0x42);
+            if (!(length & 3))
+                write_word(ram, actor + 0x62, read_word(ram, actor + 0x62) & ~(1u << ((length >> 2) & 15)));
+            write_word(ram, actor + 0x42, ++length);
+            if (length >= 0x18) {
+                write_word(ram, actor + 0x62, read_word(ram, actor + 0x62) & 0x7fff);
+                finish_animation(ram, actor);
+            }
+            break;
+        }
+        uint16_t length = decrement(ram, actor + 0x42);
+        if (!(length & 3)) {
+            part = spawn_boss_part(ram, actor, 0x3308);
+            write_word(ram, part + 0x31, read_word(ram, actor + 0x31));
+            write_word(ram, part + 0x34, read_word(ram, actor + 0x34));
+            ram[part + 0x2c] = ram[actor + 0x2c];
+            write_word(ram, part + 0x1e, read_word(ram, actor + 0x1e));
+            write_word(ram, part + 0x60, read_word(ram, actor + 0x60));
+            write_word(ram, actor + 0x60, read_word(ram, actor + 0x60) + 2);
+            write_word(ram, part + 0x62, length >> 2);
+            write_word(ram, actor + 0x62, read_word(ram, actor + 0x62) | (1u << ((length >> 2) & 15)));
+        }
+        if (!length) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor, 0x31fa);
+        }
+        s2b_hum(ram, actor);
+        break;
+    }
+    case 0x132a3:
+        write_word(ram, actor + 0x3c, 0xf7db);
+        write_word(ram, actor, 0x32ad);
+        /* fall through */
+    case 0x132ad: {
+        host = s2b_attach(ram, actor, 2);
+        if (ram[host + 0x0a]) {
+            finish_animation(ram, actor);
+            break;
+        }
+        s2b_beam_draw(ram, rom, actor, 0x253c);
+        ram[actor + 0x0d] = 3;
+        uint16_t hit = world_projectile_contact(ram, rom, actor);
+        if (hit) write_word(ram, hit + 0x26, 0);
+        if (!(read_word(ram, s2b_ancestor(ram, actor, 1) + 0x62) & (1u << (read_word(ram, actor + 0x62) & 15))))
+            finish_animation(ram, actor);
+        break;
+    }
+    case 0x13308:
+        write_word(ram, actor + 0x3c, 0xf7d3);
+        write_word(ram, actor, 0x3315);
+        /* fall through */
+    case 0x13315:
+        host = s2b_attach(ram, actor, 2);
+        if (ram[host + 0x0a]) {
+            finish_animation(ram, actor);
+            break;
+        }
+        s2b_beam_draw(ram, rom, actor, 0x2552);
+        if (!(read_word(ram, actor + 0x60) & 3)) s2b_push(ram, rom, actor);
+        if (!(read_word(ram, s2b_ancestor(ram, actor, 1) + 0x62) & (1u << (read_word(ram, actor + 0x62) & 15))))
+            finish_animation(ram, actor);
+        break;
+
+    /* ---- upper launcher 336A ---- */
+    case 0x1336a: {
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor + 0x2a, 0x9ac3);
+        uint16_t rank = read_word(bank, (uint16_t)(0x2814 + read_word(ram, 0x8c)));
+        write_word(ram, actor + 0x56, read_word(bank, (uint16_t)(rank + 0x2836)));
+        write_word(ram, actor + 0x2e, read_word(bank, (uint16_t)(rank + 0x283c)));
+        write_word(ram, actor, 0x3392);
+        break;
+    }
+    case 0x13392: case 0x133ce: case 0x13411: case 0x1343a: {
+        host = s2b_ride(ram, actor, 1, &dead);
+        if (dead) {
+            ram[actor + 0x2d] += 0x0e;
+            write_word(ram, actor, 0x2f66);
+            s5_core_draw(ram, rom, actor);
+            break;
+        }
+        if (address == 0x13392) {
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x2610 + read_word(ram, host + 0x40))));
+            if (read_word(ram, host + 0x60) & 4) {
+                write_word(ram, actor + 0x58, read_word(ram, host + 0x58));
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0x33ce);
+            }
+        } else if (address == 0x133ce) {
+            if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x25f4, 0x2628)) {
+                write_word(ram, actor + 0x54, 1);
+                write_word(ram, actor, 0x3411);
+            }
+        } else if (address == 0x13411) {
+            if (s2b_salvo(ram, rom, actor)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0x343a);
+            }
+        } else if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x2606, 0x2638)) {
+            write_word(ram, actor, 0x3392);
+        }
+        s5_core_draw(ram, rom, actor);
+        break;
+    }
+
+    /* ---- mine layer 3478 ---- */
+    case 0x13478: {
+        ram[actor + 0x2d] = 0x30;
+        write_word(ram, actor + 0x2a, 0x9add);
+        uint16_t count = read_word(bank, (uint16_t)(read_word(bank, (uint16_t)(0x2814 + read_word(ram, 0x8c))) + 0x2840));
+        write_word(ram, actor + 0x58, count);
+        write_word(ram, actor + 0x5a, count);
+        write_word(ram, actor + 0x56, 0x10);
+        write_word(ram, actor, 0x34a0);
+        break;
+    }
+    case 0x134a0: case 0x134e4: case 0x13527: case 0x135dc: {
+        host = s2b_ride(ram, actor, 1, &dead);
+        if (dead) {
+            ram[actor + 0x2d] += 0x0e;
+            write_word(ram, actor, 0x2f66);
+            s5_core_draw(ram, rom, actor);
+            break;
+        }
+        if (address == 0x134a0) {
+            uint16_t flags = read_word(ram, host + 0x60);
+            if (flags & 0x12) {
+                if (flags & 2) {
+                    write_word(ram, actor + 0x60, 1);
+                } else {
+                    write_word(ram, actor + 0x60, 4);
+                    write_word(ram, actor + 0x58, 3);
+                }
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0x34e4);
+            }
+            s5_core_draw(ram, rom, actor);
+        } else if (address == 0x134e4) {
+            if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x2640, 0x2672)) {
+                write_word(ram, actor + 0x54, 1);
+                write_word(ram, actor, 0x3527);
+            }
+            s5_core_draw(ram, rom, actor);
+        } else if (address == 0x135dc) {
+            if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x2658, 0x2688)) {
+                host = s2b_ancestor(ram, actor, 1);
+                write_word(ram, host + 0x60, read_word(ram, host + 0x60) & ~(1u << (read_word(ram, actor + 0x60) & 15)));
+                write_word(ram, actor, 0x34a0);
+            }
+            s5_core_draw(ram, rom, actor);
+        } else {
+            s5_core_draw(ram, rom, actor);
+            if (decrement(ram, actor + 0x54)) break;
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+            if (!decrement(ram, actor + 0x58)) {
+                write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x44, 1);
+                write_word(ram, actor, 0x35dc);
+            }
+            uint16_t mine = spawn_boss_part(ram, actor, 0x3863);
+            uint8_t facing = ram[actor + 0x29];
+            ram[mine + 0x29] = facing;
+            uint16_t slot = read_word(ram, actor + 0x58) % 3;
+            write_word(ram, mine + 0x58, slot);
+            uint16_t row = (uint16_t)(((facing & 1) << 1) + (slot << 2));
+            write_word(ram, actor + 0x31, read_word(bank, (uint16_t)(0x26a0 + row)));
+            write_word(ram, mine + 0x21, read_word(ram, actor + 0x31) + read_word(ram, actor + 0x21));
+            write_word(ram, actor + 0x34, read_word(bank, (uint16_t)(0x26ac + row)));
+            write_word(ram, mine + 0x24, read_word(ram, actor + 0x34) + read_word(ram, actor + 0x24));
+            ram[mine + 0x2c] = ram[actor + 0x73];
+            part = spawn_boss_part(ram, actor, 0x37f8);
+            ram[part + 0x2c] = ram[actor + 0x72];
+            ram[part + 0x29] = facing;
+            write_word(ram, part + 0x31, read_word(ram, actor + 0x31));
+            write_word(ram, part + 0x34, read_word(ram, actor + 0x34));
+            write_word(ram, part + 0x4c, 0x26be);
+            write_word(ram, part + 0x4e, 0x26d8);
+        }
+        break;
+    }
+
+    /* ---- torpedo 362F ---- */
+    case 0x1362f:
+        ram[actor + 0x2d] = 0x32;
+        write_word(ram, actor + 0x3c, 0xf7b3);
+        write_word(ram, actor + 0x26, 0x80);
+        write_word(ram, actor + 0x36, 0x80);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x54, 1);
+        write_word(ram, actor + 0x42, 0x10);
+        write_word(ram, actor, 0x3656);
+        /* fall through */
+    case 0x13656:
+        if (!decrement(ram, actor + 0x42)) {
+            ram[actor + 0x2d] = 4;
+            write_word(ram, actor, 0x3664);
+        }
+        /* fall through */
+    case 0x13664: case 0x13716: {
+        int armed = address != 0x13716;
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        if (read_word(ram, actor + 0x21) > 0x1c0 || read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (armed) {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t frame = read_word(ram, actor + 0x40);
+                write_word(ram, actor + 0x2a, read_word(bank, 0x259e + (frame & 6)));
+                write_word(ram, actor + 0x44, 3);
+                write_word(ram, actor + 0x40, frame + 2);
+            }
+        } else {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x25a6 + frame)));
+            write_word(ram, actor + 0x40, (uint16_t)(frame + 2) < 6 ? frame + 2 : 0);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        if (armed && !decrement(ram, actor + 0x54)) {
+            write_word(ram, actor + 0x54, 4);
+            part = s2b_puff(ram, actor);
+            ram[part + 0x2d] = ram[actor + 0x2d] + 1;
+        }
+        ram[actor + 0x0d] = 2;
+        if (!world_player_contact(ram, rom, actor)) {
+            ram[actor + 0x0d] = 0;
+            world_projectile_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) break;
+        }
+        if (!armed) {
+            s2b_blast(ram, actor, 0);
+            finish_animation(ram, actor);
+            break;
+        }
+        part = spawn_boss_part(ram, actor, 0x3795);
+        ram[part + 0x2c] = ram[actor + 0x2c];
+        ram[part + 0x29] = ram[actor + 0x29];
+        write_word(ram, actor + 0x3c, 0xf7bb);
+        write_word(ram, actor + 0x40, 0);
+        ram[actor + 0x2d] = 4;
+        write_word(ram, actor + 0x26, 0x40);
+        write_word(ram, actor, 0x3716);
+        break;
+    }
+    case 0x13795:
+        ram[actor + 0x2d] = 0x30;
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0x37a3);
+        /* fall through */
+    case 0x137a3:
+        host = s2b_ancestor(ram, actor, 1);
+        write_word(ram, actor + 0x21, read_word(ram, host + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, host + 0x24));
+        if (!decrement(ram, actor + 0x44) && !s2b_frames(ram, bank, actor, 0x25ac, 0x25ba)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, rom, actor, 1);
+        break;
+    case 0x137f8:
+        ram[actor + 0x2d] = 0x2c;
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0x3806);
+        /* fall through */
+    case 0x13806:
+        host = s2b_ancestor(ram, actor, 1);
+        write_word(ram, actor + 0x21, read_word(ram, host + 0x21) + read_word(ram, actor + 0x31));
+        write_word(ram, actor + 0x24, read_word(ram, host + 0x24) + read_word(ram, actor + 0x34));
+        if (!decrement(ram, actor + 0x44) &&
+            !s2b_frames(ram, bank, actor, read_word(ram, actor + 0x4c), read_word(ram, actor + 0x4e))) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, rom, actor, 0);
+        break;
+
+    /* ---- sinking mine 3863 ---- */
+    case 0x13863:
+        ram[actor + 0x2d] = 0x31;
+        write_word(ram, actor + 0x3c, 0xf7cb);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x80);
+        write_word(ram, actor + 0x3a, 0x100);
+        write_word(ram, actor + 0x42, 0x78);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x50, 0x10);
+        write_word(ram, actor, 0x388f);
+        /* fall through */
+    case 0x1388f:
+        if (!decrement(ram, actor + 0x50)) {
+            ram[actor + 0x2d] = 4;
+            write_word(ram, actor, 0x389d);
+        }
+        /* fall through */
+    case 0x1389d: {
+        if (!tiles) return 0;
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x26b8 + frame)));
+            write_word(ram, actor + 0x44, 6);
+            write_word(ram, actor + 0x40, (uint16_t)(frame + 2) < 6 ? frame + 2 : 0);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        if (decrement(ram, actor + 0x42)) {
+            if (s2b_material(ram, tiles, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24)) == 3) {
+                s2b_blast(ram, actor, 1);
+                finish_animation(ram, actor);
+                break;
+            }
+            ram[actor + 0x0d] = 2;
+            if (!world_player_contact(ram, rom, actor)) {
+                ram[actor + 0x0d] = 0;
+                world_projectile_contact(ram, rom, actor);
+                if (read_word(ram, actor + 0x26)) break;
+            }
+        }
+        s2_wreck_blast(ram, actor, 0);
+        finish_animation(ram, actor);
+        break;
+    }
+
+    /* ---- aimed shot 3935 ---- */
+    case 0x13935: {
+        world_acquire_resource(ram, actor, 0x1f);
+        ram[actor + 0x2d] = 0x32;
+        write_word(ram, actor + 0x3c, 0xf7e3);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x80);
+        write_word(ram, actor + 0x2e, 0x80);
+        uint16_t side = ram[actor + 0x29] & 1, slot = read_word(ram, actor + 0x46);
+        ram[actor + 0x28] = bank[(uint16_t)(0x26f0 + (side << 2) + slot)];
+        uint16_t row = (uint16_t)((side << 3) + ((slot & 1) << 2));
+        uint16_t depth = read_word(ram, actor + 8);
+        host = read_word(ram, (uint16_t)(0x8500 + depth - (uint16_t)(((uint16_t)(depth - 6) >> 1) << 1)));
+        write_word(ram, actor + 0x21, read_word(ram, host + 0x21) + read_word(bank, (uint16_t)(0x26f8 + row)));
+        write_word(ram, actor + 0x24, read_word(ram, host + 0x24) + read_word(bank, (uint16_t)(0x26fa + row)));
+        unsigned step = (ram[actor + 0x28] & 0xfc) >> 2;
+        ram[actor + 0x29] = bank[0x2748 + step];
+        write_word(ram, actor + 0x2a, read_word(bank, 0x2708 + 2 * (step & 0x1f)));
+        s5_velocity(ram, rom, actor);
+        write_word(ram, actor + 0x42, 0x20);
+        write_word(ram, actor, 0x39d9);
+    }
+        /* fall through */
+    case 0x139d9: case 0x13a79: case 0x13aee: {
+        if (!tiles) return 0;
+        if (ram[s2b_ancestor(ram, actor, 1) + 0x0a] & 2) {
+            s2_wreck_blast(ram, actor, 0);
+            finish_animation(ram, actor);
+            break;
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        if (address == 0x13a79 && !decrement(ram, actor + 0x50)) {
+            write_word(ram, actor + 0x50, 2);
+            s2b_home(ram, rom, actor);
+        }
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (address == 0x13aee) {
+            uint16_t x = read_word(ram, actor + 0x21);
+            int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+            if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+                finish_animation(ram, actor);
+                break;
+            }
+        }
+        queue_sprite(ram, rom, actor, 1);
+        if (address == 0x139d9 || address == 0x13935) {
+            if (!decrement(ram, actor + 0x42)) {
+                ram[actor + 0x2d] = 4;
+                write_word(ram, actor + 0x2e, 0x100);
+                write_word(ram, actor + 0x42, 0x80);
+                write_word(ram, actor + 0x50, 1);
+                write_word(ram, actor + 0x54, 1);
+                write_word(ram, actor, 0x3a79);
+            }
+        } else {
+            if (address == 0x13a79 && !decrement(ram, actor + 0x42)) write_word(ram, actor, 0x3aee);
+            if (!decrement(ram, actor + 0x54)) {
+                write_word(ram, actor + 0x54, 4);
+                part = s2b_puff(ram, actor);
+                write_word(ram, part + 0x1e, 1);
+                ram[part + 0x2d] = 0x33;
+            }
+        }
+        s2b_shot_tail(ram, rom, tiles, actor);
+        break;
+    }
+
+    /* ---- arena lamps 3BBF and the body's palette pulse 3C40 ---- */
+    case 0x13bbf:
+        world_acquire_resource(ram, actor, 0x30);
+        ram[actor + 0x2d] = 0x3f;
+        write_word(ram, actor + 0x4c, read_word(bank, (uint16_t)(0x2884 + read_word(ram, actor + 0x1e))));
+        write_word(ram, actor + 0x42, 0x80);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x46, 5);
+        write_word(ram, actor, 0x3beb);
+        break;
+    case 0x13beb: {
+        scroll_actor(ram, actor, 0xb71a);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t phase = read_word(ram, actor + 0x40);
+            if (phase & 1) {
+                write_word(ram, actor + 0x44, 1);
+            } else {
+                write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(read_word(ram, actor + 0x4c) + (phase & 2))));
+                write_word(ram, actor + 0x44, read_word(ram, actor + 0x46));
+            }
+            write_word(ram, actor + 0x40, phase + 1);
+        }
+        if (read_word(ram, actor + 0x40) & 1) queue_sprite(ram, rom, actor, 0);
+        if (read_word(ram, actor + 0x42) && !(decrement(ram, actor + 0x42) & 0x1f))
+            decrement(ram, actor + 0x46);
+        break;
+    }
+    case 0x13c40:
+        if (ram[s2b_ancestor(ram, actor, 1) + 0x0a]) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            uint16_t phase = read_word(ram, actor + 0x40);
+            queue_palette(ram, ram[actor + 0x2c] & 0x3f,
+                          read_word(bank, 0x2890 + (phase & 4) + (read_word(ram, actor + 0x1e) & 2)), 5);
+            write_word(ram, actor + 0x42, 0x28);
+            write_word(ram, actor + 0x40, phase + 4);
+        }
+        break;
+    default:
+        return 0;
+    }
+    return 1;
+}
+
 int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles)
 {
     uint32_t address;
@@ -11841,6 +13027,15 @@ stage2_jumper_terrain:
         else keep_si();
         break;
     }
+    case 0x4138:
+        /* Boss-arena camera: 450A vertical control only, no horizontal scroll.
+           450A's 45C3/45F3 may load SI with a player, so SI is left unknown. */
+        update_vertical_camera(ram, main_rom, actor);
+        write_word(ram, 0x26e, read_word(ram, 0x26e) & ~0x4000);
+        write_word(ram, 0xb71a, 0);
+        write_word(ram, 0xb72a, 0);
+        write_word(ram, 0xb726, 0);
+        break;
     case 0x4177:
         update_background_vertical(ram, actor);
         /* fall through */
@@ -15254,6 +16449,20 @@ stage2_jumper_terrain:
     case 0xb488a: case 0xb4915: case 0xb4a1a: case 0xb4a4b: case 0xb4a64: case 0xb4a94:
     case 0xb4ab7: case 0xb4b06: case 0xb4b73: case 0xb4bf2: case 0xb4c6e:
         if (!stage_two_gunner(ram, main_rom, actor, address)) return 0;
+        break;
+    /* Stage-two boss 1000:289C: arena, two bodies 29C9 and their parts. */
+    case 0x1289c: case 0x12968: case 0x1298c: case 0x129a4: case 0x129c9: case 0x12af6:
+    case 0x12c3e: case 0x12c52: case 0x12d79: case 0x12dbd: case 0x12dec: case 0x12dfe:
+    case 0x12e09: case 0x12e4f: case 0x12e7f: case 0x12eed: case 0x12f20: case 0x12f66:
+    case 0x12f6f: case 0x12f76: case 0x12f89: case 0x12fc7: case 0x12fd1: case 0x12ff6:
+    case 0x1305a: case 0x130aa: case 0x130f7: case 0x13129: case 0x13177: case 0x131fa:
+    case 0x13248: case 0x132a3: case 0x132ad: case 0x13308: case 0x13315: case 0x1336a:
+    case 0x13392: case 0x133ce: case 0x13411: case 0x1343a: case 0x13478: case 0x134a0:
+    case 0x134e4: case 0x13527: case 0x135dc: case 0x1362f: case 0x13656: case 0x13664:
+    case 0x13716: case 0x13795: case 0x137a3: case 0x137f8: case 0x13806: case 0x13863:
+    case 0x1388f: case 0x1389d: case 0x13935: case 0x139d9: case 0x13a79: case 0x13aee:
+    case 0x13bbf: case 0x13beb: case 0x13c40:
+        if (!stage_two_boss(ram, main_rom, tiles, actor, address)) return 0;
         break;
     /* Stage-five ice boss: hull 7FFE, core 8337, arms 8A19, tentacle 8EB5. */
     case 0x77ffe: case 0x78085: case 0x780c9: case 0x781ed: case 0x7826a: case 0x78295:
