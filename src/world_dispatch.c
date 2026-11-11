@@ -1254,7 +1254,7 @@ static uint16_t spawn_boss_part(uint8_t *ram, uint16_t actor, uint16_t handler)
     return part;
 }
 
-static void boss_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t entry)
+static uint16_t boss_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t entry)
 {
     const uint8_t *bank = rom + 0x10000;
     uint16_t type = read_word(bank, entry);
@@ -1271,6 +1271,7 @@ static void boss_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_
     if (type < 16 && !(effect & 0x300)) write_word(ram, effect + 0x44, 0x5d);
     write_word(ram, effect + 0x31, read_word(ram, effect + 0x31) + read_word(bank, entry + 2));
     write_word(ram, effect + 0x34, read_word(ram, effect + 0x34) + read_word(bank, entry + 4));
+    return effect;
 }
 
 static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t handler)
@@ -21366,6 +21367,127 @@ stage2_jumper_terrain:
             boss_blast(ram, main_rom, actor, 0x8a2 + step);
             write_word(ram, actor + 0x40, step + 6 < 36 ? step + 6 : 0);
         }
+        break;
+    }
+    /* 1000:0C8F, 0CD1, 0E0B: the stage-one boss's wreck once both side
+       guns are gone: a flame (0C8F) and a flash (0E0B) on the hull, and a
+       hull plate (0CD1) that slides down, bursting (0860 list), then drifts
+       back (0D8C) shaking and bursting (07F6 list) until off screen. */
+    case 0x10c8f:
+        world_acquire_resource(ram, actor, 0xe9);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0xca1);
+        /* fall through */
+    case 0x10ca1: {
+        const uint8_t *bank = main_rom + 0x10000;
+        uint16_t parent = s5_parent(ram, actor);                     /* 1000:21FD */
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, index));
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(index + 0x0c)));
+            write_word(ram, actor + 0x40, index + 2 >= 0x0c ? 0 : index + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    case 0x10cd1:
+        ram[actor + 0x2d] = 0x2c;
+        write_word(ram, actor + 0x2a, 0x7708);
+        write_word(ram, actor + 0x3c, 0xf793);
+        write_word(ram, actor + 0x26, 0x100);
+        write_word(ram, actor + 0x36, 0x400);
+        write_word(ram, actor + 0x42, 0x60);
+        write_word(ram, actor, 0xcf3);
+        /* fall through */
+    case 0x10cf3: {
+        uint16_t parent = s5_parent(ram, actor);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x3a, 0xff80);
+            write_word(ram, actor + 0x42, 0x10);
+            write_word(ram, actor, 0xd10);
+        }
+        break;
+    }
+    case 0x10d10:
+    case 0x10d8c: {
+        if (!tiles) return 0;
+        const uint8_t *bank = main_rom + 0x10000;
+        if (address == 0x10d10) {
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+            queue_sprite(ram, main_rom, actor, 0);
+        } else {
+            move_actor_axis(ram, actor + 0x30, read_word(ram, actor + 0x38));
+            write_word(ram, actor + 0x21, read_word(ram, actor + 0x31) + (world_random_byte(ram) & 2) - 1);
+            write_word(ram, actor + 0x24, read_word(ram, actor + 0x34) + (world_random_byte(ram) & 2) - 1);
+            queue_sprite(ram, main_rom, actor, 0);
+            if (read_word(ram, actor + 0x21) < 0x40) {
+                finish_animation(ram, actor);
+                break;
+            }
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 4);
+            uint16_t entry = (address == 0x10d10 ? 0x860 : 0x7f6) + read_word(ram, actor + 0x40);
+            if (read_word(bank, entry) != 0xffff) {
+                uint16_t blast = boss_blast(ram, main_rom, actor, entry);
+                if (address == 0x10d10) ram[blast + 0x2d] = bank[(uint16_t)(entry + 6)];
+                write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 8);
+            }
+        }
+        if (address == 0x10d10 &&
+            (world_terrain_mask(ram, tiles + 0x4000, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24) - 0x10) & 0xff02)) {
+            write_word(ram, actor + 0x38, 0xfe00);
+            write_word(ram, actor + 0x42, 1);
+            write_word(ram, actor + 0x31, read_word(ram, actor + 0x21));
+            write_word(ram, actor + 0x34, read_word(ram, actor + 0x24));
+            write_word(ram, actor, 0xd8c);
+        }
+        if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);   /* 0:D3D0 */
+        break;
+    }
+    case 0x10e0b:
+        world_acquire_resource(ram, actor, 0x6e);
+        ram[actor + 0x2d] = 0x30;
+        write_word(ram, actor + 0x42, 0x20);
+        write_word(ram, actor, 0xe21);
+        /* fall through */
+    case 0x10e21: {
+        const uint8_t *bank = main_rom + 0x10000;
+        uint16_t parent = s5_parent(ram, actor);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (read_word(ram, actor + 0x42)) {
+            decrement(ram, actor + 0x42);
+            break;
+        }
+        uint16_t frame = read_word(bank, (uint16_t)(0x7c + read_word(ram, actor + 0x40)));
+        if (frame == 0xffff) {
+            write_word(ram, actor, 0xe59);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x42, 1);
+            break;
+        }
+        write_word(ram, actor + 0x2a, frame);
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    case 0x10e59: {
+        const uint8_t *bank = main_rom + 0x10000;
+        if (decrement(ram, actor + 0x42)) break;
+        write_word(ram, actor + 0x42, 4);
+        uint16_t entry = 0x7f6 + read_word(ram, actor + 0x40);
+        if (read_word(bank, entry) == 0xffff) {
+            finish_animation(ram, actor);
+            break;
+        }
+        boss_blast(ram, main_rom, actor, entry);
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 8);
         break;
     }
     case 0x10ea3:
