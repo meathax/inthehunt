@@ -16645,9 +16645,12 @@ static int trooper_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
         trooper_retire(ram, actor, 0);
         return 1;
     }
+    sprite_si();                        /* 0DD6, D237, then D2B7/D371 load SI */
+    player_contact_si(ram, actor);
     ram[actor + 0x0d] = 2;
     uint16_t hit = world_player_contact(ram, rom, actor);
     if (!hit) {
+        leave_si(read_word(ram, actor + 0x3c));
         ram[actor + 0x0d] = 0;
         hit = read_word(ram, actor + 0x46) ? world_projectile_contact(ram, rom, actor)
                                            : world_surface_contact(ram, rom, actor);
@@ -16730,6 +16733,7 @@ static int stage_three_trooper(uint8_t *ram, const uint8_t *rom, const uint8_t *
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         if (trooper_out_x(ram, actor)) {
             trooper_retire(ram, actor, 1);
+            keep_si();
             return 1;
         }
         trooper_frame(ram, bank, actor, 0x1a7e, 0x1a86, 6);
@@ -19463,10 +19467,14 @@ stage2_jumper_terrain:
             keep_si();
             break;
         }
-        if (decrement(ram, actor + 0x42)) break;
+        if (decrement(ram, actor + 0x42)) {
+            keep_si();
+            break;
+        }
         write_word(ram, actor + 0x42, (world_random_byte(ram) & 15) + 8);
         ram[actor + 0x0d] = 0;
         uint16_t hit = world_surface_contact(ram, main_rom, actor);
+        leave_si(read_word(ram, actor + 0x3c));         /* D371 loads SI with the shape */
         if (read_word(ram, actor + 0x26)) break;
         if (!hit) {
             world_dispatch_detail = "block destroyed without a shot; 6237 reads leftover BX";
@@ -19477,12 +19485,18 @@ stage2_jumper_terrain:
         if (address == 0x1eb08) {
             copy_tile_blocks(ram, tiles, main_rom, 0x4000, read_word(ram, actor + 0x50), 0x3cd0, 0x201);
             write_word(ram, actor + 0x26, 0x80);
+            leave_si(0x40);                             /* 37EB */
+            uint16_t successor = read_word(ram, actor + 4);
             spawn_fragments(ram, actor, 0x1000, 0xdbee);
+            if (read_word(ram, actor + 4) != successor) leave_si(successor);   /* 1769 */
             if (world_random_byte(ram) & 7) write_word(ram, actor, 0xeb87);
             else finish_animation(ram, actor);
         } else {
             copy_tile_blocks(ram, tiles, main_rom, 0x4000, read_word(ram, actor + 0x50), 0x3bd4, 0x202);
+            leave_si(0x40);
+            uint16_t successor = read_word(ram, actor + 4);
             spawn_fragments(ram, actor, 0x1000, 0xdc14);
+            if (read_word(ram, actor + 4) != successor) leave_si(successor);
             finish_animation(ram, actor);
         }
         break;
@@ -20848,6 +20862,8 @@ stage2_jumper_terrain:
             break;
         }
         queue_sprite(ram, main_rom, actor, 0);
+        sprite_si();                    /* 0DA4, then D237 load SI */
+        player_contact_si(ram, actor);
         ram[actor + 0x0d] = 1;
         uint16_t player = world_player_contact(ram, main_rom, actor);
         if (player) {
