@@ -317,7 +317,47 @@ static void headless_run(const char *dir, const char *script_path)
     char trace_path[4096];
     snprintf(trace_path, sizeof trace_path, "%s/headless-trace.txt", dir);
     FILE *trace = fopen(trace_path, "w");
+    /* Debug acceleration only: WORLD_SNAPSHOT_LOAD=path resumes from a
+       snapshot; WORLD_SNAPSHOT_SAVE=frame,path writes one. Not an exact
+       machine state (YM/PCM and per-pass dispatch caches are not kept). */
+    const char *load_path = getenv("WORLD_SNAPSHOT_LOAD"), *save_spec = getenv("WORLD_SNAPSHOT_SAVE");
+    unsigned long save_at = 0;
+    const char *save_path = NULL;
+    if (save_spec) {
+        save_at = strtoul(save_spec, NULL, 10);
+        save_path = strchr(save_spec, ',');
+        if (save_path) ++save_path;
+    }
+    if (load_path) {
+        FILE *f = fopen(load_path, "rb");
+        if (!f || fread(ram, sizeof ram, 1, f) != 1 || fread(tiles, sizeof tiles, 1, f) != 1 ||
+            fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
+            fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
+            fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1) {
+            snprintf(failure, sizeof failure, "Cannot load the headless snapshot.");
+            if (f) fclose(f);
+            if (trace) fclose(trace);
+            fclose(script);
+            return;
+        }
+        fclose(f);
+    }
     for (;;) {
+        if (save_path && ticks >= save_at) {
+            FILE *f = fopen(save_path, "wb");
+            if (f) {
+                fwrite(ram, sizeof ram, 1, f);
+                fwrite(tiles, sizeof tiles, 1, f);
+                fwrite(oam, sizeof oam, 1, f);
+                fwrite(palette, sizeof palette, 1, f);
+                fwrite(layer_master, sizeof layer_master, 1, f);
+                fwrite(&ticks, sizeof ticks, 1, f);
+                fwrite(&board_clock, sizeof board_clock, 1, f);
+                fwrite(sound_state, sizeof sound_state, 1, f);
+                fclose(f);
+            }
+            save_path = NULL;
+        }
         int shot = 0;
         while (fields == 2 && ticks >= at) {
             if (!strcmp(first, "end")) goto done;
