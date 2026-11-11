@@ -263,16 +263,35 @@ static unsigned headless_autopilot(unsigned fallback)
         if (next == actor || next == 0x400) break;
         actor = next;
     }
-    if (!boss) return fallback;
     unsigned sub = word(ram + 0x90);
+    unsigned phase = (unsigned)(ticks % 12);
+    unsigned fire = phase < 4 ? 0x40 : (phase >= 6 && phase < 10) ? 0x80 : 0;
+    if (!boss) {
+        /* Stage four's rising camera (0:3E29) moves only while a player is
+           below its word 4C: steer there, mid-screen. */
+        unsigned camera = 0;
+        actor = 0x400;
+        for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+            if (word(ram + actor + 2) == 0 && word(ram + actor) == 0x3e29) camera = actor;
+            unsigned next = word(ram + actor + 4);
+            if (next == actor || next == 0x400) break;
+            actor = next;
+        }
+        if (!camera) return fallback;
+        int tx = 0x100 - (int)word(ram + sub + 0x21);
+        int ty = (int)word(ram + camera + 0x4c) - 0x20 - (int)word(ram + sub + 0x24);
+        unsigned held = fire;
+        if (tx > 6) held |= 0x01;
+        else if (tx < -6) held |= 0x02;
+        if (ty > 6) held |= 0x08;
+        else if (ty < -6) held |= 0x04;
+        return held;
+    }
     int dx = (int16_t)(word(ram + boss + 0x21) - word(ram + sub + 0x21));
     unsigned held = 0x08;                       /* keep rising to the surface */
     if (dx > 6) held |= 0x01;
     else if (dx < -6) held |= 0x02;
-    unsigned phase = (unsigned)(ticks % 12);
-    if (phase < 4) held |= 0x40;                /* upward / secondary fire */
-    else if (phase >= 6 && phase < 10) held |= 0x80;
-    return held;
+    return held | fire;                         /* both fire buttons in turn */
 }
 
 static void headless_run(const char *dir, const char *script_path)
@@ -314,6 +333,28 @@ done:
     fclose(script);
     draw();
     headless_shot(dir, "final");
+    /* Test-only: the live actor list with its key words, for diagnosing runs. */
+    char path[4096];
+    snprintf(path, sizeof path, "%s/headless-actors.txt", dir);
+    FILE *list = fopen(path, "w");
+    if (list) {
+        fprintf(list, "frame %lu master %04x stage %u B700 %04x B70A %04x B70C %04x 26E %04x 262 %04x 264 %04x B8C2 %04x 28C %04x\n",
+                ticks, word(ram + 0x80), word(ram + 0x84), word(ram + 0xb700), word(ram + 0xb70a),
+                word(ram + 0xb70c), word(ram + 0x26e), word(ram + 0x262), word(ram + 0x264),
+                word(ram + 0xb8c2), word(ram + 0x28c));
+        unsigned actor = 0x400;
+        for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+            fprintf(list, "%04x %04x:%04x x %04x y %04x hp %04x 1E %04x 40 %04x 42 %04x 44 %04x 46 %04x 4C %04x 50 %04x 60 %04x 6A %04x\n",
+                    actor, word(ram + actor + 2), word(ram + actor), word(ram + actor + 0x21), word(ram + actor + 0x24),
+                    word(ram + actor + 0x26), word(ram + actor + 0x1e), word(ram + actor + 0x40), word(ram + actor + 0x42),
+                    word(ram + actor + 0x44), word(ram + actor + 0x46), word(ram + actor + 0x4c), word(ram + actor + 0x50),
+                    word(ram + actor + 0x60), word(ram + actor + 0x6a));
+            unsigned next = word(ram + actor + 4);
+            if (next == actor || next == 0x400) break;
+            actor = next;
+        }
+        fclose(list);
+    }
 }
 
 int main(int argc, char **argv)
