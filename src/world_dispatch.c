@@ -17690,6 +17690,41 @@ stage2_jumper_terrain:
     case 0x115bd: case 0x115fb: case 0x116b8: case 0x116c8:
         if (!boss_segment_step(ram, main_rom, actor, (uint16_t)address)) return 0;
         break;
+    /* B000:33D6: an ending boat on its 29DC path, posed by the 29DA
+       script (duration, frame base, facing per entry). */
+    case 0xb33d6: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        world_acquire_resource(ram, actor, 4);
+        uint16_t kind = read_word(ram, actor + 0x1e) & 4;
+        uint16_t poses = read_word(bank, (uint16_t)(0x29da + kind));
+        write_word(ram, actor + 0x6e, poses);
+        begin_linear_script(ram, main_rom, actor, read_word(bank, (uint16_t)(0x29dc + kind)));
+        write_word(ram, actor + 0x42, read_word(bank, poses));
+        write_word(ram, actor + 0x4c, read_word(bank, (uint16_t)(poses + 2)));
+        ram[actor + 0x29] = bank[(uint16_t)(poses + 4)];
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x4a, 0);
+        write_word(ram, actor, 0x341d);
+    }
+        /* fall through */
+    case 0xb341d: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (!step_flight_script(ram, main_rom, actor)) {
+            world_dispatch_detail = "ending boat path script kind";
+            return 0;
+        }
+        uint16_t bottom = (ram[0x26e] & 2) ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
+        if (bottom < read_word(ram, actor + 0x24)) finish_animation(ram, actor);    /* no RETF: carries on */
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 6);
+            uint16_t entry = read_word(ram, actor + 0x6e) + read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x42, read_word(bank, entry));
+            write_word(ram, actor + 0x4c, read_word(bank, (uint16_t)(entry + 2)));
+            ram[actor + 0x29] = bank[(uint16_t)(entry + 4)];
+        }
+        queue_surface_enemy(ram, main_rom, actor);
+        break;
+    }
     case 0xb30c6:
         world_acquire_resource(ram, actor, read_word(main_rom + 0xb0000, 0x30c7));
         ram[actor + 0x2d] = 4;
@@ -23925,6 +23960,58 @@ stage2_jumper_terrain:
         write_word(ram, 0xb70e, read_word(ram, actor + 0x52));
         write_word(ram, 0xb71e, old - read_word(ram, actor + 0x52));
         write_word(ram, 0xb710, read_word(ram, 0xb70c));
+        uint16_t row = read_word(ram, actor + 0x40);
+        int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
+        advance_scroll_script(ram, main_rom, actor);
+        if (script) leave_si(row + 0x0e);
+        else keep_si();
+        break;
+    }
+    /* 0:4276: a camera scrolling left at speed A2 that draws an 11-block
+       column (0:390B) from its 42 list whenever B700 passes word 6A. */
+    case 0x4276: {
+        if (!tiles) return 0;
+        if (read_word(ram, 0x2a2) && (read_word(ram, 0x2a8) & 8)) {
+            world_dispatch_detail = "debug display 0:46D9";
+            return 0;
+        }
+        uint16_t old = read_word(ram, actor + 0x52);
+        write_word(ram, actor + 0x5a, old);
+        move_actor_axis(ram, actor + 0x51, read_word(ram, 0xa2));
+        write_word(ram, 0xb70a, read_word(ram, actor + 0x52));
+        uint16_t delta = old - read_word(ram, actor + 0x52);
+        write_word(ram, 0xb700, read_word(ram, 0xb700) + delta);
+        write_word(ram, 0xb71a, delta);
+        write_word(ram, 0xb72a, delta);
+        write_word(ram, 0xb726, delta);
+        int column = (int16_t)read_word(ram, actor + 0x6a) <= (int16_t)read_word(ram, 0xb700);
+        if (column) {
+            uint16_t base = (uint16_t)((read_word(ram, actor + 0x60) - 0xd000) << 4);
+            uint16_t source = read_word(ram, actor + 0x42), dest = read_word(ram, actor + 0x44);
+            for (unsigned i = 0; i < 11; ++i) {                          /* 0:390B */
+                world_draw_tile_block(tiles, main_rom, base, dest, read_word(main_rom + 0xa0000, source));
+                source += 2;
+                dest = (dest + 0x400) & 0x3fff;
+            }
+            write_word(ram, actor + 0x42, read_word(ram, actor + 0x42) - read_word(ram, actor + 0x4e));
+            ram[actor + 0x44] -= 0x10;
+            write_word(ram, actor + 0x6a, read_word(ram, actor + 0x6a) + 0x20);
+        }
+        uint16_t row = read_word(ram, actor + 0x40);
+        int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
+        advance_scroll_script(ram, main_rom, actor);
+        if (script) leave_si(row + 0x0e);
+        else if (column) leave_si(0x40);
+        else keep_si();
+        break;
+    }
+    /* 0:42D5: the far layer at half speed A2. */
+    case 0x42d5: {
+        uint16_t old = read_word(ram, actor + 0x52);
+        write_word(ram, actor + 0x5a, old);
+        move_actor_axis(ram, actor + 0x51, (uint16_t)((int16_t)read_word(ram, 0xa2) >> 1));
+        write_word(ram, 0xb70e, read_word(ram, actor + 0x52));
+        write_word(ram, 0xb71e, old - read_word(ram, actor + 0x52));
         uint16_t row = read_word(ram, actor + 0x40);
         int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
         advance_scroll_script(ram, main_rom, actor);
