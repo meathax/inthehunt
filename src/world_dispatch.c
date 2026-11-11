@@ -21606,8 +21606,7 @@ stage2_jumper_terrain:
             unsigned fraction = ram[actor + 0x20] + (speed & 255);
             x += (int8_t)(speed >> 8) + (fraction >> 8);
         }
-        /* Offscreen kills also consume the collision routine's scratch BX. */
-        if (x <= -64 || x >= 576) return 0;
+        (void)x;
         scroll_actor(ram, actor, 0xb71a);
         if (address == 0xb2e05) {
             write_word(ram, actor + 0x38, speed);
@@ -21638,8 +21637,28 @@ stage2_jumper_terrain:
         }
         ram[actor + 0x29] = speed >> 15;
         queue_surface_enemy(ram, main_rom, actor);
-        surface_enemy_hit(ram, main_rom, actor);
-        if (read_word(ram, actor + 0x26)) register_surface_enemy(ram, actor);
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_surface_contact(ram, main_rom, actor);
+        int16_t at = (int16_t)read_word(ram, actor + 0x21);
+        if (read_word(ram, actor + 0x26) && at > -0x40 && at < 0x240) {
+            register_surface_enemy(ram, actor);                          /* 0:B900 */
+            break;
+        }
+        /* 2ED1 scores through BX as D371 leaves it: the hit shot, or on a
+           miss the last nonzero entry of the AEE6 list it scanned. */
+        if (!hit) {
+            unsigned end = read_word(ram, 0xaee6);
+            for (unsigned i = 0; i < end; i += 2)
+                if (read_word(ram, (uint16_t)(0xaeea + i))) hit = read_word(ram, (uint16_t)(0xaeea + i));
+            /* An empty list leaves BX from the last 0DA4: (2D & 3Fh) * 2
+               when the sprite was queued, else the sprite id 2A. */
+            if (!hit)
+                hit = queued_sprite_entry ? (uint16_t)(2 * (ram[actor + 0x2d] & 0x3f)) : read_word(ram, actor + 0x2a);
+        }
+        ram[actor + 0x0b] = ram[(uint16_t)(hit + 0x0b)];
+        world_award_score(ram, main_rom, actor, hit);
+        write_word(ram, 0xc4, read_word(ram, 0xc4) & ~(1u << (ram[actor + 0x1e] & 15)));
+        write_word(ram, actor, 0x2eee);
         break;
     }
     case 0x7e5d8: {
