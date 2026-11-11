@@ -26,6 +26,7 @@ void world_dispatch_return(WorldDispatch *, uint8_t *ram, uint16_t actor);
 
 /* Names the untranslated branch when a recovered handler stops. */
 extern const char *world_dispatch_detail;
+extern uint16_t world_dispatch_port4;
 
 #endif
 

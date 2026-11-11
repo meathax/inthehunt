@@ -394,6 +394,9 @@ void world_queue_sound(uint8_t *, uint16_t);
 /* Set by a handler that stops on a known untranslated branch. */
 const char *world_dispatch_detail = "";
 
+/* The raw value the board reads from I/O port 4 (DIP switches). */
+uint16_t world_dispatch_port4 = 0xffbf;
+
 /* The 0:08AB actor loop never loads SI, so a handler can observe the value
    its predecessor in the actor list left there. Each handler's exit value is
    unknown unless it calls leave_si(); a consumer stops on an unknown value. */
@@ -15978,6 +15981,42 @@ stage2_jumper_terrain:
         write_word(ram, 0xb720, 0);
         keep_si();
         break;
+    /* 0:400C: the far layer scrolls at half the speed and fills three
+       row-scroll bands below it at 1/4, 1/8 and 1/2 of the camera speed;
+       the band bias comes from 5051, chosen by bit 8 of port 4. */
+    case 0x400c: {
+        if (!tiles) return 0;
+        if (!(read_word(ram, 0x26e) & 0x4000)) {
+            write_word(ram, 0xb71e, 0);
+            keep_si();
+            break;
+        }
+        int16_t speed = (int16_t)read_word(ram, 0xa4);
+        uint16_t script_row = read_word(ram, actor + 0x40);
+        static const uint8_t frac_at[3] = {0x51, 0x70, 0x73};
+        for (unsigned i = 0; i < 3; ++i) {
+            int16_t step = speed >> (i + 1);
+            unsigned frac = ram[actor + frac_at[i]] + (step & 255);
+            ram[actor + frac_at[i]] = (uint8_t)frac;
+            uint16_t at = actor + frac_at[i] + 1;
+            write_word(ram, at, read_word(ram, at) + (int8_t)(step >> 8) + (frac >> 8));
+            if (!i) write_word(ram, 0xb70e, read_word(ram, actor + 0x52));
+        }
+        uint16_t bias = read_word(main_rom, 0x5051 + 2 * ((world_dispatch_port4 >> 8) & 1));
+        uint16_t far = read_word(ram, 0xb70e);
+        static const uint16_t start[3] = {0xfd10, 0xfd80, 0xfde0}, count[3] = {0x70, 0x60, 0x60};
+        uint16_t value[3] = {(uint16_t)(read_word(ram, actor + 0x71) + far + bias),
+                             (uint16_t)(read_word(ram, actor + 0x74) + far + bias),
+                             (uint16_t)(far + bias)};
+        for (unsigned band = 0; band < 3; ++band)
+            for (unsigned i = 0; i < count[band]; ++i)
+                write_word(tiles, (uint16_t)(start[band] + 2 * i), value[band]);
+        write_word(ram, 0xb71e, (uint16_t)((int16_t)read_word(ram, 0xb71a) >> 1));
+        advance_scroll_script(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x40) != script_row) leave_si(read_word(ram, actor + 0x40));
+        else keep_si();
+        break;
+    }
     case 0x3fcd:
         update_background_vertical(ram, actor);
         /* fall through */

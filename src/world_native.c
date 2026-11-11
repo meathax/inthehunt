@@ -186,7 +186,7 @@ static int tick(uint16_t pads, uint16_t system)
     if (board_clock.pass_mode == WORLD_TIMING_ARCADE && (master == 0xa0e || master == 0x24e2))
         busy_system = system;
     if (!world_frame_boundary_irq(ram, tiles, oam, palette, rom, pads, 0xffff,
-                                  system, 0xffbf, 0, busy_system,
+                                  system, world_dispatch_port4, 0, busy_system,
                                   &sound, &master_sound)) {
         snprintf(failure, sizeof failure, "Unrecovered World frame transition at master %04X.", master);
         return 0;
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
         if (!headless) MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
         return 1;
     }
-    if (!world_boot_world(ram, tiles, oam, palette, rom, 0xffbf)) {
+    if (!world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4)) {
         if (!headless) MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
                                    "In The Hunt", MB_ICONERROR);
         world_audio_output_close();
