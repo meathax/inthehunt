@@ -9619,6 +9619,221 @@ static int stage_three_bridge(uint8_t *ram, const uint8_t *rom, uint8_t *terrain
     return 0;
 }
 
+/* 0:A363: trail strength from how many of the three map cells from
+   y + 18h upwards are material 3. */
+static uint16_t trail_strength(const uint8_t *ram, const uint8_t *terrain, uint16_t actor)
+{
+    uint16_t cell = world_tile_address(read_word(ram, actor + 0x21) - 0x60 + read_word(ram, 0xb70a),
+                                       0x177 - (read_word(ram, actor + 0x24) + 0x18) + read_word(ram, 0xb70c));
+    static const uint16_t strength[4] = {0x11, 0x0e, 0x0a, 6};
+    for (unsigned i = 0; i < 3; ++i) {
+        if ((terrain[(uint16_t)(cell + 3)] >> 3) != 3) return strength[i];
+        cell = (cell + 0x100) & 0x3fff;
+    }
+    return strength[3];
+}
+
+static void spark_trail(uint8_t *ram, uint16_t actor)
+{
+    uint16_t trail = effect_slot(ram, read_word(ram, 0x9a), 0x9e17);
+    write_word(ram, trail + 0x21, read_word(ram, actor + 0x21));
+    write_word(ram, trail + 0x24, read_word(ram, actor + 0x24));
+    ram[trail + 0x2c] = ram[actor + 0x2c];
+    write_word(ram, trail + 0x58, read_word(ram, actor + 0x5a));
+    ram[trail + 0x2c] = 3;
+}
+
+/* 0:AF63..B335: the third powered primary weapon. It runs at a speed
+   from AF2D (doubled when the fire input B73E bit 0 is held at launch),
+   with a B1DA shield that passes damage to it. After 14h ticks, on
+   terrain ahead or when hit it stops (B0C4), plays its burst frames and
+   throws w76 + 2 B234 shrapnel pieces, then returns its stock. */
+static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
+                                   uint16_t actor, uint32_t address)
+{
+    unsigned facing = ram[actor + 0x29] & 1;
+    switch (address) {
+    case 0xaf63: {
+        world_acquire_resource(ram, actor, 0x56);
+        write_word(ram, actor + 0x3c, 0xaf09);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x90);
+        write_word(ram, actor + 0x2a, 0x2692);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x38, read_word(rom, (uint16_t)(0xaf2d + 2 * facing + 4 * (ram[0xb73e] & 1))));
+        write_word(ram, actor + 0x42, 0x14);
+        write_word(ram, actor + 0x5c, 3);
+        write_word(ram, actor + 0x58, trail_strength(ram, terrain, actor));
+        write_word(ram, actor + 0x5a, read_word(ram, actor + 0x58));
+        uint16_t shield = effect_slot(ram, actor, 0xb1da);
+        write_word(ram, shield + 0x3c, 0xaf11);
+        write_word(ram, shield + 0x26, 1);
+        ram[shield + 0x29] = ram[actor + 0x29];
+        write_word(ram, actor, 0xafd3);
+        return 1;
+    }
+    case 0xafd3: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        queue_sprite(ram, rom, actor, 1);
+        if (!decrement(ram, actor + 0x5c)) {
+            write_word(ram, actor + 0x5c, 3);
+            spark_trail(ram, actor);
+        }
+        int burst = 0;
+        if (!decrement(ram, actor + 0x42)) {
+            /* A3B7 then tests CX as DD6/17C3 left it. */
+            if (read_word(ram, 0x84) == 4) {
+                world_dispatch_detail = "A3B7 on timer expiry reads leftover CX in stage five";
+                return 0;
+            }
+            burst = 1;
+        } else if (read_word(ram, actor + 0x26)) {
+            uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+            uint16_t cell = world_tile_address(x + 0x20 - 0x60 + read_word(ram, 0xb70a),
+                                               0x177 - y + read_word(ram, 0xb70c));
+            unsigned material = terrain[(uint16_t)(cell + 3)] >> 3;
+            if ((1u << (material & 15)) & 0xff02) {
+                /* A3B7 calls 7000:9D93 for this stage-five material. */
+                if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                burst = 1;
+            } else {
+                uint16_t behind = (cell & 0xff00) | (uint8_t)(cell - 0x10);
+                unsigned m = terrain[(uint16_t)(behind + 3)] >> 3;
+                if ((1u << ((m - 1) & 15)) & 0xff02)
+                    burst = 1;  /* CX = (m << 8) | (m - 1) is never 1 */
+                else if (x > 0x1c0 || x < 0x40) {
+                    uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+                    write_word(ram, parent + 0x48, read_word(ram, parent + 0x48) + 1);
+                    finish_animation(ram, actor);
+                    return 1;
+                } else {
+                    if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+                    return 1;
+                }
+            }
+        }
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x58, 1);
+        write_word(ram, actor + 0x42, 0x0a);
+        write_word(ram, actor + 0x38, read_word(rom, (uint16_t)(0xaf2d + 2 * facing)));
+        ram[actor + 0x0a] = 2;
+        write_word(ram, actor + 0x3c, 0xaf21);
+        write_word(ram, actor + 0x36, 8);
+        world_queue_sound(ram, 0x39);
+        write_word(ram, actor, 0xb0c4);
+        return 1;
+    }
+    case 0xb0c4: {
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x38)) {
+            move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+            write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) - read_word(rom, (uint16_t)(0xaf35 + 2 * facing)));
+            if (!decrement(ram, actor + 0x5c)) {
+                write_word(ram, actor + 0x5c, 3);
+                spark_trail(ram, actor);
+            }
+        }
+        if (!decrement(ram, actor + 0x58)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            uint16_t frame = read_word(rom, (uint16_t)(0xae5d + index));
+            if (frame == 0xffff) {
+                finish_animation(ram, actor);
+                return 1;
+            }
+            write_word(ram, actor + 0x2a, frame);
+            write_word(ram, actor + 0x58, read_word(rom, (uint16_t)(0xae7d + index)));
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        if (read_word(ram, actor + 0x42)) {
+            if (!decrement(ram, actor + 0x42)) {
+                for (uint16_t count = read_word(ram, actor + 0x76) + 2; count; --count) {
+                    uint16_t piece = world_spawn_child(ram, actor, 0xb234);
+                    if (!piece) break;
+                    ram[piece + 0x29] = ram[actor + 0x29];
+                    write_word(ram, piece + 0x21, read_word(ram, actor + 0x21) + read_word(rom, (uint16_t)(0xaf29 + 2 * facing)));
+                    write_word(ram, piece + 0x24, read_word(ram, actor + 0x24));
+                    ram[piece + 0x0b] = ram[actor + 0x0b];
+                    ram[piece + 0x2d] = ram[actor + 0x2d];
+                    write_word(ram, piece + 0x52, (count - 1) * 2);
+                    write_word(ram, piece + 0x76, read_word(ram, actor + 0x76));
+                    write_word(ram, piece + 0x54, read_word(ram, actor + 0x54));
+                    write_word(ram, actor + 0x54, read_word(ram, actor + 0x54) + 1);
+                }
+                write_word(ram, actor + 0x78, 0x10);
+            }
+        } else if (!decrement(ram, actor + 0x78)) {
+            uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            write_word(ram, parent + 0x48, read_word(ram, parent + 0x48) + 1);
+        }
+        if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
+        return 1;
+    }
+    case 0xb1da: {
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        if (ram[parent + 0x0a]) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (!read_word(ram, actor + 0x26)) {
+            write_word(ram, parent + 0x26, 0);
+            finish_animation(ram, actor);
+        } else if (read_word(ram, actor + 0x3c) != 0xffff)
+            world_append_candidate(ram + 0xa6e2, actor);
+        return 1;
+    }
+    case 0xb234: {
+        uint16_t level = 2 * read_word(ram, actor + 0x76), part = read_word(ram, actor + 0x52);
+        world_acquire_resource(ram, actor, read_word(rom, 0x9bb1 + (ram[actor + 0x0b] & 2)));
+        write_word(ram, actor + 0x3c, 0xaf19);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x40);
+        uint16_t row = read_word(rom, (uint16_t)(0xaf5d + level)) + facing + part;
+        ram[actor + 0x28] = rom[(uint16_t)(0xaf39 + row)];
+        write_word(ram, actor + 0x2e, 0x300);
+        s5_velocity(ram, rom, actor);
+        write_word(ram, actor + 0x4c, read_word(rom, (uint16_t)(0xaeb9 + read_word(rom, (uint16_t)(0xaecb + level)) + part)));
+        write_word(ram, actor + 0x42, read_word(rom, (uint16_t)(0xaf4b + read_word(rom, (uint16_t)(0xaf5d + level)) + part)));
+        write_word(ram, actor, 0xb2ab);
+        return 1;
+    }
+    case 0xb2ab: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t spin = read_word(ram, actor + 0x40) + 0x34;
+        write_word(ram, actor + 0x40, spin >= 0x700 ? 0 : spin);
+        write_word(ram, actor + 0x2a, read_word(rom, (uint16_t)(2 * ram[actor + 0x41] + read_word(ram, actor + 0x4c))));
+        queue_sprite(ram, rom, actor, 1);
+        int spent = !decrement(ram, actor + 0x42) || !read_word(ram, actor + 0x26);
+        if (!spent) {
+            uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+            uint16_t cell = world_tile_address(x - 0x60 + read_word(ram, 0xb70a), 0x177 - y + read_word(ram, 0xb70c));
+            unsigned material = terrain[(uint16_t)(cell + 3)] >> 3;
+            if ((1u << (material & 15)) & 0xff0a) {
+                /* A3B7 calls 7000:9D93 for this stage-five material. */
+                if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                spent = 1;
+            } else if (x > 0x1c0 || x < 0x40) {
+                finish_animation(ram, actor);
+                return 1;
+            }
+        }
+        if (spent) {
+            release_actor_resources(ram, actor);
+            write_word(ram, actor + 0x36, 0x20);
+            write_word(ram, actor, 0xa199);
+        } else if (read_word(ram, actor + 0x3c) != 0xffff)
+            world_append_candidate(ram + 0xa6e2, actor);
+        return 1;
+    }
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -12688,6 +12903,10 @@ stage2_jumper_terrain:
     case 0x1f1ba: case 0x1f1dd: case 0x1f23b: case 0x1f265: case 0x1f377:
         if (!tiles) return 0;
         if (!stage_three_bridge(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0xaf63: case 0xafd3: case 0xb0c4: case 0xb1da: case 0xb234: case 0xb2ab:
+        if (!tiles) return 0;
+        if (!update_shrapnel_torpedo(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
