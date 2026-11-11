@@ -15007,6 +15007,21 @@ stage2_jumper_terrain:
     case 0xbe694: case 0xbe703: case 0xbe80f: case 0xbe883: case 0xbe89b:
         if (!stage_five_diver(ram, main_rom, actor, address)) return 0;
         break;
+    /* 7000:7A84: unless 28C bit 0, play sound 22h and after 80h ticks 7. */
+    case 0x77a84:
+        if (ram[0x28c] & 1) {
+            finish_animation(ram, actor);
+            break;
+        }
+        world_queue_sound(ram, 0x22);
+        write_word(ram, actor + 0x44, 0x80);
+        write_word(ram, actor, 0x7a9e);
+        /* fall through */
+    case 0x77a9e:
+        if (decrement(ram, actor + 0x44)) break;
+        world_queue_sound(ram, 7);
+        finish_animation(ram, actor);
+        break;
     case 0x7711d: case 0x77140:
     case 0x77187: case 0x771af: case 0x771e3: case 0x77239: case 0x7725c: case 0x772a0:
     case 0x772c1: case 0x772f5: case 0x7737b: case 0x773a2: case 0x77448:
