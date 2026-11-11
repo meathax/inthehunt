@@ -238,7 +238,7 @@ static int tick(uint16_t pads, uint16_t system)
     for (unsigned i = 0; i < 3; ++i)
         if (ram[0x29a] & (1u << i)) layer_master[i] = word(ram + 0x29c + 2*i);
     if (master == 0xa0e) layer_master[1] = 1;
-    if (master == 0x24e2 || master == 0x344d)       /* OUT 98/9A/9C = 0, 1, 2 */
+    if (master == 0x24e2 || master == 0x344d || master == 0x333d)       /* OUT 98/9A/9C = 0, 1, 2 */
         for (unsigned i = 0; i < 3; ++i) layer_master[i] = (uint16_t)i;
     if (master == 0xa09 || master == 0x1d52) layer_master[1] = 0x41;
     int busy_system = -1;
@@ -361,7 +361,6 @@ static unsigned headless_autopilot(unsigned fallback)
     return held | fire;                         /* both fire buttons in turn */
 }
 
-extern unsigned world_debug_ice[4];
 static void headless_run(const char *dir, const char *script_path)
 {
     FILE *script = fopen(script_path, "r");
@@ -460,10 +459,10 @@ static void headless_run(const char *dir, const char *script_path)
         if (trace && before / 1000 != ticks / 1000) {
             unsigned sub = word(ram + 0x90);
             unsigned cfg = word(ram + sub + 0x70);
-            fprintf(trace, "%lu stage %u B700 %04x 26E %04x 264 %04x sub %04x x %04x y %04x input %02x up %04x mid %04x down %04x ice %u/%u last %u\n",
+            fprintf(trace, "%lu stage %u B700 %04x 26E %04x 264 %04x sub %04x x %04x y %04x input %02x up %04x mid %04x down %04x\n",
                     ticks, word(ram + 0x84), word(ram + 0xb700), word(ram + 0x26e), word(ram + 0x264),
                     word(ram + sub), word(ram + sub + 0x21), word(ram + sub + 0x24), input & 0xff,
-                    word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6), world_debug_ice[0], world_debug_ice[1], world_debug_ice[2]);
+                    word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6));
         }
         draw();
         if (shot) {

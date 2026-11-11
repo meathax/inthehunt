@@ -2026,17 +2026,13 @@ static void s5_break_ice(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
    (x, y) found material 1 breaks that ice cell through 7000:9D93. */
 void world_sub_pose(uint8_t *, const uint8_t *, uint16_t);
 void world_sub_wake(uint8_t *, const uint8_t *, uint16_t);
-unsigned world_debug_ice[4];
 static void weapon_ice_impact(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
                               uint16_t actor, uint16_t x, uint16_t y)
 {
     if (read_word(ram, 0x84) != 4) return;
     uint16_t cell = world_tile_address(x - 0x60 + read_word(ram, 0xb70a),
                                        0x177 - y + read_word(ram, 0xb70c));
-    ++world_debug_ice[0];
-    world_debug_ice[2] = terrain[cell + 3] >> 3;
     if ((terrain[cell + 3] >> 3) != 1) return;
-    ++world_debug_ice[1];
     s5_break_ice(ram, rom, (uint8_t *)terrain - 0x4000, actor, cell);
 }
 

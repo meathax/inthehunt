@@ -41,6 +41,12 @@ foreach ($mode in $Modes) {
         }
         $shot = ($ShotEvery -gt 0 -and $f -gt 0 -and $f % $ShotEvery -eq 0)
         # 'boss' hands the held inputs to the runner's autopilot (prefix a) once play starts.
+        # 'duo' plays two players: both coin slots, both starts, P2 mirrors P1.
+        if ($mode -match 'duo') {
+            if ($buttons -band 4) { $buttons = $buttons -bor 8 }
+            if ($buttons -band 1) { $buttons = $buttons -bor 2 }
+            $held = $held -bor ($held -shl 8)
+        }
         $state = if ($mode -match 'boss' -and $f -ge $PlayFrom) { 'a{0:x} {1:x}' -f $held, $buttons } else { '{0:x} {1:x}' -f $held, $buttons }
         if ($state -ne $prev -or $shot) { $lines.Add(('{0} {1}{2}' -f $f, $state, $(if ($shot) { ' shot' } else { '' }))); $prev = $state }
     }
