@@ -2,7 +2,7 @@
 
 Extract the Windows x64 release and double-click `play.cmd`. It imports the user's World parent archive from `$HOME\Downloads\inthunt.7z` or opens a file picker, then launches the included `InTheHunt.exe`. From the source checkout, `.\play.ps1` builds the native executable as needed. To select another archive run `.\setup.ps1 -Rom 'D:\Games\inthunt.7z'`.
 
-Press **5** for a credit and **1** to start. Use the **arrow keys** to steer, **Z** and **X** for the two weapons, and **Esc** to exit. An XInput controller uses **Back** for coin, **Start** to join, the **D-pad** or **left stick** to steer, and **A/B** for weapons.
+Press **5** for a credit and **1** to start. Use the **arrow keys** to steer, **Z** and **X** for the two weapons, **F1** (or **L3 + R3** on a controller) for the pause/options menu; quit from its last entry. An XInput controller uses **Back** for coin, **Start** to join, the **D-pad** or **left stick** to steer, and **A/B** for weapons.
 
 ## Native build
 

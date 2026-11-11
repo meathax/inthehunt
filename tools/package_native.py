@@ -14,7 +14,7 @@ FILES = {
     "tools/world_native.ps1": "tools/world_native.ps1",
     "CREDITS.md": "CREDITS.md",
 }
-INSTRUCTIONS = """In The Hunt World - native Windows development build
+INSTRUCTIONS = """In The Hunt World - native Windows build
 
 Extract the complete ZIP to a writable folder and open play.cmd.
 Select your own World ROM archive when prompted. The launcher also checks your
@@ -23,16 +23,14 @@ images stay under .local/world. Later launches can run without the archive.
 
 5 inserts a coin, 1 starts Player 1, the arrow keys move and Z and X fire.
 On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
-Esc closes the window.
+F1 (or L3 + R3 together on a controller) opens the pause menu: resume,
+video, sound, game timing, border, controls and quit. Esc goes back in the menu.
 
-PowerShell timing selection accepts:
-.\play.ps1 -TimingMode Arcade
-.\play.ps1 -TimingMode RemoveSlowdown
-The choice is saved. Original workload timing remains under recovery.
+Timing (Arcade or RemoveSlowdown) can be changed in the menu or with
+.\\play.ps1 -TimingMode Arcade. The choice is saved.
 
-This development build includes native music and sample playback. Some sound
-callbacks and gameplay routines remain under recovery. The game reports a
-missing gameplay routine when it reaches one.
+All six stages, both endings and two-player play run on natively translated
+game code with native music and sample playback.
 """
 
 if __name__ == "__main__":
