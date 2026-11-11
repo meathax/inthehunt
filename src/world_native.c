@@ -272,14 +272,17 @@ static unsigned headless_autopilot(unsigned fallback)
         unsigned camera = 0;
         actor = 0x400;
         for (unsigned steps = 0; steps < 512 && actor; ++steps) {
-            if (word(ram + actor + 2) == 0 && word(ram + actor) == 0x3e29) camera = actor;
+            if (word(ram + actor + 2) == 0 && (word(ram + actor) == 0x3e29 || word(ram + actor) == 0x3e6c)) camera = actor;
             unsigned next = word(ram + actor + 4);
             if (next == actor || next == 0x400) break;
             actor = next;
         }
         if (!camera) return fallback;
         int tx = 0x100 - (int)word(ram + sub + 0x21);
-        int ty = (int)word(ram + camera + 0x4c) - 0x20 - (int)word(ram + sub + 0x24);
+        /* Stage five's descent (0:3E6C) sinks only while a player is at or
+           below word 4C (and none above C8h): steer just below it. */
+        int depth = word(ram + camera) == 0x3e6c ? 0x10 : -0x20;
+        int ty = (int)word(ram + camera + 0x4c) + depth - (int)word(ram + sub + 0x24);
         unsigned held = fire;
         if (tx > 6) held |= 0x01;
         else if (tx < -6) held |= 0x02;

@@ -51,7 +51,7 @@ foreach ($mode in $Modes) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process -FilePath (Join-Path $Root '.local/native/InTheHunt.exe') -ArgumentList "`"$world`"", '--timing=arcade', "`"--headless=$script`"" `
         -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $out "$tag.err.txt")
-    if (!$p.WaitForExit(240000)) { Stop-Process -Id $p.Id -Force; $result = 'TIMEOUT' } else { $result = "exit $($p.ExitCode)" }
+    if (!$p.WaitForExit([Math]::Max(240000, $Frames * 5))) { Stop-Process -Id $p.Id -Force; $result = 'TIMEOUT' } else { $result = "exit $($p.ExitCode)" }
     $stop = if (Test-Path (Join-Path $world 'native-stops.tsv')) { Get-Content (Join-Path $world 'native-stops.tsv') -First 1 } else { "no stop in $Frames frames" }
     Get-ChildItem $world -Filter 'headless-*.bmp' | ForEach-Object {
         $bmp = [Drawing.Bitmap]::FromFile($_.FullName)
