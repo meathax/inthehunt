@@ -10934,6 +10934,124 @@ stage2_jumper_terrain:
         if (!tiles) return 0;
         if (!stage_three_wildlife(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
+    /* 7000:D2DD (init), D308 (perched), D390 (falling), D412 (sinking): a
+       perch that falls when the object at B8B0 touches it, releasing two
+       D45F runners, and two D50B swimmers when it reaches the water. */
+    case 0x7d2dd:
+        world_acquire_resource(ram, actor, 0xd0);
+        write_word(ram, actor + 0x0e, 0x2e);
+        ram[actor + 0x2d] = 0x29;
+        write_word(ram, actor + 0x3c, 0xf763);
+        write_word(ram, actor + 0x26, 0x100);
+        write_word(ram, actor + 0x36, 0x100);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0xd308);
+        break;
+    case 0x7d308: {
+        const uint8_t *bank = main_rom + 0x70000;
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            write_word(ram, actor + 0x2a, read_word(bank, 0xcb0e + (read_word(ram, actor + 0x40) & 2)));
+            write_word(ram, actor + 0x44, 0x0f);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 1);
+        uint16_t other = read_word(ram, 0xb8b0);
+        if (other && world_shape_overlap(ram, main_rom, actor, other, read_word(ram, actor + 0x3c),
+                                         read_word(ram, other + 0x3c))) {
+            surface_enemy_death_blast(ram, main_rom, actor);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            bank_7_effect(ram, actor, 0xd45f);
+            write_word(ram, bank_7_effect(ram, actor, 0xd45f) + 0x1e, 2);
+            write_word(ram, actor, 0xd390);
+        }
+        break;
+    }
+    case 0x7d390: {
+        const uint8_t *bank = main_rom + 0x70000;
+        if (!tiles) return 0;
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x10);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xcb12 + index)));
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0xcb1c + index)));
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        if (terrain_material(ram, tiles + 0x4000, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24)) == 4) {
+            write_word(ram, actor + 0x2a, 0x14f9);
+            write_word(ram, actor + 0x3a, (uint16_t)((int16_t)read_word(ram, actor + 0x3a) >> 1));
+            bank_7_effect(ram, actor, 0xd50b);
+            write_word(ram, bank_7_effect(ram, actor, 0xd50b) + 0x1e, 2);
+            write_word(ram, actor, 0xd412);
+        }
+        break;
+    }
+    case 0x7d412: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
+    /* 7000:D45F/D4B4 (runner) and D50B/D560 (swimmer) leave the perch. */
+    case 0x7d45f:
+    case 0x7d50b: {
+        const uint8_t *bank = main_rom + 0x70000;
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        uint16_t side = read_word(ram, actor + 0x1e) & 2, run = address == 0x7d45f;
+        uint16_t speed = read_word(bank, (run ? 0xcb2c : 0xcb38) + side);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) + 0x20);
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        ram[actor + 0x2c] = ram[parent + 0x2c];
+        ram[actor + 0x2d] = 0x31;
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x38, speed);
+        ram[actor + 0x29] = (speed >> 15) ^ 1;
+        write_word(ram, actor + 0x42, read_word(bank, (run ? 0xcb30 : 0xcb3c) + side));
+        write_word(ram, actor, run ? 0xd4b4 : 0xd560);
+        break;
+    }
+    case 0x7d4b4:
+    case 0x7d560: {
+        const uint8_t *bank = main_rom + 0x70000;
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        uint16_t x = read_word(ram, actor + 0x21);
+        if (x > 0x1c0 || x < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            if (address == 0x7d4b4) {
+                write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xcb26 + index)));
+                write_word(ram, actor + 0x40, index + 2 < 6 ? index + 2 : 0);
+            } else {
+                write_word(ram, actor + 0x2a, read_word(bank, 0xcb34 + (index & 2)));
+                write_word(ram, actor + 0x40, index + 2);
+            }
+            write_word(ram, actor + 0x44, read_word(ram, actor + 0x42));
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    }
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
         queue_palette(ram, 0x10, 0x1cb, 8);
