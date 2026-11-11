@@ -11808,6 +11808,104 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     return 0;
 }
 
+/* B000:18CB..1A7D: a stage-four vent. After a random pause it plays its
+   1196 cycle, then releases a 19A3 bubble that rises swaying on a sine;
+   a player touching a bubble takes its lift as word 33. At the surface
+   the bubble plays its 11B4 burst. */
+static int stage_four_vent(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint32_t address, const uint8_t *terrain)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    switch (address) {
+    case 0xb18cb:
+        world_acquire_resource(ram, actor, 0x4f);
+        ram[actor + 0x2d] = 0x26;
+        write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(0x18c3 + (read_word(ram, actor + 0x1e) & 6))));
+        write_word(ram, actor + 0x46, read_word(ram, actor + 0x42));
+        write_word(ram, actor, 0x18ee);
+        /* fall through */
+    case 0xb18ee:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor, 0x191d);
+        }
+        return 1;
+    case 0xb191d:
+    case 0xb1a3d:
+    case 0xb1a47: {
+        if (address == 0xb1a3d) {
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor, 0x1a47);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        int vent = address == 0xb191d;
+        if (vent && read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        unsigned step = ram[actor + 0x41];
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 0x40);
+        uint16_t frame = read_word(bank, (uint16_t)((vent ? 0x1196 : 0x11b4) + 2 * step));
+        if (frame != 0xffff) {
+            write_word(ram, actor + 0x2a, frame);
+            queue_sprite(ram, rom, actor, 1);
+            return 1;
+        }
+        if (!vent) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        uint16_t bubble = bank_b_effect(ram, actor, 0x19a3);
+        write_word(ram, bubble + 0x21, read_word(ram, actor + 0x21));
+        write_word(ram, bubble + 0x31, read_word(ram, actor + 0x21));
+        write_word(ram, bubble + 0x24, read_word(ram, actor + 0x24) + 0x10);
+        write_word(ram, bubble + 0x34, read_word(ram, actor + 0x24) + 0x10);
+        ram[bubble + 0x2c] = ram[actor + 0x2c];
+        ram[bubble + 0x2d] = 0x26;
+        write_word(ram, bubble + 0x3c, 0xf2fb);
+        write_word(ram, bubble + 0x3a, 0xc0);
+        write_word(ram, actor + 0x42, (world_random_byte(ram) & 0x3f) + read_word(ram, actor + 0x46));
+        write_word(ram, actor, 0x18ee);
+        return 1;
+    }
+    case 0xb19a3: {
+        /* 0:4372 */
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
+        write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        /* 0:6784 with BX = 200h, CX = 8, DX = word 34. */
+        uint16_t phase = (uint16_t)((read_word(ram, actor + 0x24) - read_word(ram, actor + 0x34)) * 0x200);
+        int32_t wave = (int16_t)read_word(rom + 0xa0000, 0x9d92 + 2 * (phase >> 8)) * 8;
+        uint32_t base = ram[actor + 0x30] | ((uint32_t)read_word(ram, actor + 0x31) << 8);
+        uint32_t at = (base + (uint32_t)wave) & 0xffffff;
+        ram[actor + 0x20] = (uint8_t)at;
+        write_word(ram, actor + 0x21, (uint16_t)(at >> 8));
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 0x1d);
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x118e + 2 * (ram[actor + 0x41] & 3))));
+        queue_sprite(ram, rom, actor, 1);
+        for (unsigned i = 0; i < 2; ++i) {
+            uint16_t player = read_word(ram, i ? 0x92 : 0x90);
+            uint16_t shape = read_word(ram, player + 0x3c);
+            if (shape != 0xffff && world_shape_overlap(ram, rom, actor, player, read_word(ram, actor + 0x3c), shape))
+                write_word(ram, player + 0x33, read_word(ram, actor + 0x3a));
+        }
+        if (terrain_material(ram, terrain, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24)) == 3)
+            write_word(ram, actor, 0x1a3d);
+        return 1;
+    }
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -14914,6 +15012,10 @@ stage2_jumper_terrain:
     case 0x772c1: case 0x772f5: case 0x7737b: case 0x773a2: case 0x77448:
         if (!tiles) return 0;
         if (!stage_four_props(ram, main_rom, tiles, actor, address)) return 0;
+        break;
+    case 0xb18cb: case 0xb18ee: case 0xb191d: case 0xb19a3: case 0xb1a3d: case 0xb1a47:
+        if (!tiles) return 0;
+        if (!stage_four_vent(ram, main_rom, actor, address, tiles + 0x4000)) return 0;
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
