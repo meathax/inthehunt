@@ -293,8 +293,9 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
     /* 7C58..7CA0: a submarine sealed in ice (its B8B2 bit) cannot die or
        steer. After the HUD it clears the held directions and resumes at
        7D1B, skipping the velocity and the 8480 terrain step. */
-    if ((word(ram + 0xb8b2) & owner_bit) && word(a) == 0x7c3b && !word(a + 0x6e) &&
-        !word(ram + 0x2a4)) {
+    /* 7BE5 with byte 0A set joins the same 7C88 path directly. */
+    if ((word(ram + 0xb8b2) & owner_bit) && !word(a + 0x6e) &&
+        (hidden_entry || (word(a) == 0x7c3b && !word(ram + 0x2a4)))) {
         if (!(flags & 0x8080) && !a[0x0a] && !word(a + 0x26)) put(a + 0x26, 1);
         world_sub_hud(ram, rom, tiles, sub);
         put(ram + 0xb73e, word(ram + 0xb73e) & 0xfff0);

@@ -311,6 +311,19 @@ static void apply_radial_impulse(uint8_t *ram, const uint8_t *rom, uint16_t acto
         return;
     }
     leave_cx((uint16_t)y > (uint16_t)x ? (uint16_t)y : (uint16_t)x);
+    /* D459 leaves SI at its octant table entry: D48D + (|dy| << 8) / |dx|,
+       or D58E + (|dx| << 8) / |dy| when |dy| is larger; the bare base when
+       the divisor is zero. */
+    {
+        unsigned big = x, small = y;
+        uint16_t base = 0xd48d;
+        if ((uint16_t)y > (uint16_t)x) {
+            big = y;
+            small = x;
+            base = 0xd58e;
+        }
+        leave_si(big ? (uint16_t)(base + ((small << 8) / big)) : base);
+    }
 
     unsigned angle = vector_angle(rom, dx, dy);
     uint16_t offset = ((angle + 4) & 0xf8) / 2 + (distance & 0xfff0) * 8
@@ -333,18 +346,26 @@ static void update_radial_effect(uint8_t *ram, const uint8_t *rom, uint16_t acto
     } else {
         scroll_actor(ram, actor, 0xb726);
     }
+    int stepped = 0;
+    uint16_t step_si = 0;
     if (!--ram[actor + 0x48]) {
         uint16_t frame = read_word(ram, actor + 0x40);
-        uint16_t sprite = read_word(rom, read_word(ram, actor + 0x4c) + 2 * frame);
+        step_si = (uint16_t)(2 * frame + read_word(ram, actor + 0x4c));    /* MOV IX, frame*2 + 4C */
+        stepped = 1;
+        uint16_t sprite = read_word(rom, step_si);
         write_word(ram, actor + 0x40, frame + 1);
         if (sprite == 0xffff) {
             finish_animation(ram, actor);
+            leave_si(step_si);
             return;
         }
         write_word(ram, actor + 0x2a, sprite);
         ram[actor + 0x48] = rom[(uint16_t)(read_word(ram, actor + 0x4a) + frame)];
     }
     queue_sprite(ram, rom, actor, 0);
+    if (queued_sprite_entry) leave_si(queued_sprite_entry);
+    else if (stepped) leave_si(step_si);
+    else keep_si();
     if (read_word(ram, actor + 0x64)) {
         decrement(ram, actor + 0x64);
         return;
@@ -23693,6 +23714,24 @@ stage2_jumper_terrain:
         write_word(ram, actor+2, 0);
         break;
     case 0x1a4f:
+        break;
+    /* 0:CD9C: blinks the new high-score row's palette (slot 31h + rank)
+       every 24h ticks until the scene fades. */
+    case 0xcd9c:
+        ram[actor + 0x2c] = (uint8_t)(read_word(ram, actor + 0x4e) - 1 + 0x32);
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x42, 0x24);
+        write_word(ram, actor, 0xcdb5);
+        /* fall through */
+    case 0xcdb5:
+        if (!decrement(ram, actor + 0x42)) {
+            uint16_t index = (read_word(ram, actor + 0x40) & 4) + ((read_word(ram, actor + 0x1e) & 1) << 1);
+            if (!(read_word(ram, 0x262) & 0x8800))
+                s4b_job(ram, 8 * (ram[actor + 0x2c] & 0x3f), read_word(main_rom, (uint16_t)(0xcead + index)), 5);
+            write_word(ram, actor + 0x42, 0x24);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 4);
+        }
+        if (ram[0x263] & 0x80) finish_animation(ram, actor);
         break;
     case 0xcccb: {
         if (read_word(ram, 0xd2)) {
