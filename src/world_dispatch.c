@@ -17581,6 +17581,30 @@ stage2_jumper_terrain:
         write_word(ram, 0xb72a, 0);
         write_word(ram, 0xb726, 0);
         break;
+    /* 0:413B is 4138 without the 450A camera call. */
+    case 0x413b:
+        write_word(ram, 0x26e, read_word(ram, 0x26e) & ~0x4000);
+        write_word(ram, 0xb71a, 0);
+        write_word(ram, 0xb72a, 0);
+        write_word(ram, 0xb726, 0);
+        keep_si();
+        break;
+    /* 0:414D lifts the near layers one pixel, then 4162 holds them still. */
+    case 0x414d:
+        write_word(ram, 0x26e, read_word(ram, 0x26e) & ~0x4000);
+        write_word(ram, 0xb71c, 0xffff);
+        write_word(ram, 0xb72c, 0xffff);
+        write_word(ram, actor, 0x4162);
+        keep_si();
+        break;
+    case 0x4162:
+        write_word(ram, 0x26e, read_word(ram, 0x26e) & ~0x4000);
+        write_word(ram, 0xb71a, 0);
+        write_word(ram, 0xb72a, 0);
+        write_word(ram, 0xb71c, 0);
+        write_word(ram, 0xb72c, 0);
+        keep_si();
+        break;
     case 0x4177:
         update_background_vertical(ram, actor);
         /* fall through */
