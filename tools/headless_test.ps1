@@ -40,7 +40,8 @@ foreach ($mode in $Modes) {
             if ($mode -match 'x' -and $phase -ge 12 -and $phase -lt 18) { $held = $held -bor 0x40 }
         }
         $shot = ($ShotEvery -gt 0 -and $f -gt 0 -and $f % $ShotEvery -eq 0)
-        $state = '{0:x} {1:x}' -f $held, $buttons
+        # 'boss' hands the held inputs to the runner's autopilot (prefix a) once play starts.
+        $state = if ($mode -match 'boss' -and $f -ge $PlayFrom) { 'a{0:x} {1:x}' -f $held, $buttons } else { '{0:x} {1:x}' -f $held, $buttons }
         if ($state -ne $prev -or $shot) { $lines.Add(('{0} {1}{2}' -f $f, $state, $(if ($shot) { ' shot' } else { '' }))); $prev = $state }
     }
     $lines.Add("$Frames end")

@@ -244,6 +244,37 @@ static void headless_shot(const char *dir, const char *name)
     fclose(f);
 }
 
+/* Test-only autopilot for scripted runs: it reads work RAM to choose the
+   held inputs and changes no game state. While the stage-three end boss body
+   (1000:45BA..4C19) is in the actor list, player one moves under it, keeps
+   to the surface and alternates both fire buttons; otherwise `fallback`. */
+static unsigned headless_autopilot(unsigned fallback)
+{
+    static const unsigned boss_states[] = {0x45ba, 0x4614, 0x4640, 0x465a, 0x46a5, 0x46e4, 0x47cb,
+                                           0x4811, 0x4837, 0x48a4, 0x49ab, 0x49ce, 0x4c19};
+    unsigned boss = 0, actor = 0x400;
+    for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+        if (word(ram + actor + 2) == 0x1000) {
+            unsigned state = word(ram + actor);
+            for (unsigned i = 0; i < sizeof boss_states / sizeof *boss_states; ++i)
+                if (state == boss_states[i]) boss = actor;
+        }
+        unsigned next = word(ram + actor + 4);
+        if (next == actor || next == 0x400) break;
+        actor = next;
+    }
+    if (!boss) return fallback;
+    unsigned sub = word(ram + 0x90);
+    int dx = (int16_t)(word(ram + boss + 0x21) - word(ram + sub + 0x21));
+    unsigned held = 0x08;                       /* keep rising to the surface */
+    if (dx > 6) held |= 0x01;
+    else if (dx < -6) held |= 0x02;
+    unsigned phase = (unsigned)(ticks % 12);
+    if (phase < 4) held |= 0x40;                /* upward / secondary fire */
+    else if (phase >= 6 && phase < 10) held |= 0x80;
+    return held;
+}
+
 static void headless_run(const char *dir, const char *script_path)
 {
     FILE *script = fopen(script_path, "r");
@@ -251,7 +282,7 @@ static void headless_run(const char *dir, const char *script_path)
         snprintf(failure, sizeof failure, "Cannot open the headless input script.");
         return;
     }
-    unsigned held = 0, buttons = 0;
+    unsigned held = 0, buttons = 0, autopilot = 0;
     unsigned long at = 0;
     char first[32], second[32], third[32];
     int fields = fscanf(script, "%lu %31s", &at, first);
@@ -260,7 +291,8 @@ static void headless_run(const char *dir, const char *script_path)
         while (fields == 2 && ticks >= at) {
             if (!strcmp(first, "end")) goto done;
             if (fscanf(script, "%31s", second) != 1) goto done;
-            held = (unsigned)strtoul(first, NULL, 16);
+            autopilot = first[0] == 'a';
+            held = (unsigned)strtoul(first + autopilot, NULL, 16);
             buttons = (unsigned)strtoul(second, NULL, 16);
             long mark = ftell(script);
             if (fscanf(script, "%31s", third) == 1 && !strcmp(third, "shot")) shot = 1;
@@ -268,7 +300,8 @@ static void headless_run(const char *dir, const char *script_path)
             fields = fscanf(script, "%lu %31s", &at, first);
         }
         if (fields != 2) break;
-        if (!tick((uint16_t)~held, (uint16_t)~buttons)) break;
+        unsigned input = autopilot ? headless_autopilot(held) : held;
+        if (!tick((uint16_t)~input, (uint16_t)~buttons)) break;
         ticks += elapsed_board_frames;
         draw();
         if (shot) {
