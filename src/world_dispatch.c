@@ -18554,6 +18554,59 @@ stage2_jumper_terrain:
        below y C8h and at or below word 4C (44AB), the camera sinks one
        pixel a frame and, at each 20h trigger in 6A, 3950 draws a row of
        12 map blocks. */
+    /* 0:3DFE (init) and 3E29: the stage-four ascent. While a player is above
+       y 148h and below word 4C (444C), the camera rises one pixel a frame. */
+    case 0x3dfe: {
+        static const uint16_t cleared[] = {0xb716, 0xb718, 0xb726, 0xb728, 0xb71a,
+                                           0xb71c, 0xb72a, 0xb72c, 0xb71e, 0xb720};
+        for (unsigned i = 0; i < sizeof cleared / sizeof *cleared; ++i) write_word(ram, cleared[i], 0);
+    }
+        /* fall through */
+    case 0x3e1e:
+        write_word(ram, 0x270, 2);
+        write_word(ram, actor, 0x3e29);
+        /* fall through */
+    case 0x3e29: {
+        if (!tiles || (read_word(ram, 0x2a2) && (read_word(ram, 0x2a8) & 0x100)))
+            return 0;
+        uint16_t limits = read_word(ram, actor + 0x68), row = read_word(ram, actor + 0x40);
+        update_camera_limits(ram, main_rom, actor);
+        /* 444C */
+        uint16_t flags = read_word(ram, 0x26e) & ~0x4000;
+        int rise = 0;
+        if (!(flags & 0x8000)) {
+            uint16_t height = read_word(ram, actor + 0x4c);
+            int stop = 0;
+            if (read_word(ram, 0x264) & 4) {
+                uint16_t y = read_word(ram, read_word(ram, 0x90) + 0x24);
+                if (y >= 0x148) stop = 1;
+                else if (y < height) flags |= 0x4000;
+            }
+            if (!stop && (read_word(ram, 0x264) & 8)) {
+                uint16_t y = read_word(ram, read_word(ram, 0x92) + 0x24);
+                if (y >= 0x148) stop = 1;
+                else if (y < height) flags |= 0x4000;
+            }
+            rise = !stop && (flags & 0x4000);
+        }
+        if (!rise) flags &= ~0x4000;
+        write_word(ram, 0x26e, flags);
+        if (!rise) {
+            write_word(ram, 0xb71c, 0);
+            write_word(ram, 0xb72c, 0);
+            write_word(ram, 0xa4, 0);
+            leave_si(limits);
+            break;
+        }
+        write_word(ram, actor + 0x56, read_word(ram, actor + 0x56) + 1);
+        write_word(ram, 0xb70c, read_word(ram, 0xb70c) + 1);
+        write_word(ram, 0xb700, read_word(ram, 0xb700) + 1);
+        write_word(ram, 0xb71c, 1);
+        write_word(ram, 0xb72c, 1);
+        advance_scroll_script(ram, main_rom, actor);
+        leave_si(read_word(ram, actor + 0x40) != row ? read_word(ram, actor + 0x40) : limits);
+        break;
+    }
     case 0x3e61:
         write_word(ram, 0x270, 4);
         write_word(ram, actor, 0x3e6c);
