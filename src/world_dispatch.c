@@ -660,6 +660,20 @@ static void begin_linear_script(uint8_t *ram, const uint8_t *rom, uint16_t actor
         ram[actor + 0x20] = ram[actor + 0x23] = 0;
         return;
     }
+    if (kind == 0x0e) {
+        /* D806: heading from the script, speed 2E kept; steps the anchor. */
+        ram[actor + 0x28] = bank[offset + 4];
+        unsigned angle = ram[actor + 0x28] * 2;
+        for (unsigned axis = 0; axis < 2; ++axis) {
+            int16_t component = read_word(rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + angle);
+            write_word(ram, actor + 0x38 + 2 * axis, (component * (int16_t)read_word(ram, actor + 0x2e)) >> 8);
+        }
+        write_word(ram, actor + 0x78, 0);
+        write_word(ram, actor + 0x76, 0);
+        write_word(ram, actor + 0x7e, offset + 8);
+        ram[actor + 0x20] = ram[actor + 0x23] = 0;
+        return;
+    }
     if (kind == 0x14) {
         /* D87D: a fixed velocity; fractions and accelerations stay as they were. */
         write_word(ram, actor + 0x38, read_word(bank, offset + 4));
@@ -687,8 +701,8 @@ static int step_flight_script(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     uint16_t kind = read_word(ram, actor + 0x7a);
     uint16_t next = read_word(ram, actor + 0x7e);
     uint16_t next_kind = read_word(bank, next);
-    if ((kind & 1) || (kind > 6 && kind != 0x10 && kind != 0x14) || (read_word(ram, actor + 0x7c) == 1 &&
-        next_kind != 0xffff && ((next_kind & 1) || (next_kind > 6 && next_kind != 0x10 && next_kind != 0x14)))) return 0;
+    if ((kind & 1) || (kind > 6 && kind != 0x0e && kind != 0x10 && kind != 0x14) || (read_word(ram, actor + 0x7c) == 1 &&
+        next_kind != 0xffff && ((next_kind & 1) || (next_kind > 6 && next_kind != 0x0e && next_kind != 0x10 && next_kind != 0x14)))) return 0;
     if (!kind) {
         scroll_actor(ram, actor, 0xb71a);
     } else if (kind == 0x10) {
@@ -706,6 +720,13 @@ static int step_flight_script(uint8_t *ram, const uint8_t *rom, uint16_t actor)
         uint32_t height = (ram[actor + 0x33] | ((uint32_t)read_word(ram, actor + 0x34) << 8)) + ((uint32_t)wave & 0xffffff);
         ram[actor + 0x23] = (uint8_t)height;
         write_word(ram, actor + 0x24, (uint16_t)(height >> 8));
+    } else if (kind == 0x0e) {
+        /* D6F0: accelerate and move the anchor at 30..35. */
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) + read_word(ram, actor + 0x78));
+        move_actor_axis(ram, actor + 0x30, read_word(ram, actor + 0x38));
+        write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) + read_word(ram, actor + 0x76));
+        move_actor_axis(ram, actor + 0x33, read_word(ram, actor + 0x3a));
     } else if (kind == 0x14) {
         /* D70C. */
         scroll_actor(ram, actor, 0xb71a);
@@ -14209,6 +14230,91 @@ static int stage_four_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
     return 0;
 }
 
+/* B000:EBF5..EDDF: the stage-five ice cutter (count B8C0). It follows its
+   EA06 path; while heading along an axis it breaks a 4-cell line of ice
+   ahead of it every 8 frames (ED7D column / EDB6 row). Above y = 168h it
+   only scrolls. */
+static int stage_five_cutter(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    if (address == 0xbebf5) {
+        write_word(ram, 0xb8c0, read_word(ram, 0xb8c0) + 1);
+        world_acquire_resource(ram, actor, 0xa1);
+        write_word(ram, actor + 0x0e, 0x1e);
+        write_word(ram, actor + 0x2d, 0x20);
+        write_word(ram, actor + 0x3c, 0xf6e3);
+        write_word(ram, actor + 0x26, 0x200);
+        write_word(ram, actor + 0x36, 0x200);
+        begin_linear_script(ram, rom, actor, read_word(bank, (uint16_t)(0xea06 + (read_word(ram, actor + 0x1e) & 6))));
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor, 0xec3b);
+        return 1;
+    }
+    if (read_word(ram, actor + 0x24) >= 0x168) {
+        scroll_actor(ram, actor, 0xb71a);
+    } else {
+        int step = step_flight_script(ram, rom, actor);
+        if (!step) {
+            world_dispatch_detail = "stage-five cutter path script kind";
+            return 0;
+        }
+        if (step < 0 || s4_offscreen(ram, actor)) {
+            decrement(ram, 0xb8c0);
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            unsigned dir = (ram[actor + 0x28] & 0xf0) >> 4;
+            ram[actor + 0x29] = bank[(uint16_t)(0xe9f6 + dir)];
+            uint16_t set = read_word(bank, (uint16_t)(0xe9e6 + ((dir << 1) & 0x0e)));
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xe9c8 + read_word(ram, actor + 0x40) + set)));
+            write_word(ram, actor + 0x44, 2);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2 >= 6 ? 0 : read_word(ram, actor + 0x40) + 2);
+        }
+        if (!(ram[actor + 0x28] & 0x3f) && !decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 8);
+            uint16_t ix = (read_word(ram, actor + 0x28) >> 4) & 0x0c;
+            uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+            write_word(ram, actor + 0x21, x + read_word(bank, (uint16_t)(0xebac + ix)));
+            write_word(ram, actor + 0x24, y + read_word(bank, (uint16_t)(0xebae + ix)));
+            uint16_t cell = s5_cell(ram, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
+            int row = (ix >> 1) & 2;
+            for (unsigned i = 0; i < 4; ++i) {
+                if (i) {
+                    if (row) {
+                        cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+                        write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + 8);
+                    } else {
+                        cell = (cell + 0x100) & 0x3fff;
+                        write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) - 8);
+                    }
+                }
+                s5_break_ice(ram, rom, tiles, actor, cell);
+            }
+            write_word(ram, actor + 0x24, y);
+            write_word(ram, actor + 0x21, x);
+        }
+    }
+    queue_sprite(ram, rom, actor, 1);
+    ram[actor + 0x0d] = 0;
+    uint16_t hit = world_player_contact(ram, rom, actor);
+    if (read_word(ram, actor + 0x26)) {
+        ram[actor + 0x0d] = 0;
+        hit = world_projectile_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) return 1;
+    }
+    if (!hit) {
+        world_dispatch_detail = "stage-five cutter destroyed without a hit; 6237 reads leftover BX";
+        return 0;
+    }
+    world_award_score(ram, rom, actor, hit);
+    spawn_kill_blast(ram, actor);
+    decrement(ram, 0xb8c0);
+    finish_animation(ram, actor);
+    return 1;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -17471,6 +17577,19 @@ stage2_jumper_terrain:
     case 0x76b7b: case 0x76b89:
         if (!tiles) return 0;
         if (!stage_four_boss(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0xbebf5: case 0xbec3b:
+        if (!tiles) return 0;
+        if (!stage_five_cutter(ram, main_rom, tiles, actor, address)) return 0;
+        break;
+    /* B000:EBC0: until B700 reaches word 1E, plays cutter sound 93h every
+       20h ticks while any cutter (B8C0) lives. */
+    case 0xbebc0:
+        if (read_word(ram, 0xb700) >= read_word(ram, actor + 0x1e)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (read_word(ram, 0xb8c0) && !(read_word(ram, 0x276) & 0x1f)) s2b_sound2(ram, 0x93);
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
