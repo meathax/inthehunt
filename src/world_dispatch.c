@@ -471,7 +471,7 @@ static void queue_surface_enemy(uint8_t *ram, const uint8_t *rom, uint16_t actor
 }
 
 /* 6C78 is used both on initial destruction and on the rising mine's timer. */
-static void surface_enemy_death_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+static uint16_t surface_enemy_death_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     uint16_t blast = effect_slot(ram, actor, 0x6efe);
     write_word(ram, blast + 0x4c, read_word(rom, 0x6c86));
@@ -481,6 +481,7 @@ static void surface_enemy_death_blast(uint8_t *ram, const uint8_t *rom, uint16_t
     write_word(ram, blast + 0x56, 0x30);
     write_word(ram, blast + 0x58, 0x80);
     world_queue_sound(ram, 0x3f);
+    return blast;
 }
 
 static void register_surface_enemy(uint8_t *ram, uint16_t actor)
@@ -8829,6 +8830,402 @@ static int stage_three_building(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     return 0;
 }
 
+/* 0:11AD: return the private palette in byte 14 to the free list. */
+static void release_private_palette(uint8_t *ram, uint16_t actor)
+{
+    unsigned slot = ram[actor + 0x14];
+    uint16_t cursor = read_word(ram, 0xa488);
+    ram[0xa406 + cursor] = slot;
+    write_word(ram, 0xa488, (cursor + 1) & 63);
+    write_word(ram, 0xa48a, read_word(ram, 0xa48a) + 1);
+    write_word(ram, 0x9e06 + 8 * slot, 0);
+}
+
+/* 1000:FFCC: ride the parent at offset (31, 34). */
+static uint16_t boss_part_follow(uint8_t *ram, uint16_t actor)
+{
+    uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+    write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) + read_word(ram, actor + 0x31));
+    write_word(ram, actor + 0x24, read_word(ram, parent + 0x24) + read_word(ram, actor + 0x34));
+    return parent;
+}
+
+/* 1000:EC04..F196 and 7000:CCA9: the stage-three boss. EC04 locks the
+   scroll (26E bit 15) once B700 reaches DBFh and assembles its parts. The
+   EE3D core takes shots; when it dies its EDB3 mount bursts and sets bit 0
+   of word 50 on EC04, which collapses the structure: the EFEA segments
+   fall one by one, EF60 bursts and EF18 slides away. EC04 then redraws the
+   map, sets bit 1 of word 50 (retiring F188 and the CCA9 launcher) and
+   unlocks the scroll. CCA9 sends CDCC attackers while the scroll is locked. */
+static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
+                            uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0x10000;
+    uint16_t parent, child;
+    switch (address) {
+    case 0x1ec04:
+        ram[actor + 0x2c] = 0x0d;
+        child = world_spawn_child(ram, actor, 0xedb3);
+        if (!child)
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x50) | 1);
+        else {
+            write_word(ram, child + 2, 0x1000);
+            write_word(ram, child + 0x31, 0);
+            write_word(ram, child + 0x34, 0xff88);
+            ram[child + 0x2c] = ram[actor + 0x2c];
+            bank_7_effect(ram, actor, 0xcca9);
+            child = bank_1_effect(ram, actor, 0xef18);
+            write_word(ram, child + 0x31, 0xff30);
+            write_word(ram, child + 0x34, 0x10);
+            write_word(ram, child + 0x2a, 0xc064);
+            child = bank_1_effect(ram, actor, 0xef60);
+            write_word(ram, child + 0x31, 0xff68);
+            write_word(ram, child + 0x34, 8);
+            ram[child + 0x2c] = ram[actor + 0x2c];
+            child = bank_1_effect(ram, actor, 0xefea);
+            write_word(ram, child + 0x31, 0xff80);
+            write_word(ram, child + 0x34, 8);
+            ram[child + 0x2c] = ram[actor + 0x2c];
+            write_word(ram, child + 0x1e, 6);
+            child = bank_1_effect(ram, actor, 0xf188);
+            write_word(ram, child + 0x31, 0x38);
+            write_word(ram, child + 0x34, 0x28);
+            write_word(ram, child + 0x2a, 0xc014);
+        }
+        write_word(ram, actor, 0xecad);
+        return 1;
+    case 0x1ecad:
+        scroll_actor(ram, actor, 0xb71a);
+        if ((int16_t)read_word(ram, 0xb700) >= 0xdbf) {
+            write_word(ram, 0x26e, read_word(ram, 0x26e) | 0x8000);
+            write_word(ram, actor, 0xecc6);
+        }
+        return 1;
+    case 0x1ecc6:
+        if (read_word(ram, actor + 0x50) & 1) {
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor, 0xecd8);
+        }
+        return 1;
+    case 0x1ecd8:
+        if (decrement(ram, actor + 0x42)) return 1;
+        ram[actor + 0x2d] = 0x3e;
+        write_word(ram, actor + 0x2a, 0xc286);
+        ram[actor + 0x2c] = 0x23;
+        ram[blast_sequence(ram, actor, 0x1000, 0xd768, 2) + 0x2d] = 0x1f;
+        write_word(ram, actor + 0x42, 0x40);
+        write_word(ram, actor, 0xed07);
+        return 1;
+    case 0x1ed07:
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            blast_sequence(ram, actor, 0x1000, 0xd7ac, 1);
+            write_word(ram, actor + 0x42, 0x10);
+            write_word(ram, actor, 0xed2a);
+        }
+        return 1;
+    case 0x1ed2a:
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            copy_tile_blocks(ram, terrain - 0x4000, rom, 0x4000, 0x1070, 0x3c90, 0x408);
+            leave_si(0x40);
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x50) | 2);
+            write_word(ram, 0x26e, read_word(ram, 0x26e) & 0x7fff);
+            finish_animation(ram, actor);
+        }
+        return 1;
+
+    case 0x1ed64:
+        parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        if (ram[parent + 0x0a] & 1) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            queue_palette(ram, ram[actor + 0x2c], read_word(bank, 0xd714 + (read_word(ram, actor + 0x40) & 2)), 5);
+            write_word(ram, actor + 0x42, 0x21);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        }
+        return 1;
+
+    case 0x1edb3:
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor + 0x2a, 0xbf82);
+        write_word(ram, actor + 0x26, 1);
+        child = world_spawn_child(ram, actor, 0xee3d);
+        if (child) write_word(ram, child + 2, 0x1000);
+        else write_word(ram, actor + 0x26, 0);
+        write_word(ram, actor, 0xedd9);
+        return 1;
+    case 0x1edd9:
+        boss_part_follow(ram, actor);
+        queue_sprite(ram, rom, actor, 0);
+        if (!read_word(ram, actor + 0x26)) {
+            blast_sequence(ram, actor, 0x1000, 0xd718, 2);
+            spawn_fragments(ram, actor, 0x1000, 0xd808);
+            write_word(ram, actor + 0x42, 0x20);
+            write_word(ram, actor, 0xee0c);
+        }
+        return 1;
+    case 0x1ee0c:
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            write_word(ram, parent + 0x50, read_word(ram, parent + 0x50) | 1);
+            finish_animation(ram, actor);
+        }
+        return 1;
+
+    case 0x1ee3d:
+        ram[actor + 0x2c] = 9;
+        write_word(ram, actor + 0x0e, 0x38);
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor + 0x3c, 0xf9f3);
+        write_word(ram, actor + 0x44, 0);
+        write_word(ram, actor + 0x2a, read_word(bank, 0xd6f0));
+        write_word(ram, actor + 0x26, read_word(bank, (uint16_t)(0xd6f4 + read_word(ram, 0x88))));
+        write_word(ram, actor + 0x36, read_word(bank, (uint16_t)(0xd6f4 + read_word(ram, 0x88))));
+        child = bank_1_effect(ram, actor, 0xed64);
+        ram[child + 0x2c] = ram[actor + 0x2c];
+        write_word(ram, child + 0x42, 2);
+        write_word(ram, actor, 0xee85);
+        /* fall through */
+    case 0x1ee85:
+    case 0x1ee97: {
+        int open = (int16_t)read_word(ram, 0xb700) >= 0xdbf;
+        if (address != 0x1ee97 && open) {
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0xee97);
+        }
+        boss_part_follow(ram, actor);
+        if (!decrement(ram, actor + 0x44)) {
+            write_word(ram, actor + 0x2a, read_word(bank, 0xd6f0 + (read_word(ram, actor + 0x40) & 2)));
+            write_word(ram, actor + 0x44, ram[actor + 0x19] ? 1 : 2);
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        if (ram[actor + 0x19]) decrement(ram, actor + 0x19);
+        if (!open) return 1;
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_projectile_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) return 1;
+        if (!hit) {
+            world_dispatch_detail = "boss core destroyed without a shot; 6237 reads leftover BX";
+            return 0;
+        }
+        world_award_score(ram, rom, actor, hit);
+        parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        write_word(ram, parent + 0x26, 0);
+        release_private_palette(ram, actor);
+        finish_animation(ram, actor);
+        return 1;
+    }
+
+    case 0x1ef18:
+        ram[actor + 0x2c] = 0x21;
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor, 0xef26);
+        return 1;
+    case 0x1ef26:
+        parent = boss_part_follow(ram, actor);
+        if (read_word(ram, parent + 0x50) & 1) write_word(ram, actor, 0xef3b);
+        queue_sprite(ram, rom, actor, 0);
+        return 1;
+    case 0x1ef3b:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x20) finish_animation(ram, actor);
+        else queue_sprite(ram, rom, actor, 0);
+        return 1;
+
+    case 0x1ef60:
+        ram[actor + 0x2d] = 0x3d;
+        write_word(ram, actor + 0x2a, 0xbfdc);
+        write_word(ram, actor, 0xef6f);
+        return 1;
+    case 0x1ef6f:
+        parent = boss_part_follow(ram, actor);
+        if (read_word(ram, parent + 0x50) & 1) {
+            write_word(ram, actor + 0x42, read_word(bank, 0xd942));
+            write_word(ram, actor, 0xef8b);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return 1;
+    case 0x1ef8b:
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 0x10);
+            surface_enemy_death_blast(ram, rom, actor);
+            spawn_fragments(ram, actor, 0x1000, 0xd8a6);
+            write_word(ram, actor, 0xefb0);
+        }
+        return 1;
+    case 0x1efb0:
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x2a, 0xc00a);
+            write_word(ram, actor, 0xefc5);
+        }
+        return 1;
+    case 0x1efc5:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) == 0x40) finish_animation(ram, actor);
+        else queue_sprite(ram, rom, actor, 0);
+        return 1;
+
+    case 0x1efea: {
+        uint16_t links = read_word(ram, actor + 0x1e);
+        ram[actor + 0x2d] = (uint8_t)(links * 2 + 0x30);
+        write_word(ram, actor + 0x2a, 0xbfe6);
+        write_word(ram, actor + 0x3c, 0xfb4b);
+        links = decrement(ram, actor + 0x1e);
+        if (links) {
+            child = bank_1_effect(ram, actor, 0xefea);
+            write_word(ram, child + 0x31, 0x20);
+            ram[child + 0x2c] = ram[actor + 0x2c];
+            write_word(ram, child + 0x1e, links);
+        } else
+            write_word(ram, actor + 0x2a, 0xbff8);
+        write_word(ram, actor, 0xf02e);
+        return 1;
+    }
+    case 0x1f02e:
+        parent = boss_part_follow(ram, actor);
+        if (read_word(ram, parent + 0x50) & 1) {
+            write_word(ram, actor + 0x50, read_word(ram, actor + 0x50) | 1);
+            write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(0xd936 + 2 * read_word(ram, actor + 0x1e))));
+            write_word(ram, actor, 0xf055);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return 1;
+    case 0x1f055: {
+        queue_sprite(ram, rom, actor, 0);
+        if (decrement(ram, actor + 0x42)) return 1;
+        uint16_t blast = surface_enemy_death_blast(ram, rom, actor);
+        write_word(ram, blast + 0x31, 0xfff0);
+        ram[blast + 0x2d] = ram[actor + 0x2d] + 1;
+        spawn_fragments(ram, actor, 0x1000, 0xd8a6);
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x42, 0x28);
+        write_word(ram, actor + 0x3a, 0x100);
+        uint16_t cell = read_word(bank, 0xd944 + 2 * (read_word(ram, actor + 0x1e) & 7));
+        for (unsigned i = 0; i < 4; ++i) {
+            uint16_t at = (uint16_t)(cell + 2 + 4 * i);
+            if (at >= 0xc000) {
+                world_dispatch_detail = "boss segment clears a map cell outside segment D400";
+                return 0;
+            }
+            write_word(terrain, at, read_word(terrain, at) & 0x7ff);
+        }
+        write_word(ram, actor, 0xf0c1);
+        return 1;
+    }
+    case 0x1f0c1:
+    case 0x1f0cf: {
+        if (address == 0x1f0c1) {
+            write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x10);
+            if (!decrement(ram, actor + 0x42)) write_word(ram, actor, 0xf0cf);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        write_word(ram, actor + 0x60, read_word(ram, actor + 0x60) + 1);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xd90a + index)));
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0xd920 + index)));
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        if (terrain_material(ram, terrain, x, y) == 4) {
+            spawn_surface_splash_effect(ram, rom, actor, x, y);
+            write_word(ram, actor + 0x3a, 0xff00);
+            write_word(ram, actor + 0x2a, 0xc25c);
+            write_word(ram, actor, 0xf122);
+        }
+        return 1;
+    }
+    case 0x1f122:
+    case 0x1f13b: {
+        if (address == 0x1f122 &&
+            (world_terrain_mask(ram, terrain, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24)) & 0xff02)) {
+            write_word(ram, actor + 0x3a, (uint16_t)((int16_t)read_word(ram, actor + 0x3a) >> 1));
+            write_word(ram, actor, 0xf13b);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40)
+            finish_animation(ram, actor);
+        else
+            queue_sprite(ram, rom, actor, 0);
+        return 1;
+    }
+
+    case 0x1f188:
+        ram[actor + 0x2c] = 0x23;
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor, 0xf196);
+        return 1;
+    case 0x1f196:
+        parent = boss_part_follow(ram, actor);
+        if (read_word(ram, parent + 0x50) & 2) finish_animation(ram, actor);
+        else queue_sprite(ram, rom, actor, 0);
+        return 1;
+
+    case 0x7cca9:
+        world_acquire_resource(ram, actor, 0xd1);
+        world_acquire_resource(ram, actor, 0xd1);
+        world_acquire_resource(ram, actor, 0xd2);
+        world_acquire_resource(ram, actor, 0xd4);
+        write_word(ram, actor + 0x46, read_word(rom + 0x70000, (uint16_t)(0xc9d4 + read_word(ram, 0x8a))));
+        write_word(ram, actor + 0x42, 0x40);
+        write_word(ram, actor, 0xcce0);
+        return 1;
+    case 0x7cce0:
+        if (read_word(ram, 0x26e) & 0x8000) write_word(ram, actor, 0xccee);
+        return 1;
+    case 0x7ccee:
+    case 0x7cd2b:
+        if (!decrement(ram, actor + 0x42)) {
+            child = bank_7_effect(ram, actor, 0xcdcc);
+            write_word(ram, child + 0x21, 0x1b8);
+            write_word(ram, child + 0x24, 0x120);
+            write_word(ram, actor + 0x42, 0x28);
+            if (address == 0x7ccee) {
+                ram[child + 0x2c] = ram[actor + 0x17];
+                write_word(ram, child + 0x1e, 3);
+                write_word(ram, actor + 0x52, 0x40);
+                world_queue_sound(ram, 0x81);
+                write_word(ram, actor, 0xcd2b);
+                return 1;
+            }
+            uint16_t kind = read_word(rom + 0x70000, (uint16_t)(0xc9f4 + (read_word(ram, actor + 0x40) & 0x0e) + read_word(ram, actor + 0x46)));
+            write_word(ram, child + 0x1e, kind);
+            ram[child + 0x2c] = ram[actor + 0x14 + (kind & 3)];
+            write_word(ram, child + 0x14, read_word(ram, actor + 0x15));
+            write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        } else if (address == 0x7ccee)
+            return 1;
+        if (read_word(ram, actor + 0x4a)) {
+            if (!decrement(ram, actor + 0x4a)) write_word(ram, actor + 0x48, 0);
+        } else if (read_word(ram, actor + 0x48) & 1)
+            write_word(ram, actor + 0x4a, 0x18);
+        parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        if (read_word(ram, parent + 0x50) & 2) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x52)) {
+            write_word(ram, actor + 0x52, 0x40);
+            world_queue_sound(ram, 0x81);
+        }
+        return 1;
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -11879,6 +12276,16 @@ stage2_jumper_terrain:
         leave_si(0x10);
         break;
     }
+    case 0x1ec04: case 0x1ecad: case 0x1ecc6: case 0x1ecd8: case 0x1ed07:
+    case 0x1ed2a: case 0x1ed64: case 0x1edb3: case 0x1edd9: case 0x1ee0c:
+    case 0x1ee3d: case 0x1ee85: case 0x1ee97: case 0x1ef18: case 0x1ef26:
+    case 0x1ef3b: case 0x1ef60: case 0x1ef6f: case 0x1ef8b: case 0x1efb0:
+    case 0x1efc5: case 0x1efea: case 0x1f02e: case 0x1f055: case 0x1f0c1:
+    case 0x1f0cf: case 0x1f122: case 0x1f13b: case 0x1f188: case 0x1f196:
+    case 0x7cca9: case 0x7cce0: case 0x7ccee: case 0x7cd2b:
+        if (!tiles) return 0;
+        if (!stage_three_boss(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
         queue_palette(ram, 0x10, 0x1cb, 8);
