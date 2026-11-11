@@ -17736,6 +17736,90 @@ stage2_jumper_terrain:
             write_word(ram, actor, 0x3b72);
         }
         break;
+    /* 0:3E61 (init) and 3E6C: the stage-five descent. While a player is
+       below y C8h and at or below word 4C (44AB), the camera sinks one
+       pixel a frame and, at each 20h trigger in 6A, 3950 draws a row of
+       12 map blocks. */
+    case 0x3e61:
+        write_word(ram, 0x270, 4);
+        write_word(ram, actor, 0x3e6c);
+        /* fall through */
+    case 0x3e6c: {
+        if (!tiles || (read_word(ram, 0x2a2) && (read_word(ram, 0x2a8) & 0x100)))
+            return 0;
+        uint16_t limits = read_word(ram, actor + 0x68), row = read_word(ram, actor + 0x40);
+        update_camera_limits(ram, main_rom, actor);
+        /* 44AB */
+        uint16_t flags = read_word(ram, 0x26e) & ~0x4000;
+        int sink = 0;
+        if (!(flags & 0x8000)) {
+            uint16_t depth = read_word(ram, actor + 0x4c);
+            int stop = 0;
+            if (read_word(ram, 0x264) & 4) {
+                uint16_t y = read_word(ram, read_word(ram, 0x90) + 0x24);
+                if (y < 0xc8) stop = 1;
+                else if (y >= depth) flags |= 0x4000;
+            }
+            if (!stop && (read_word(ram, 0x264) & 8)) {
+                uint16_t y = read_word(ram, read_word(ram, 0x92) + 0x24);
+                if (y < 0xc8) stop = 1;
+                else if (y >= depth) flags |= 0x4000;
+            }
+            sink = !stop && (flags & 0x4000);
+        }
+        if (!sink) flags &= ~0x4000;
+        write_word(ram, 0x26e, flags);
+        if (!sink) {
+            write_word(ram, 0xb71c, 0);
+            write_word(ram, 0xb72c, 0);
+            write_word(ram, 0xa4, 0);
+            leave_si(limits);
+            break;
+        }
+        decrement(ram, actor + 0x56);
+        decrement(ram, 0xb70c);
+        write_word(ram, 0xb700, read_word(ram, 0xb700) + 1);
+        write_word(ram, 0xb71c, 0xffff);
+        write_word(ram, 0xb72c, 0xffff);
+        int copied = 0;
+        if ((int16_t)read_word(ram, actor + 0x6a) >= (int16_t)read_word(ram, 0xb70c)) {
+            uint16_t source = read_word(ram, actor + 0x42), dest = read_word(ram, actor + 0x44);
+            uint16_t base = (uint32_t)read_word(ram, actor + 0x60) << 4;
+            for (unsigned block = 0; block < 12; block++) {
+                world_draw_tile_block(tiles, main_rom, base, dest, read_word(main_rom + 0xa0000, source + 2 * block));
+                dest = (dest & 0xff00) | (uint8_t)(dest + 0x10);
+            }
+            write_word(ram, actor + 0x42, source + read_word(ram, actor + 0x4e));
+            write_word(ram, actor + 0x44, (read_word(ram, actor + 0x44) - 0x400) & 0x3fff);
+            write_word(ram, actor + 0x6a, read_word(ram, actor + 0x6a) - 0x20);
+            copied = 1;
+        }
+        advance_scroll_script(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x40) != row) leave_si(read_word(ram, actor + 0x40));
+        else leave_si(copied ? 0x40 : limits);
+        break;
+    }
+    /* 0:409E: while the descent runs (26E bit 14) the far layer sinks
+       half a pixel a frame through 56 and B710. */
+    case 0x409e: {
+        if (!(read_word(ram, 0x26e) & 0x4000)) {
+            write_word(ram, 0xb71e, 0);
+            keep_si();
+            break;
+        }
+        uint16_t old = read_word(ram, actor + 0x56), row = read_word(ram, actor + 0x40);
+        write_word(ram, actor + 0x5e, old);
+        unsigned frac = ram[actor + 0x55] + 0x80;
+        ram[actor + 0x55] = (uint8_t)frac;
+        uint16_t now = old + (frac >> 8);
+        write_word(ram, actor + 0x56, now);
+        write_word(ram, 0xb710, -now);
+        write_word(ram, 0xb720, old - now);
+        advance_scroll_script(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x40) != row) leave_si(read_word(ram, actor + 0x40));
+        else keep_si();
+        break;
+    }
     case 0x3d93:
         write_word(ram, 0xb71a, 0);
         write_word(ram, 0xb72a, 0);
