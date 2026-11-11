@@ -17876,6 +17876,13 @@ stage2_jumper_terrain:
         break;
     /* 0:C99F/C9B2 and C9D1/C9E4: a three-piece banner row; 0:CA03/CA3E: a
        single plate chosen by 272 and the active player. */
+    /* 0:C97A: draw a 10 x 8 block panel on the near layer (D800) and retire. */
+    case 0xc97a:
+        if (!tiles) return 0;
+        copy_tile_blocks(ram, tiles, main_rom, 0x8000, 0x2130, 0x5ab4, 0x0a08);
+        finish_animation(ram, actor);
+        leave_si(0x40);
+        break;
     case 0xc99f:
     case 0xc9d1:
         ram[actor + 0x2c] = address == 0xc99f ? 0x10 : 0x0e;
