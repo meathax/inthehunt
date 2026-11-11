@@ -1955,9 +1955,12 @@ static void cycle_torpedo_sprite(uint8_t *ram, const uint8_t *rom, uint16_t acto
     }
 }
 
+static void leave_si(uint16_t value);
 static void spawn_impact(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
+    uint16_t successor = read_word(ram, actor + 4);
     uint16_t child = effect_slot(ram, actor, 0x6efe);
+    if (child != 0x8480) leave_si(successor);       /* 1769 leaves SI at the old successor */
     write_word(ram, child + 0x4c, read_word(rom, 0x6ad9));
     write_word(ram, child + 0x4a, read_word(rom, 0x6ade));
     ram[child + 0x2c] = rom[0x6ae3];
@@ -21865,7 +21868,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (outside_pickup_area(ram, actor)) { finish_animation(ram, actor); break; }
+        if (outside_pickup_area(ram, actor)) { finish_animation(ram, actor); keep_si(); break; }
         if (!decrement(ram, actor + 0x44)) {
             uint16_t frame = read_word(ram, actor + 0x40);
             write_word(ram, actor + 0x2a, read_word(main_rom + 0x70000, 0xa787 + (frame & 14)));
@@ -21873,8 +21876,10 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x40, frame + 2);
         }
         queue_sprite(ram, main_rom, actor, 0);
+        si_after_sprite();
         if (!(world_terrain_mask(ram, tiles + 0x4000, read_word(ram, actor + 0x21),
                                   read_word(ram, actor + 0x24)) & 0xff0a)) {
+            player_contact_si(ram, actor);
             ram[actor + 0xd] = 0;
             if (!world_player_contact(ram, main_rom, actor)) break;
         }
