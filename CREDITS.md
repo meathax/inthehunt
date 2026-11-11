@@ -1,6 +1,5 @@
 # Source credits
 
-The native flat CRT shader in src/shaders/world_crt.hlsl adapts Timothy Lottes's public-domain CRT reconstruction and Hyllian's MIT-licensed beam and cubic reconstruction. The source reference is Libretro slang-shaders revision 2b0530b. Original notices accompany the shader and the terms are retained in LICENSES/CRT-Lottes-Public-Domain.txt and LICENSES/CRT-Hyllian-MIT.txt. [Pinned shader collection](https://github.com/libretro/slang-shaders/tree/2b0530b/crt/shaders)
 
 
 

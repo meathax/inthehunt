@@ -4,8 +4,6 @@ function Get-WorldArtPresets {
     param([string]$Root)
     $directory = Join-Path $Root '.local/art-sources'
     foreach ($entry in @(
-        @('WorldMarquee','World marquee','world-marquee.jpg'),
-        @('ControlPanel','Arcade control panel','inthunt-cpo.jpg'),
         @('FanBackground','Fan background','world-fan-background.jpg')
     )) {
         $path = Join-Path $directory $entry[2]

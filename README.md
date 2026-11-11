@@ -1,90 +1,141 @@
-# In the Hunt — World native Windows port in development
+# In the Hunt — native Windows port
 
-Extract the Windows x64 release and double-click `play.cmd`. It imports the user's World parent archive from `$HOME\Downloads\inthunt.7z` or opens a file picker, then launches the included `InTheHunt.exe`. From the source checkout, `.\play.ps1` builds the native executable as needed. To select another archive run `.\setup.ps1 -Rom 'D:\Games\inthunt.7z'`.
+Irem's 1993 submarine shooter *In the Hunt* (World set `inthunt`), rebuilt as a native Windows x64 game. The original V33 main program and V35 sound program were translated routine by routine into portable C. The arcade CPUs are not emulated. All six stages, every boss, both endings and two-player co-op run from power-on on translated code. Original music and effects are kept, along with an approximation of the arcade slowdown.
 
-Press **5** for a credit and **1** to start. Use the **arrow keys** to steer, **Z** and **X** for the two weapons, **F1** (or **L3 + R3** on a controller) for the pause/options menu; quit from its last entry. An XInput controller uses **Back** for coin, **Start** to join, the **D-pad** or **left stick** to steer, and **A/B** for weapons.
+You supply the game data from your own copy of the World ROM set. This repository contains no Irem code, graphics or audio.
 
-## Native build
+---
 
-The Windows game reads graphics and lookup tables from privately imported data. Recovered C runs cold initialization, the title, coin/start, briefing, and the opening Arctic encounter. Unknown actor or frame routines stop the game and report the missing address in the window and in `.local/world/native-stops.tsv`. Native music and sample effects run through the recovered V35 sequencer, YM2151 synthesis and four-channel GA20 mixer. Remaining sound callbacks are logged in `.local/world/native-audio-stops.tsv`. Full stage coverage and the enhanced presentation remain in development. The window currently uses integer scaling and a 4:3 playfield. Windows uses per-monitor DPI awareness to preserve physical pixel scaling. Physical board frames use the exact reference ratio 6,666,666 / (424 × 262) Hz. Recovered mid-transfer VBlanks now advance audio and host pacing independently of actor-pass count. General workload-dependent slowdown and independently uncapped presentation remain in recovery.
+## Quick start
 
-The recovered sound driver in `src/world_audio_driver.c` and `src/world_audio_notes.c` runs on the YM timer A clock. A native cold-boot input run reached 2,500 points with both sound paths active and no reported unsupported callbacks. Sound synthesis uses only the user's imported sound ROM and sample region. The GA20 mixer matched two million reference chip clocks across 512 KiB and 1 MiB sample mappings. Its 48 kHz output and the FM wrapper retain phase across buffer boundaries. Windows output queues mono 16-bit PCM through WinMM.
+1. Download the Windows x64 release ZIP and extract **all** of it to a writable folder.
+2. Double-click **`play.cmd`**.
+3. On first launch, pick your `inthunt.7z` (MAME World parent set). The launcher also looks in `Downloads` and next to `play.cmd`. The chips are SHA-1 checked and imported into `.local/world`; later launches no longer need the archive.
 
-Timing selection is persistent. Use `.\play.ps1 -TimingMode Arcade` for the original-slowdown target, or `.\play.ps1 -TimingMode RemoveSlowdown` to suppress recovered workload waits. Omitting the argument uses the saved choice. Arcade is the first-run default.
+From a source checkout, `.\play.ps1` does the same and builds the executable first if the sources are newer (the pinned Zig C compiler is fetched on first build). To import a different archive: `.\setup.ps1 -Rom 'D:\Games\inthunt.7z'`.
 
-**Arcade timing is still incomplete.** The native loop currently accounts for recovered scene-transfer interrupts, and reports executed blocks whose original costs are missing. The clock and instruction-prefetch timing primitives are implemented, but the remaining gameplay costs and checkpoints still need recovery. The mode name expresses the selected policy, with no claim of complete arcade slowdown parity. Removing workload waits preserves authored timers and the physical audio clock.
+## Controls
 
-## Developer reference build
+| Action | Player 1 keyboard | Player 2 keyboard | Xbox-style controller |
+|---|---|---|---|
+| Move | Arrow keys | W A S D | D-pad or left stick |
+| Torpedo / fire | Z | G | A |
+| Secondary weapon | X | H | B |
+| Insert coin | 5 | 6 | Back |
+| Start / join | 1 | 2 | Start |
+| **Pause menu** | **F1** | **F1** | **L3 + R3 together** |
 
-The optional reference tools below use MAME and Open Watcom for comparing behavior against the World board. Run `.\tools\setup_reference.ps1` to install them. The following table includes routines from that development workflow.
+Each controller drives its own player. Key and button assignments are stored in `.local/world/native-settings.ini`.
 
-| Recovered source | World entry or block | Implemented behavior |
-|---|---|---|
-| `src/world_io.c` | V33 `7F303` | Reset coin outputs, playfield controls and sound command latch |
-| Same | `05E64` | Latch held and newly pressed cabinet buttons for the frame |
-| Same | `0821C`, `082D4`, `08253` | Gate standard torpedo and secondary fire on cooldown, input edge and available projectiles; position a new torpedo from the submarine's facing and pose |
-| Same | `0179B`, `017F9`, `01848` | Insert a spawned actor into the update list in each of three allocation paths |
-| Same | `0372D` | Dequeue a pending sound command and send it to the V35 |
-| `src/world_motion.c` | V33 `05E9B`, `05EA8`, `05EB5`, `05EC2` | Advance four actor position fields using signed 8.8 velocity, subpixel carry and the original return flags |
-| `src/world_sound.c` | V35 `00713` | Wait for YM2151 readiness and write register and data atomically. The encrypted 32-byte rebuild matches the World ROM exactly. |
+## Pause and options menu
 
-## Reproduce the stage-one check
+Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears in the game's own lettering and colours. Up and down select, left and right change a value, Enter/A confirms, Esc/B goes back. Each line has a short description at the bottom of the screen.
 
-```powershell
-.\tools\play_reference.ps1 -StageOneCheck -Reference
-.\tools\play_reference.ps1 -StageOneCheck
+- **Resume**
+- **Options**: three tabs (Q/E or the shoulder buttons switch tabs)
+  - **Video**: window or full screen; window size (sharp ×1 to ×8 integer scaling); border art (Black or Undersea); border brightness
+  - **Sound**: master volume, 0–100 %
+  - **Game**: slowdown mode (Arcade keeps the original slowdown; Remove Slowdown runs busy scenes at full speed); reset all options
+- **Controls**: the keyboard and controller layout
+- **Quit game**: asks for confirmation
+
+Settings are saved when the menu closes. Esc no longer quits the game outright.
+
+### Border art
+
+`play.cmd` downloads one optional undersea background (`tools/get_border_art.ps1`, SHA-256 checked) into `.local/art-sources`. It fills the space beside the 4:3 picture in full screen or a resized window; at the default ×3 window the picture fills the window exactly. If the download fails, the game starts anyway with a black border.
+
+### Command line
+
+```text
+InTheHunt.exe <data-dir> [--timing=arcade|remove-slowdown]
+.\play.ps1 [-Rom <archive>] [-TimingMode Arcade|RemoveSlowdown]
 ```
 
-Both runs boot the cabinet, insert a coin, start player one, steer and fire both weapons. Each writes a screenshot and mono WAV under `.local/world/`. The check compares the stage, stock, sound command count and FM write stream to the observed reference. The hybrid run also checks that the compiled input routine executed. Keep default cabinet settings for this recording.
+---
 
-The stage-one comparison reached 200 points with identical final pixels and the same sequence of 36,074 FM register/data writes in the measured window. The gameplay WAV contains audio; its samples differ from the reference. V33 replacements execute with different instruction timings. Player steering, collision, most actors, stages, most sound sequencing and the M92 runtime still rely on the original programs and emulator. The planned enhanced frontend and achievement catalog have separate previews and are pending integration into play.
+## What is in the box
 
-## Release boundary and encounter tracking
+| Area | State |
+|---|---|
+| Boot, attract, title, coin/start, briefing | Native C |
+| Stages 1–6, mid-bosses, bosses, stage transitions | Native C |
+| Normal ending, true ending and epilogue, staff roll | Native C |
+| Two-player co-op, continues, game over | Native C |
+| Sound: V35 sequencer, YM2151 (ymfm), GA20 PCM | Native C/C++ |
+| Video: M92 tilemaps, sprites, palette, raster effects | Native C framebuffer, 320×240 |
+| Pause/options menu, border art, controller support | New, native |
 
-Run `python tools/package_source.py` to build the source release from its explicit list of text files. Setup obtains the pinned MAME metadata locally. Supply your own World set. The cabinet picture uses its original 4:3 aspect; the display aspect override stays on automatic so a wide monitor receives pillarboxing.
+If play ever reaches a routine that was not translated, the game stops instead of guessing. It names the routine's address on screen and logs it to `.local/world/native-stops.tsv`. Recent long runs have not hit this (see Verification).
 
-StageOneCheck records per-CPU guest program-counter histograms under `.local/world/fallback-*.tsv` for frames 2500–3049. These samples identify active addresses; they cannot certify instruction-level coverage or prove an interval is native. Those samples describe the reference process. The native executable directly dispatches recovered C handlers.
+## Verification
 
-In the reference recording, V33 address 0629F executes a six-digit packed-BCD addition at frames 2603 and 2905. The source comes from the score table indexed by actor field 0E, and the destination comes from the player pointer at 0254/0256 plus one byte. This identifies the award operation; establish the collision and actor death caller before attributing a kill to a particular projectile.
+The game's behaviour was tested with scripted headless runs that drive real inputs through the native executable:
 
-The first two recorded kills share enemy kind 0x11, update handler B000:914C and scoring call B000:91EE. The zero-health path calls scoring, requests an effect and sound, and marks the enemy for removal. The portable C implementation in src/world_score.c recovers ownership checks, the per-player kill counter and the packed-BCD score addition. tools/replay_score.c runs it on host hardware against private RAM snapshots and the user-supplied ROM. The standalone Windows path uses the same C scoring routine.
+- An autopilot playthrough from power-on ran **620,000 frames** (several complete loops of all six stages and bosses) with no stops.
+- Five consecutive full loops (2,000,000 frames from a saved state), both endings, and a **two-player co-op** run of 120,000 frames all completed with no stops.
+- Regression modes (`steer`, `adv`, `dive`) are rerun after each translation batch.
+- The pause menu was driven live: open, change and save volume, resume and quit.
 
-On both kills the lethal write comes from the projectile-list scan at D2B7. src/world_contact.c recovers its slot ordering, facing-dependent rectangle intersection, mutual damage and hit-flash state. The host replay accepts the word contact in place of the attacker argument to find the projectile, apply damage and award the kill. On private snapshots taken before collision on frames 2603 and 2905, it independently selected the same two attackers as the World program (3B00 and 8380) and matched enemy health, kill count and score. This replay starts with live projectiles already in RAM.
+Earlier in the project, encounter replays were compared with MAME's reference execution, and in the measured windows RAM, sprite, tile, palette and sound-command state matched. See the developer tools below.
 
-The host flight replay now computes the first lethal torpedo's muzzle placement, acceleration, scroll compensation and fixed-point motion. For the first kill, its position, fraction, velocity and countdown matched all 35 observed states from launch to contact. The flight mode in tools/replay_score.c reads a hexadecimal actor slot and decimal parent x, y, facing and pose, followed by one unsigned scroll-delta pair per tick. It writes the computed coordinates into the captured encounter state before running collision and scoring. Compile it with world_torpedo.c, world_contact.c and world_score.c. Input dispatch, slot allocation, enemy updates and camera scroll are still supplied by the reference run.
+## Known limitations
 
-The encounter replay also accepts a pre-fire RAM image and the parent actor offset. It reads the latched input edge, cooldown, stock and weapon type; enqueues sound; allocates the torpedo and muzzle effect; updates the actor list and derives launch placement from the parent. The first lethal torpedo chose slot 3B00. Compared at the end of the firing block, all 64 KiB matched except six bytes of guest call-stack scratch. Build the replay with src/world_fire.c as well. Encounter mode accepts the contact RAM image as usual, then the pre-fire RAM filename and parent offset after the output path; stdin supplies scroll pairs only. It still uses the later capture for the enemy and projectile candidate list.
+- **Arcade slowdown is approximate.** Original per-block CPU costs are only partly recovered, so busy scenes slow down close to, but not exactly like, the PCB. Remove Slowdown is unaffected.
+- **No final frame-by-frame MAME comparison.** MAME 0.289 also needs the set's four PLD dumps (`m92_a-9j-.ic51`, `m92_e-3k-.ic20`, `m92_e-3p-.ic21`, `m92_e-4k-.ic29`). The importer does not keep them, so whole-game equivalence against MAME has not been rechecked.
+- **Audio** follows the original driver and chip models, but its samples were never shown to be bit-identical to the reference.
+- Only the World set (`inthunt`) is supported. *Kaitei Daisensou* and the US set are not.
 
-The playable hybrid now compiles both collision-table append paths (D3D0 and D3E4) from src/world_candidates.c. Each actor with an active shape appends at the current cursor in update order. On frame 2603 the first lethal torpedo occupied the fourth of six entries. The native replay still consumes the candidate list in the captured encounter state.
+---
 
-The native kind-11 enemy death path now creates the explosion actor, links it after the enemy, queues the sound, awards score and marks the enemy for removal. Add src/world_death.c when building the host replay. On both recorded kills, RAM from 0000 through FEFF matched the arcade state at return from the death handler when starting at entry to the collision scan.
+## Building from source
 
-The host stage-script routine reads the World stage table, checks camera position and player-count gates, allocates due actors and computes their initial coordinates. The kind-11 initializer obtains its graphics resource and loads the behavior profile selected by the current board state. Link src/world_stage.c into the replay tool. The stage-spawn mode accepts a script controller offset and enemy-init accepts the newly allocated actor offset. On frame 2601, both routines individually matched all 65,280 compared RAM bytes on return; feeding the spawn result directly to enemy-init also reproduced the complete 128-byte first enemy actor.
+Requirements: Windows 10/11 x64, PowerShell 5+, Python 3 (packaging only). The build downloads Zig 0.16.0 (SHA-256 pinned) into `.local/` and compiles with `zig cc`. No Visual Studio is needed.
 
-Kind-11 movement now has a host replay from immediately after steering to the terrain response. Build the replay with src/world_terrain.c and pass enemy-motion followed by the output path and a private 16 KiB playfield dump. The host and playable V33 overlay share the recovered tile addressing code in world_tile_address.h. Both motion updates preceding the first kill matched RAM through FEFF. Camera scroll, steering and actor scheduling remain inputs to this isolated check.
+```powershell
+. .\tools\world_native.ps1; Build-WorldNative -Root (Get-Location).Path   # → .local/native/InTheHunt.exe
+python tools/package_native.py     # → .local/release/InTheHunt-Windows-x64.zip
+python tools/package_source.py     # → .local/release/inthehunt-source.zip (every tracked file)
+```
 
-The camera-encounter replay computes horizontal scrolling from player positions. Link src/world_camera.c alongside the other replay sources. Use the encounter arguments with camera-encounter as the mode, then provide the hexadecimal camera-controller offset and one pair of decimal player X coordinates per tick on stdin. The running-scroll path matched camera speed, fractional position and whole position on all 34 ticks of the first lethal flight, including the speed change. Player positions and the contact-time world state still come from private captures; vertical camera changes and stopping are outside this replay path.
+### Source map
 
-The cabinet-encounter mode starts from RAM captured immediately before the fire button was sampled. Pass the pre-pad image where encounter mode takes launch RAM. Feed the hexadecimal camera controller followed by raw active-low cabinet words, one per tick. Link src/world_player.c with the existing replay sources. For the recorded single-player open-water interval, the host now derives held/pressed inputs, steering velocity, fractional movement, the firing decision and camera speed without recorded player coordinates or scroll deltas. All 34 cabinet samples reproduced the first lethal hit. Enemy-side state and the candidate list still come from the separate contact snapshot. This mode has yet to implement player terrain response, vertical camera changes, or a full frame's other actor dispatch.
+| File | Contents |
+|---|---|
+| `src/world_native.c` | Main loop, board frame and VBlank scheduling, menu integration, headless test runner |
+| `src/world_dispatch.c` | The game itself: every actor, enemy, boss, effect and camera handler, translated from the V33 program |
+| `src/world_frame.c`, `world_title_master.c`, `world_title.c`, `world_gameover.c` | Scene masters: attract, title, stage clear, endings, game over |
+| `src/world_player.c`, `world_fire.c`, `world_torpedo.c` | Player submarine, weapons, stage-end and sub exit |
+| `src/world_contact.c`, `world_candidates.c`, `world_death.c`, `world_score.c` | Collision lists, damage, death effects, scoring |
+| `src/world_stage.c`, `world_camera.c`, `world_terrain.c`, `world_enemy_target.c` | Stage scripts, scrolling, terrain response, targeting |
+| `src/world_video.c`, `world_frame_video.c`, `world_palette.c` | M92 video: tilemaps, sprites, priorities, palette |
+| `src/world_audio_driver.c`, `world_audio_notes.c`, `world_ga20.c`, `world_ym.cpp`, `world_audio_output.c` | V35 sound driver, chip synthesis, Windows output |
+| `src/world_clock.c`, `world_cycle_costs.c`, `world_timing_options.c` | Board clock and the slowdown model |
+| `src/world_window.c`, `world_input.c`, `world_border.c`, `world_menu.c`, `world_settings.c` | Window, XInput/keyboard, border art, pause menu, settings |
+| `src/world_boot.c` | ROM import checks and cold-boot state |
+| `src/world_io.c`, `world_motion.c`, `world_sound.c`, `world_tile_v33.c` | Early V33 reference routines used by the MAME hybrid tools |
+| `src/third_party/ymfm` | Aaron Giles's YM2151 emulator (BSD-3-Clause) |
 
-The host actor dispatcher in 'src/world_dispatch.c' traverses the live actor links and switches player state at the World program's phase boundaries. On the first-kill frame, the host executed all 104 returning actor calls, including foreground and background tile animation, parent-attached effects, radial impulses, sprite animation, sprite submission and actor retirement. The standalone replay_frame runner takes the initial work RAM, video RAM and user-supplied program image and reaches the terminal actor without recorded handler effects. All 105 visits matched the reference actor and handler addresses, and the first 48 KiB of work RAM matched at each entry. On the spawn frame the native dispatcher also followed the newly inserted child link directly into the kind-11 enemy initializer. The foreground and parallax camera controllers and the inactive second-player credit display now run on that frame. The player-weapons replay entry runs the complete 8210 firing routine, including both vertical shots. Its first 48 KiB of work RAM matched at routine return on all 55 consecutive frames from 2550 through 2604. The player-display-fire replay entry extends that comparison from pose selection through weapon and wake-effect updates. The HUD routine also matched the arcade score tiles and work RAM at its return on those 55 frames. The vertical weapons advance their flight, animation and collision registration on the first-kill frame. Stage trigger evaluation, timed palette updates and the stage timer between HUD refreshes also run on the host. The dispatcher computes the frame difficulty ranks, propagates scroll deltas and runs the three tile-layer scripts. A separate replay moved their triggers forward to exercise their tile writes. The submarine display actors apply fractional displacement, submit their sprite layers and update idle equipment attachments. The firing flash, attached torpedo sprite and explosion initializer now run through the dispatcher as well. The standard torpedo initializer and both flight phases run in the host dispatcher on the first encounter, including registering the shot for the enemy contact check. The cruising kind-11 handler now runs from actor entry through torpedo contact, death, score and effect allocation without a contact-time snapshot. The open-water player handler samples terrain, updates the HUD and processes all standard weapons. The playable hybrid still uses the guest dispatcher.
+### Headless testing
 
-## Developer presentation reference
+`tools/headless_test.ps1` runs the executable with no window using scripted inputs and reports any stop:
 
-Run `.\tools\play_reference.ps1 -Reference` for the reference Start, Options and Exit menu. Options remembers the display profile and border. Pixels uses nearest-neighbour integer scaling. Flat CRT Deluxe adds phosphor persistence and bloom. Flat CRT Fast uses the lighter CRT-Geom chain. Both profiles fix curvature and tilt at zero and retain the complete picture. At 1920 × 1080 the largest whole-number fit for 320 × 240 is 1280 × 960. Allow room for at least one native picture when resizing.
+```powershell
+.\tools\headless_test.ps1 -Root (Get-Location).Path -Modes @('dive coin z x boss') -Frames 620000 -ShotEvery 0
+```
 
-Press Tab during play for options. In **Input Settings → Input Assignments (this system)**, select a binding, press confirm, then press the desired input. Press 5 to insert a coin and 1 to start with the default keyboard mapping. `.\tools\play_reference.ps1 -Reference -Options` opens the reference game with its options menu. `.\tools\play_reference.ps1 -Reference -QuickStart` uses the saved reference display choices. The World arcade high-score table persists through the MAME hiscore plugin. Controller mappings and scores live under the local MAME installation.
+Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fire), `coin` (keep continuing), `boss` (an autopilot that reads game RAM to position for bosses), `duo` (two players; P2 mirrors P1). Screenshots go to `.local/world/headless/`. Environment hooks:
 
-The hybrid runs at the World board rate of approximately 60.01248 Hz and outputs the original mono mix at 48 kHz. In the 50.82-second stage check, hybrid and reference PCM matched for the first 43.22 seconds. The captures differed on 4.69% of samples overall. Sample-exact hybrid audio and independently uncapped rendering remain open.
+| Variable | Effect |
+|---|---|
+| `WORLD_SNAPSHOT_SAVE=frame,path` / `WORLD_SNAPSHOT_LOAD=path` | Save or resume full machine state |
+| `WORLD_MENU_SHOT=frame` | Render every pause-menu page over that frame |
+| `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset at 1920×1080 and 1280×1024 using the real window painter |
 
-## Replaying the first native encounter
+### Developer reference tools (MAME)
 
-After reference setup, run `.\tools\play_reference.ps1 -CaptureEncounter`, then `python tools/run_encounter.py`. The replay from frames 580 through 6000 matched 5,215 actor passes, 583 outgoing sound commands and the final work RAM, tile RAM, sprite RAM and palette. This diagnostic uses captured initial memory and IRQ events. The Windows game boots from ROM and takes live input. A separate cold-boot check supplied cabinet buttons alone, played through player death and respawn, and reached 2,500 points in Arctic. The upgraded secondary controller and its downward projectiles also matched 163 original handler calls. Captures and imported images stay under `.local`.
+`tools/setup_reference.ps1` installs pinned MAME 0.289 and Open Watcom. `tools/play_reference.ps1` runs the original game or a hybrid with translated V33 routines patched in. `tools/run_encounter.py`, `tools/render_world.py` and `tools/replay_*.c` replay captured encounters on the native code and compare them against the reference. These tools were used for verification during translation; they need the complete original set (including the PLD dumps) and are not needed to play.
 
-### Native gameplay frames
+## Credits and licences
 
-After capturing the encounter, run `python tools/render_world.py --standalone --frame 2750 --scale 3` to produce a 960 × 720 PNG. The host executes the actor passes and exports scroll registers, the tilemap, the previous sprite DMA transfer and the active palette at scanout. This mode reads the initial encounter state, raw inputs and imported ROM graphics. To compare every pixel against the arcade board, replace `--standalone` with `--encounter`. Both modes accept `--cc` and `--output`.
-
-### Reference background artwork and brightness
-
-Run `.\tools\get_border_art.ps1` to fetch the World arcade marquee, ArsInvictus's portrait cabinet reconstruction and a landscape fan background. In the reference launcher's Options, select **World marquee**, **Arcade control panel** or **Fan background** under Cabinet border. Adjust border brightness from 0 to 100 percent. Use **Import border artwork** for your own JPEG or PNG. The same brightness setting dims Pressure Hull and Deep Water. Black remains available. Downloads, imports and gameplay screenshots stay local. Credits and original dimensions are in [the artwork credits](CREDITS.md#optional-cabinet-artwork).
+*In the Hunt* © 1993 Irem. This project is an unofficial, non-commercial preservation and porting effort and ships no original game data. Third-party code and references are listed in [CREDITS.md](CREDITS.md). Their licences are in [LICENSES/](LICENSES): ymfm and the GA20 model (BSD-3-Clause), and MAME timing constants (BSD-3-Clause).
