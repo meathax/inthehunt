@@ -11690,6 +11690,26 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         queue_sprite(ram, rom, actor, 0);
         return 1;
     }
+    /* 711D: a 2 x 4 block animation on the far layer, while on screen. */
+    case 0x7711d:
+        write_word(ram, actor + 0x46, read_word(bank, (uint16_t)(0x6d28 + (kind & 0x0e))));
+        write_word(ram, actor + 0x40, kind & 0x70);
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor, 0x7140);
+        return 1;
+    case 0x77140:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (decrement(ram, actor + 0x42)) return 1;
+        copy_tile_blocks(ram, tiles, rom, 0x4000, read_word(ram, actor + 0x46),
+                         (read_word(ram, actor + 0x40) & 0x70) + 0x4cd4, 0x204);
+        leave_si(0x40);
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 0x10);
+        write_word(ram, actor + 0x42, 7);
+        return 1;
     case 0x77239:
         write_word(ram, actor + 0x46, read_word(bank, (uint16_t)(0x6d4a + (kind & 6))));
         write_word(ram, actor + 0x40, kind & 0x70);
@@ -14889,6 +14909,7 @@ stage2_jumper_terrain:
     case 0xbe694: case 0xbe703: case 0xbe80f: case 0xbe883: case 0xbe89b:
         if (!stage_five_diver(ram, main_rom, actor, address)) return 0;
         break;
+    case 0x7711d: case 0x77140:
     case 0x77187: case 0x771af: case 0x771e3: case 0x77239: case 0x7725c: case 0x772a0:
     case 0x772c1: case 0x772f5: case 0x7737b: case 0x773a2: case 0x77448:
         if (!tiles) return 0;
