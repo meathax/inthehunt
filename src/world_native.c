@@ -15,6 +15,7 @@
 #include "world_ym.h"
 #include "world_clock.h"
 #include "world_settings.h"
+#include "world_menu.h"
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
 static uint8_t oam[2048], palette[2048];
@@ -33,6 +34,64 @@ static uint8_t reported_sound_gaps[8192];
 static WorldClock board_clock;
 static WorldSettings settings;
 static unsigned elapsed_board_frames = 1;
+static char settings_path[4096];
+static WorldMenu menu;
+
+/* Border presets fetched by tools/get_border_art.ps1 into .local/art-sources. */
+static void menu_borders(const char *dir)
+{
+    static char paths[4][4096];
+    static const char *const files[3] = {"world-marquee.jpg", "inthunt-cpo.jpg", "world-fan-background.jpg"};
+    static const char *const labels[3] = {"MARQUEE", "CONTROL PANEL", "FAN ART"};
+    const char *names[5], *list[5];
+    unsigned count = 0;
+    names[count] = "BLACK";
+    list[count++] = "";
+    for (unsigned i = 0; i < 3; ++i) {
+        snprintf(paths[i], sizeof paths[i], "%s/../art-sources/%s", dir, files[i]);
+        if (GetFileAttributesA(paths[i]) == INVALID_FILE_ATTRIBUTES) continue;
+        names[count] = labels[i];
+        list[count++] = paths[i];
+    }
+    int known = 0;
+    for (unsigned i = 1; i < count; ++i) known |= !strcmp(list[i], settings.border_image);
+    if (settings.border_image[0] && !known) {
+        snprintf(paths[3], sizeof paths[3], "%s", settings.border_image);
+        names[count] = "CUSTOM";
+        list[count++] = paths[3];
+    }
+    world_menu_set_borders(&menu, count, names, list, &settings);
+}
+
+static void apply_border(void)
+{
+    world_window_set_border(strcmp(settings.border, "black") ? settings.border_image : "", settings.border_brightness);
+}
+
+/* Runs the open pause menu for one frame on the paused picture. Returns 0
+ * when the player chose to quit. */
+static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, unsigned rising, int gamepad)
+{
+    if (toggle & 2) held |= WORLD_MENU_BACK;           /* Esc steps back inside the menu */
+    unsigned result = 0;
+    if (rising & 1) {
+        menu.open = 0;
+        result = WORLD_MENU_RESUME | (menu.dirty ? WORLD_MENU_SAVE : 0);
+    } else
+        result = world_menu_update(&menu, &settings, held, gamepad, GetTickCount());
+    if (result & WORLD_MENU_DISPLAY) world_window_set_display(settings.fullscreen, settings.window_scale);
+    if (result & WORLD_MENU_BORDER) apply_border();
+    if (result & WORLD_MENU_TIMING) world_clock_request_mode(&board_clock, settings.timing_mode);
+    if ((result & WORLD_MENU_SAVE) && world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
+        fprintf(stderr, "Could not save native settings.\n");
+    if (result & WORLD_MENU_QUIT) return 0;
+    if (menu.open) {
+        memcpy(pixels, paused, sizeof pixels);
+        world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
+        world_window_present(pixels);
+    }
+    return 1;
+}
 
 static unsigned word(const uint8_t *p) { return p[0] | ((unsigned)p[1] << 8); }
 
@@ -107,7 +166,7 @@ static void sound_frame(void)
         world_ym_render(fm, count);
         for (unsigned i = 0; i < count; ++i) {
             /* Both GA20 outputs route at unity to the mono speaker. */
-            int32_t mixed = 2 * (int32_t)output[done + i] + fm[i];
+            int32_t mixed = (2 * (int32_t)output[done + i] + fm[i]) * (int32_t)settings.volume / 100;
             if (mixed > 32767) mixed = 32767;
             if (mixed < -32768) mixed = -32768;
             output[done + i] = (int16_t)mixed;
@@ -343,6 +402,29 @@ static void headless_run(const char *dir, const char *script_path)
         fclose(f);
     }
     for (;;) {
+        /* WORLD_MENU_SHOT=frame renders every menu page over that frame. */
+        static int menu_shot_done;
+        const char *menu_shot = getenv("WORLD_MENU_SHOT");
+        if (menu_shot && !menu_shot_done && ticks >= strtoul(menu_shot, NULL, 10)) {
+            menu_shot_done = 1;
+            static uint32_t still[320*240];
+            memcpy(still, pixels, sizeof still);
+            menu_borders(dir);
+            static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0}};
+            for (unsigned i = 0; i < sizeof pages / sizeof pages[0]; ++i) {
+                world_menu_open(&menu, 0, i & 1, 0);
+                menu.page = pages[i][0];
+                menu.tab = pages[i][1];
+                menu.row = pages[i][2];
+                memcpy(pixels, still, sizeof still);
+                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i);
+                char name[32];
+                snprintf(name, sizeof name, "menu%u", i);
+                headless_shot(dir, name);
+            }
+            memcpy(pixels, still, sizeof still);
+            menu.open = 0;
+        }
         if (save_path && ticks >= save_at) {
             FILE *f = fopen(save_path, "wb");
             if (f) {
@@ -423,7 +505,6 @@ int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".local/world";
     data_directory = dir;
-    char settings_path[4096];
     int path_length = snprintf(settings_path, sizeof settings_path, "%s/native-settings.ini", dir);
     if (path_length < 0 || (size_t)path_length >= sizeof settings_path) return 1;
     WorldSettingsStatus settings_status = world_settings_load(settings_path, &settings);
@@ -478,13 +559,46 @@ int main(int argc, char **argv)
         world_audio_output_close();
         return 1;
     }
+    world_window_set_display(settings.fullscreen, settings.window_scale);
+    apply_border();
+    menu_borders(dir);
     LARGE_INTEGER rate, now;
     QueryPerformanceFrequency(&rate);
     QueryPerformanceCounter(&now);
     double deadline = (double)now.QuadPart;
     double period = (double)rate.QuadPart * (424 * 262) / 6666666;
     uint16_t pads, system;
+    static uint32_t paused_frame[320*240];
+    unsigned previous_toggle = 0, hold_input = 0;
     while (world_window_poll(&pads, &system)) {
+        /* F1, Esc or L3+R3 opens the pause menu; the game stands still. */
+        unsigned toggle;
+        int gamepad;
+        unsigned menu_held = world_window_menu_buttons(&toggle, &gamepad);
+        unsigned rising = toggle & ~previous_toggle;
+        previous_toggle = toggle;
+        if (menu.open) {
+            if (!menu_frame(paused_frame, menu_held, toggle, rising, gamepad)) break;
+            if (!menu.open) {
+                hold_input = 1;
+                previous_toggle = toggle;
+                QueryPerformanceCounter(&now);
+                deadline = (double)now.QuadPart;
+            }
+            Sleep(15);
+            continue;
+        }
+        if (rising) {
+            memcpy(paused_frame, pixels, sizeof paused_frame);
+            world_menu_open(&menu, menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0), gamepad, GetTickCount());
+            menu_frame(paused_frame, menu_held, toggle, 0, gamepad);
+            continue;
+        }
+        /* Keys used to leave the menu are not passed to the game until released. */
+        if (hold_input) {
+            if ((uint16_t)~pads || ((uint16_t)~system & 0xf) || menu_held) pads = system = 0xffff;
+            else hold_input = 0;
+        }
         QueryPerformanceCounter(&now);
         if (now.QuadPart < deadline) { Sleep(1); continue; }
         if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;

@@ -638,6 +638,8 @@ static void surface_enemy_hit(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     ram[actor + 0x0d] = 0;
     uint16_t hit = world_surface_contact(ram, rom, actor);
+    /* D371 loads SI with the shape; 6237 on the death path reloads it. */
+    if (read_word(ram, actor + 0x26)) leave_si(read_word(ram, actor + 0x3c));
     if (!read_word(ram, actor + 0x26)) {
         ram[actor + 0x0b] = ram[hit + 0x0b];
         world_award_score(ram, rom, actor, hit);
@@ -19527,6 +19529,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         if (read_word(ram, actor + 0x21) < 0x40) {
             finish_animation(ram, actor);
+            keep_si();
             break;
         }
         if (!decrement(ram, actor + 0x44)) {
@@ -19535,14 +19538,23 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
         }
         queue_sprite(ram, main_rom, actor, 1);
+        si_after_sprite();
         uint16_t other = read_word(ram, 0xb8b0);
+        if (other) leave_si(read_word(ram, actor + 0x3c));             /* MOV IX, [BP+3C] */
         if (other && world_shape_overlap(ram, main_rom, actor, other, read_word(ram, actor + 0x3c),
                                          read_word(ram, other + 0x3c))) {
             surface_enemy_death_blast(ram, main_rom, actor);
             write_word(ram, actor + 0x40, 0);
             write_word(ram, actor + 0x44, 1);
             bank_7_effect(ram, actor, 0xd45f);
-            write_word(ram, bank_7_effect(ram, actor, 0xd45f) + 0x1e, 2);
+            uint16_t successor = read_word(ram, actor + 4);
+            uint16_t runner = bank_7_effect(ram, actor, 0xd45f);
+            write_word(ram, runner + 0x1e, 2);
+            if (runner != 0x8480) leave_si(successor);               /* 1769 */
+            else {
+                world_dispatch_detail = "D308 runner spawn failed; SI after 1769 not modelled";
+                return 0;
+            }
             write_word(ram, actor, 0xd390);
         }
         break;
@@ -21814,6 +21826,7 @@ stage2_jumper_terrain:
         uint16_t hit = world_surface_contact(ram, main_rom, actor);
         int16_t at = (int16_t)read_word(ram, actor + 0x21);
         if (read_word(ram, actor + 0x26) && at > -0x40 && at < 0x240) {
+            leave_si(read_word(ram, actor + 0x3c));                     /* D371 */
             register_surface_enemy(ram, actor);                          /* 0:B900 */
             break;
         }

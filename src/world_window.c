@@ -19,6 +19,11 @@ static HMODULE controller_library;
 typedef DWORD (WINAPI *ControllerState)(DWORD, XINPUT_STATE *);
 static ControllerState controller_state;
 static DWORD retry_at[2];
+static WORD pad_buttons[2];
+static SHORT pad_lx[2], pad_ly[2];
+static int last_device_pad;
+static int fullscreen;
+static RECT windowed_rect;
 
 static int smaller(int x, int y) { return x < y ? x : y; }
 
@@ -64,12 +69,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
     }
     case WM_KEYDOWN:
     case WM_KEYUP:
-        if (wp == VK_ESCAPE && message == WM_KEYDOWN) {
-            DestroyWindow(hwnd);
-            return 0;
+        if (wp < sizeof keys) {
+            if (message == WM_KEYDOWN && !keys[wp]) last_device_pad = 0;
+            keys[wp] = message == WM_KEYDOWN;
         }
-        if (wp < sizeof keys) keys[wp] = message == WM_KEYDOWN;
         return 0;
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+        /* F10 and Alt arrive as system keys; keep them out of the menu bar. */
+        if (wp == VK_F10 && wp < sizeof keys) { keys[wp] = message == WM_SYSKEYDOWN; return 0; }
+        return DefWindowProcW(hwnd, message, wp, lp);
     case WM_KILLFOCUS:
         memset(keys, 0, sizeof keys);
         return 0;
@@ -167,6 +176,13 @@ static void poll_controller(unsigned player, uint16_t *held, uint16_t *buttons)
     retry_at[player] = 0;
     XINPUT_GAMEPAD *pad = &state.Gamepad;
     WORD pressed = pad->wButtons;
+    if ((pressed & ~pad_buttons[player]) || (pad->sThumbLX > 12000 && pad_lx[player] <= 12000) ||
+        (pad->sThumbLX < -12000 && pad_lx[player] >= -12000) ||
+        (pad->sThumbLY > 12000 && pad_ly[player] <= 12000) ||
+        (pad->sThumbLY < -12000 && pad_ly[player] >= -12000)) last_device_pad = 1;
+    pad_buttons[player] = pressed;
+    pad_lx[player] = pad->sThumbLX;
+    pad_ly[player] = pad->sThumbLY;
     unsigned value = 0;
     if ((pressed & XINPUT_GAMEPAD_DPAD_RIGHT) || pad->sThumbLX > 12000) value |= 1;
     if ((pressed & XINPUT_GAMEPAD_DPAD_LEFT) || pad->sThumbLX < -12000) value |= 2;
@@ -197,6 +213,8 @@ int world_window_poll(uint16_t *pads, uint16_t *system)
     uint16_t buttons = keys['1'] | keys['2'] << 1 | keys['5'] << 2 | keys['6'] << 3;
     if (GetForegroundWindow() == window)
         for (unsigned player = 0; player < 2; ++player) poll_controller(player, &held, &buttons);
+    else
+        memset(pad_buttons, 0, sizeof pad_buttons), memset(pad_lx, 0, sizeof pad_lx), memset(pad_ly, 0, sizeof pad_ly);
     *pads = (uint16_t)~held;
     *system = (uint16_t)~buttons;
     return 1;
@@ -227,4 +245,69 @@ void world_window_close(void)
     controller_library = NULL;
     memset(retry_at, 0, sizeof retry_at);
     world_border_close();
+}
+
+/* Menu navigation from either keyboard or any pad, as held levels:
+ * up 1, down 2, left 4, right 8, accept 16, back 32, page back 64, page on 128.
+ * The toggle level is F1, Esc, or L3 and R3 held together. */
+unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
+{
+    unsigned held = 0;
+    held |= (keys[VK_UP] | keys['W']) ? 1 : 0;
+    held |= (keys[VK_DOWN] | keys['S']) ? 2 : 0;
+    held |= (keys[VK_LEFT] | keys['A']) ? 4 : 0;
+    held |= (keys[VK_RIGHT] | keys['D']) ? 8 : 0;
+    held |= (keys[VK_RETURN] | keys[VK_SPACE] | keys['Z']) ? 16 : 0;
+    held |= (keys[VK_BACK] | keys['X']) ? 32 : 0;
+    held |= (keys['Q'] | keys[VK_PRIOR]) ? 64 : 0;
+    held |= (keys['E'] | keys[VK_NEXT] | keys[VK_TAB]) ? 128 : 0;
+    unsigned toggle_level = keys[VK_F1] ? 1 : 0;
+    unsigned escape = keys[VK_ESCAPE] ? 1 : 0;
+    for (unsigned player = 0; player < 2; ++player) {
+        WORD b = pad_buttons[player];
+        held |= ((b & XINPUT_GAMEPAD_DPAD_UP) || pad_ly[player] > 12000) ? 1 : 0;
+        held |= ((b & XINPUT_GAMEPAD_DPAD_DOWN) || pad_ly[player] < -12000) ? 2 : 0;
+        held |= ((b & XINPUT_GAMEPAD_DPAD_LEFT) || pad_lx[player] < -12000) ? 4 : 0;
+        held |= ((b & XINPUT_GAMEPAD_DPAD_RIGHT) || pad_lx[player] > 12000) ? 8 : 0;
+        held |= (b & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_START)) ? 16 : 0;
+        held |= (b & XINPUT_GAMEPAD_B) ? 32 : 0;
+        held |= (b & XINPUT_GAMEPAD_LEFT_SHOULDER) ? 64 : 0;
+        held |= (b & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 128 : 0;
+        if ((b & XINPUT_GAMEPAD_LEFT_THUMB) && (b & XINPUT_GAMEPAD_RIGHT_THUMB)) toggle_level = 1;
+    }
+    if (toggle) *toggle = toggle_level | escape << 1;
+    if (gamepad) *gamepad = last_device_pad;
+    return held;
+}
+
+/* Borderless full screen on the window's monitor, or a window whose client
+ * area is scale times 320x240 (clamped to the work area). */
+void world_window_set_display(int full, unsigned scale)
+{
+    if (!window) return;
+    if (full && !fullscreen) GetWindowRect(window, &windowed_rect);
+    fullscreen = full;
+    if (full) {
+        MONITORINFO info;
+        info.cbSize = sizeof info;
+        GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info);
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(window, HWND_TOP, info.rcMonitor.left, info.rcMonitor.top,
+                     info.rcMonitor.right - info.rcMonitor.left, info.rcMonitor.bottom - info.rcMonitor.top,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        return;
+    }
+    SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    MONITORINFO info;
+    info.cbSize = sizeof info;
+    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info);
+    RECT work = info.rcWork, frame_rect = {0, 0, 0, 0};
+    AdjustWindowRect(&frame_rect, WS_OVERLAPPEDWINDOW, FALSE);
+    int dw = frame_rect.right - frame_rect.left, dh = frame_rect.bottom - frame_rect.top;
+    int fit = smaller((work.right - work.left - dw) / WIDTH, (work.bottom - work.top - dh) / HEIGHT);
+    if (scale < 1) scale = 1;
+    if ((int)scale > fit && fit >= 1) scale = (unsigned)fit;
+    int w = WIDTH * (int)scale + dw, h = HEIGHT * (int)scale + dh;
+    SetWindowPos(window, HWND_NOTOPMOST, (work.left + work.right - w) / 2, (work.top + work.bottom - h) / 2,
+                 w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
 }

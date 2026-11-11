@@ -3,42 +3,47 @@
 #include <stdint.h>
 #include "world_settings.h"
 
+/* Menu buttons, sampled as held levels each frame. */
 enum {
-    WORLD_MENU_UP = 1, WORLD_MENU_DOWN = 2, WORLD_MENU_LEFT = 4,
-    WORLD_MENU_RIGHT = 8, WORLD_MENU_ACCEPT = 16, WORLD_MENU_BACK = 32
+    WORLD_MENU_UP = 1, WORLD_MENU_DOWN = 2, WORLD_MENU_LEFT = 4, WORLD_MENU_RIGHT = 8,
+    WORLD_MENU_ACCEPT = 16, WORLD_MENU_BACK = 32, WORLD_MENU_TAB_PREV = 64, WORLD_MENU_TAB_NEXT = 128
 };
+
+/* Result bits from world_menu_update. */
 enum {
-    WORLD_MENU_SOUND = 1, WORLD_MENU_TIMING = 2, WORLD_MENU_BORDERS = 4,
-    WORLD_MENU_CONTROLS = 8, WORLD_MENU_ACHIEVEMENTS = 16,
-    WORLD_MENU_BOSS_RUSH = 32, WORLD_MENU_SCORE_ATTACK = 64,
-    WORLD_MENU_RETURN_TITLE = 128
+    WORLD_MENU_RESUME = 1,          /* close and continue the game */
+    WORLD_MENU_QUIT = 2,            /* leave the program */
+    WORLD_MENU_VOLUME = 4,          /* settings->volume changed */
+    WORLD_MENU_DISPLAY = 8,         /* fullscreen or window_scale changed */
+    WORLD_MENU_BORDER = 16,         /* border, border_image or brightness changed */
+    WORLD_MENU_TIMING = 32,         /* timing_mode changed */
+    WORLD_MENU_SAVE = 64            /* persist settings (on close) */
 };
-typedef enum {
-    WORLD_MENU_NONE, WORLD_MENU_START_GAME, WORLD_MENU_RESUME,
-    WORLD_MENU_EXIT, WORLD_MENU_TITLE, WORLD_MENU_OPEN_CONTROLS,
-    WORLD_MENU_OPEN_ACHIEVEMENTS, WORLD_MENU_PICK_BACKGROUND,
-    WORLD_MENU_START_BOSS_RUSH, WORLD_MENU_START_SCORE_ATTACK,
-    WORLD_MENU_SETTINGS_CHANGED
-} WorldMenuCommand;
+
+enum { WORLD_MENU_BORDER_LIMIT = 8 };
 
 typedef struct {
-    unsigned open, paused, options, selected, return_selected, capabilities;
-    unsigned previous_buttons, repeat_button;
-    uint32_t repeat_at;
+    unsigned open, page, tab, row, rows[4];
+    unsigned previous, repeat_buttons, gamepad, dirty;
+    uint32_t repeat_at, opened_at;
+    unsigned border_count, border_index;
+    char border_name[WORLD_MENU_BORDER_LIMIT][24];
+    char border_path[WORLD_MENU_BORDER_LIMIT][WORLD_SETTINGS_PATH_SIZE];
 } WorldMenu;
 
-/* Supply buttons currently held to consume the key that opened this menu.
- * Capability bits must describe implemented host features. */
-void world_menu_open(WorldMenu *menu, int paused, unsigned capabilities,
-                     unsigned held_buttons, uint32_t now_ms);
-void world_menu_close(WorldMenu *menu);
-WorldMenuCommand world_menu_update(WorldMenu *menu, WorldSettings *settings,
-                                   unsigned held_buttons, uint32_t now_ms);
-/* Separate host UI canvas. game_frame is optional, read-only 320x240 ARGB.
- * width/height must fit at least 320x240. No game state is modified. */
+/* Border choices; index 0 must be black (empty path). */
+void world_menu_set_borders(WorldMenu *menu, unsigned count, const char *const names[],
+                            const char *const paths[], const WorldSettings *settings);
+/* held is the button level when opened so that key is not acted on twice. */
+void world_menu_open(WorldMenu *menu, unsigned held, int gamepad, uint32_t now_ms);
+unsigned world_menu_update(WorldMenu *menu, WorldSettings *settings, unsigned held,
+                           int gamepad, uint32_t now_ms);
+/* canvas: the 320x240 ARGB game frame, replaced by the menu over it.
+ * gfx1 supplies the game's own 8x8 and 16x16 lettering. */
 void world_menu_render(const WorldMenu *menu, const WorldSettings *settings,
-                       uint32_t *output, unsigned width, unsigned height,
-                       const uint32_t *game_frame);
+                       uint32_t *canvas, const uint8_t *gfx1, uint32_t now_ms);
+
+/* Small 5x7 host lettering kept for the achievement view. */
 void world_menu_draw_text(uint32_t *pixels, unsigned width, unsigned height,
                           int x, int y, unsigned scale, uint32_t color, const char *text);
 int world_menu_text_width(const char *text, unsigned scale);
