@@ -9505,6 +9505,120 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     return 0;
 }
 
+/* Bit n of the 32-bit mask at parent words 50/52 marks bridge piece n as
+   fallen; F1BA starts it as FFFE0000, so pieces past either end count as
+   fallen. */
+static int bridge_fallen(const uint8_t *ram, uint16_t parent, uint16_t piece)
+{
+    uint16_t word = read_word(ram, parent + 0x50 + ((piece & 0x10) >> 3));
+    return (word >> (piece & 15)) & 1;
+}
+
+/* 1000:F1BA..F3F5: the stage-three bridge. F1BA lays down 17 F23B pieces
+   20h apart as the camera advances. A piece falls when shot, or when its
+   neighbours have fallen (for pieces at multiples of 4, both of them);
+   it then bursts, marks itself fallen and drops like the boss segments
+   (F0C1). */
+static int stage_three_bridge(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
+                              uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0x10000;
+    uint16_t piece = read_word(ram, actor + 0x1e);
+    switch (address) {
+    case 0x1f1ba:
+        ram[actor + 0x2c] = 0x0d;
+        write_word(ram, actor + 0x42, read_word(ram, 0xb700) - 0x20);
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x21));
+        write_word(ram, actor + 0x50, 0);
+        write_word(ram, actor + 0x52, 0xfffe);
+        write_word(ram, actor, 0xf1dd);
+        return 1;
+    case 0x1f1dd: {
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
+        if ((int16_t)read_word(ram, actor + 0x42) > (int16_t)read_word(ram, 0xb700)) return 1;
+        write_word(ram, actor + 0x42, read_word(ram, actor + 0x42) + 0x20);
+        uint16_t child = bank_1_effect(ram, actor, 0xf23b);
+        write_word(ram, child + 0x21, read_word(ram, actor + 0x31));
+        write_word(ram, child + 0x24, 0x118);
+        ram[child + 0x2c] = ram[actor + 0x2c];
+        write_word(ram, child + 0x1e, read_word(ram, actor + 0x44) & 0x1f);
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + 0x20);
+        write_word(ram, actor + 0x44, read_word(ram, actor + 0x44) + 1);
+        if (read_word(ram, actor + 0x44) >= 0x11) finish_animation(ram, actor);
+        return 1;
+    }
+    case 0x1f23b:
+        write_word(ram, actor + 0x0e, 0x3b);
+        ram[actor + 0x2d] = 0x2e;
+        write_word(ram, actor + 0x3c, 0xf9fb);
+        write_word(ram, actor + 0x26, 0x200);
+        write_word(ram, actor + 0x36, 0x200);
+        if (piece & 3) write_word(ram, actor + 0x2a, 0xbfe6);
+        write_word(ram, actor, 0xf265);
+        return 1;
+    case 0x1f265: {
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        int left = bridge_fallen(ram, parent, piece - 1), right = bridge_fallen(ram, parent, piece + 1);
+        if (!(piece & 3)) {
+            write_word(ram, actor + 0x2a, 0xc01e);
+            if (!left) {
+                if (right) write_word(ram, actor + 0x2a, 0xc038);
+            } else if (!right)
+                write_word(ram, actor + 0x2a, 0xc052);
+            else write_word(ram, actor + 0x50, 1);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        int fall = (piece & 3) ? left || right : read_word(ram, actor + 0x50) != 0;
+        if (!fall) {
+            ram[actor + 0x0d] = 0;
+            uint16_t hit = world_surface_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) return 1;
+            if (!hit) {
+                world_dispatch_detail = "bridge piece destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            world_award_score(ram, rom, actor, hit);
+        }
+        ram[surface_enemy_death_blast(ram, rom, actor) + 0x2d] = ram[actor + 0x2d] + 1;
+        write_word(ram, actor + 0x42, 0x10);
+        write_word(ram, actor, 0xf377);
+        return 1;
+    }
+    case 0x1f377: {
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, rom, actor, 0);
+        if (decrement(ram, actor + 0x42)) return 1;
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        uint16_t mask = parent + 0x50 + ((piece & 0x10) >> 3);
+        write_word(ram, mask, read_word(ram, mask) | (1u << (piece & 15)));
+        surface_enemy_death_blast(ram, rom, actor);
+        spawn_fragments(ram, actor, 0x1000, 0xd8d8);
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x42, 0x28);
+        write_word(ram, actor + 0x3a, 0x100);
+        uint16_t cell = read_word(bank, 0xd956 + 2 * (piece & 15));
+        for (unsigned i = 0; i < 4; ++i) {
+            uint16_t at = (uint16_t)(cell + 2 + 4 * i);
+            if (at >= 0xc000) {
+                world_dispatch_detail = "bridge piece clears a map cell outside segment D400";
+                return 0;
+            }
+            write_word(terrain, at, read_word(terrain, at) & 0x7ff);
+        }
+        write_word(ram, actor, 0xf0c1);
+        return 1;
+    }
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -12570,6 +12684,10 @@ stage2_jumper_terrain:
     case 0x7d1d6: case 0x7d260:
         if (!tiles) return 0;
         if (!stage_three_attacker(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0x1f1ba: case 0x1f1dd: case 0x1f23b: case 0x1f265: case 0x1f377:
+        if (!tiles) return 0;
+        if (!stage_three_bridge(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
