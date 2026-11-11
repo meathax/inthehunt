@@ -9,6 +9,7 @@
 #include "world_palette.h"
 #include "world_video.h"
 #include "world_window.h"
+#include "world_border.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
 #include "world_ga20.h"
@@ -423,6 +424,30 @@ static void headless_run(const char *dir, const char *script_path)
             }
             memcpy(pixels, still, sizeof still);
             menu.open = 0;
+        }
+        /* WORLD_BORDER_SHOT=frame composes that frame with every border
+           preset at 1920x1080 (and 1280x1024) through the window painter. */
+        static int border_shot_done;
+        const char *border_shot = getenv("WORLD_BORDER_SHOT");
+        if (border_shot && !border_shot_done && ticks >= strtoul(border_shot, NULL, 10)) {
+            border_shot_done = 1;
+            int border_failed = 0;
+            menu_borders(dir);
+            static const int sizes[2][2] = {{1920, 1080}, {1280, 1024}};
+            for (unsigned i = 0; i < menu.border_count; ++i) {
+                world_border_set(menu.border_path[i], 100);
+                for (unsigned s = 0; s < 2; ++s) {
+                    char path[4096];
+                    snprintf(path, sizeof path, "%s/headless-border%u-%dx%d.bmp", dir, i,
+                             sizes[s][0], sizes[s][1]);
+                    if (!world_window_compose_bmp(pixels, sizes[s][0], sizes[s][1], path)) {
+                        snprintf(failure, sizeof failure, "Border composition failed: %s", menu.border_name[i]);
+                        border_failed = 1;
+                    }
+                }
+            }
+            world_border_set("", 100);
+            if (border_failed) break;
         }
         if (save_path && ticks >= save_at) {
             FILE *f = fopen(save_path, "wb");

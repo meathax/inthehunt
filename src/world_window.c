@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <xinput.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include "world_window.h"
 #include "world_border.h"
@@ -27,10 +28,8 @@ static RECT windowed_rect;
 
 static int smaller(int x, int y) { return x < y ? x : y; }
 
-static void paint(HWND hwnd, HDC dc)
+static void paint_area(HDC dc, RECT rect)
 {
-    RECT rect;
-    GetClientRect(hwnd, &rect);
     int scale = smaller(rect.right / WIDTH, rect.bottom / HEIGHT);
     if (scale < 1) scale = 1;
     int w = WIDTH * scale, h = HEIGHT * scale;
@@ -39,6 +38,56 @@ static void paint(HWND hwnd, HDC dc)
     SetStretchBltMode(dc, COLORONCOLOR);
     StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH, HEIGHT, frame, &bitmap,
                   DIB_RGB_COLORS, SRCCOPY);
+}
+
+static void paint(HWND hwnd, HDC dc)
+{
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    paint_area(dc, rect);
+}
+
+/* Headless check of the window picture: the same border and centred
+ * integer-scaled frame, painted into an off-screen width x height bitmap. */
+int world_window_compose_bmp(const uint32_t *pixels, int width, int height, const char *path)
+{
+    if (!pixels || width < WIDTH || height < HEIGHT || width > 8192 || height > 8192) return 0;
+    memcpy(frame, pixels, sizeof frame);
+    bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap.bmiHeader.biWidth = WIDTH;
+    bitmap.bmiHeader.biHeight = -HEIGHT;
+    bitmap.bmiHeader.biPlanes = 1;
+    bitmap.bmiHeader.biBitCount = 32;
+    bitmap.bmiHeader.biCompression = BI_RGB;
+    BITMAPINFO info = bitmap;
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    void *bits = NULL;
+    HDC dc = CreateCompatibleDC(NULL);
+    HBITMAP target = dc ? CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0) : NULL;
+    int ok = 0;
+    if (target) {
+        HGDIOBJ previous = SelectObject(dc, target);
+        RECT rect = {0, 0, width, height};
+        paint_area(dc, rect);
+        GdiFlush();
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            BITMAPFILEHEADER file = {0};
+            size_t size = (size_t)width * height * 4;
+            file.bfType = 0x4d42;
+            file.bfOffBits = sizeof file + sizeof info.bmiHeader;
+            file.bfSize = (DWORD)(file.bfOffBits + size);
+            ok = fwrite(&file, sizeof file, 1, f) == 1 &&
+                 fwrite(&info.bmiHeader, sizeof info.bmiHeader, 1, f) == 1 &&
+                 fwrite(bits, size, 1, f) == 1;
+            ok = (fclose(f) == 0) && ok;
+        }
+        SelectObject(dc, previous);
+        DeleteObject(target);
+    }
+    if (dc) DeleteDC(dc);
+    return ok;
 }
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)

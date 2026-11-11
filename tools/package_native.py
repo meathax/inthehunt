@@ -13,6 +13,7 @@ FILES = {
     "tools/world_regions.json": "tools/world_regions.json",
     "tools/world_native.ps1": "tools/world_native.ps1",
     "CREDITS.md": "CREDITS.md",
+    "tools/get_border_art.ps1": "tools/get_border_art.ps1",
 }
 INSTRUCTIONS = """In The Hunt World - native Windows build
 
@@ -25,6 +26,8 @@ images stay under .local/world. Later launches can run without the archive.
 On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
 F1 (or L3 + R3 together on a controller) opens the pause menu: resume,
 video, sound, game timing, border, controls and quit. Esc goes back in the menu.
+On first launch the game downloads three optional In The Hunt border images
+(marquee, control panel, fan art); pick one under OPTIONS > VIDEO > BORDER ART.
 
 Timing (Arcade or RemoveSlowdown) can be changed in the menu or with
 .\\play.ps1 -TimingMode Arcade. The choice is saved.
