@@ -12233,6 +12233,536 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
     return 0;
 }
 
+/* 0:D3FE with IX = FB2B: is a player inside the turret box? Also returns
+   AX as D429 leaves it: |dx| when x is out of range, else |dy|; untouched
+   when no player is active. */
+static int s4_near_player_ax(const uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t *ax)
+{
+    for (unsigned i = 0; i < 2; ++i) {
+        if (!(ram[0x264] & (1u << i))) continue;
+        uint16_t player = read_word(ram, 0x90 + 2 * i);
+        uint16_t dx = read_word(ram, actor + 0x21) + read_word(rom, 0xfb2b) - read_word(ram, player + 0x21);
+        if (dx & 0x8000) dx = -dx;
+        *ax = dx;
+        if (dx >= read_word(rom, 0xfb2f)) continue;
+        uint16_t dy = read_word(ram, actor + 0x24) + read_word(rom, 0xfb2d) - read_word(ram, player + 0x24);
+        if (dy & 0x8000) dy = -dy;
+        *ax = dy;
+        if (dy < read_word(rom, 0xfb31)) return 1;
+    }
+    return 0;
+}
+
+/* B000:9A2C, called as a subroutine: the cruiser's forward terrain evade.
+   Returns 1 (carry) while evading. */
+static int s4_cruiser_evade(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    if (read_word(ram, actor + 0x4e) && !decrement(ram, actor + 0x4e))
+        write_word(ram, actor + 0x3a, 0);
+    if (read_word(ram, actor + 0x46)) {
+        if (!decrement(ram, actor + 0x46)) {
+            uint16_t speed = read_word(ram, actor + 0x2e);
+            write_word(ram, actor + 0x38, (ram[actor + 0x29] & 1) ? (uint16_t)-speed : speed);
+            write_word(ram, actor + 0x3a, 0);
+            write_word(ram, actor + 0x4a, (world_random_byte(ram) & 15) + 0x30);
+            write_word(ram, actor + 0x4c, 0);
+            ram[actor + 0x64] &= 0xfe;
+        }
+        return 1;
+    }
+    uint16_t x = read_word(ram, actor + 0x21) + read_word(bank, 0x8d58 + 2 * (ram[actor + 0x29] & 1));
+    uint16_t cell = world_tile_address(x - 0x60 + read_word(ram, 0xb70a), 0x177 - read_word(ram, actor + 0x24) + read_word(ram, 0xb70c));
+    static const int16_t step[3] = {0, 0x100, -0x200};
+    for (unsigned i = 0; i < 3; ++i) {
+        cell = (cell + step[i]) & 0x3fff;
+        unsigned material = terrain[cell + 3] >> 3;
+        if (!((1u << (material & 15)) & 0xff02)) continue;
+        uint16_t index = (material - 8) & 6;
+        write_word(ram, actor + 0x3a, read_word(bank, (uint16_t)(0x8d6c + index)));
+        write_word(ram, actor + 0x38, read_word(bank, (uint16_t)(0x8d64 + (index & 4) + 2 * (ram[actor + 0x29] & 1))));
+        write_word(ram, actor + 0x46, 10);
+        write_word(ram, actor + 0x4e, 0);
+        return 1;
+    }
+    return 0;
+}
+
+static unsigned s4_cell_mask(const uint8_t *terrain, uint16_t cell)
+{
+    return 1u << ((terrain[(uint16_t)(cell + 3)] >> 3) & 15);
+}
+
+/* B000:0E83: probe five cells ahead in the heading (byte 28) and, on a
+   wall, bounce: reverse the blocked axis and turn round, pausing (0ACA). */
+static void s4_diver_walls(uint8_t *ram, const uint8_t *terrain, uint16_t actor)
+{
+    uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+    unsigned octant = (ram[actor + 0x28] & 0xe0) >> 5;
+    static const int16_t start_x[8] = {0x10, 0, -0x10, 0x10, -0x10, -0x10, -0x10, 0};
+    static const int16_t start_y[8] = {0x10, 0x10, 0x10, 0x10, 0x10, 0, -0x10, -0x10};
+    /* Steps: 'r' next row (108C), 'c' next column (10A5), 'b' back two
+       columns then next row, 'u' back two rows then next row. */
+    static const char *const steps[8] = {"rrrr", "ccrr", "cccc", "ccbr", "rrrr", "rrcc", "cccc", "ccur"};
+    static const uint16_t first_mask[8] = {0xff02, 0xff0a, 0xff0a, 0xff0a, 0xff02, 0xff02, 0xff0a, 0xff02};
+    uint16_t cell = world_tile_address(x + start_x[octant] - 0x60 + read_word(ram, 0xb70a),
+                                       0x177 - (uint16_t)(y + start_y[octant]) + read_word(ram, 0xb70c));
+    int hit;
+    unsigned solid[5];
+    solid[0] = (s4_cell_mask(terrain, cell) & first_mask[octant]) != 0;
+    const char *step = steps[octant];
+    for (unsigned i = 0; i < 4; ++i) {
+        uint16_t mask = 0xff02;
+        switch (step[i]) {
+        case 'r': cell = (cell + 0x100) & 0x3fff; break;
+        case 'c': cell = (cell & 0xff00) | (uint8_t)(cell + 4); if (first_mask[octant] == 0xff0a) mask = 0xff0a; break;
+        case 'b': cell = (cell & 0xff00) | (uint8_t)(cell - 8); cell = (cell + 0x100) & 0x3fff; break;
+        case 'u': cell = (cell - 0x200) & 0x3fff; cell = (cell + 0x100) & 0x3fff; break;
+        }
+        solid[i + 1] = (s4_cell_mask(terrain, cell) & mask) != 0;
+    }
+    if (octant == 0 || octant == 4)     /* 0E94/0E9A: first two, or the last three together */
+        hit = solid[0] || solid[1] || (solid[2] && solid[3] && solid[4]);
+    else
+        hit = solid[0] || solid[1] || solid[2] || solid[3] || solid[4];
+    if (!hit) return;
+    write_word(ram, actor + 0x4c, 0x30);
+    if (octant == 2 || octant == 6) {
+        write_word(ram, actor + 0x3a, -read_word(ram, actor + 0x3a));
+        ram[actor + 0x28] ^= 0x40;
+    } else if (octant == 0 || octant == 4) {
+        write_word(ram, actor + 0x38, -read_word(ram, actor + 0x38));
+        ram[actor + 0x28] ^= 0x80;
+    } else {
+        write_word(ram, actor + 0x38, -read_word(ram, actor + 0x38));
+        write_word(ram, actor + 0x3a, -read_word(ram, actor + 0x3a));
+        ram[actor + 0x28] ^= 0x80;
+    }
+    write_word(ram, actor, 0x0aca);
+}
+
+/* B000:0893..0DD1: a stage-four diver (at most 8, counted in C0) with a
+   0B25 gun on its back. It follows its 063C script, then hunts: it turns
+   to face a player (0A21), charges (0A73) bouncing off walls, and when
+   B8A8 is set or word 46 runs out swims away left (0AE5). */
+static int s4_diver_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    ram[actor + 0x0d] = 0;
+    uint16_t hit = world_player_contact(ram, rom, actor);
+    if (read_word(ram, actor + 0x26)) {
+        ram[actor + 0x0d] = 0;
+        hit = world_projectile_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) return 1;
+    }
+    if (!hit) {
+        world_dispatch_detail = "stage-four diver destroyed without a hit; 6237 reads leftover BX";
+        return 0;
+    }
+    world_award_score(ram, rom, actor, hit);
+    spawn_kill_blast(ram, actor);
+    decrement(ram, 0xc0);
+    finish_animation(ram, actor);
+    return 1;
+}
+
+static int stage_four_diver(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    uint16_t parent;
+    int low = read_word(ram, 0x26e) & 2;
+    uint16_t bottom = low ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
+    int16_t top = low ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+    switch (address) {
+    case 0xb0893: {
+        if (read_word(ram, 0xc0) >= 8) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        write_word(ram, actor + 0x4e, read_word(ram, 0xc0));
+        write_word(ram, 0xc0, read_word(ram, 0xc0) + 1);
+        world_acquire_resource(ram, actor, 0x4b);
+        world_acquire_resource(ram, actor, 0x4a);
+        write_word(ram, actor + 0x0e, 3);
+        ram[actor + 0x0c] = 4;
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x26, 0xc0);
+        write_word(ram, actor + 0x36, 0x28);
+        write_word(ram, actor + 0x3c, 0xf2b3);
+        write_word(ram, actor + 0x2a, 0xe010);
+        uint16_t row = (read_word(ram, actor + 0x1e) & 0x0e) << 2;
+        write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + read_word(bank, (uint16_t)(0x063e + row)));
+        write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(bank, (uint16_t)(0x0640 + row)));
+        ram[actor + 0x29] = bank[(uint16_t)(0x0642 + row)];
+        begin_linear_script(ram, rom, actor, read_word(bank, (uint16_t)(0x063c + row)));
+        uint16_t aim = ram[actor + 0x1f] & 0x0c;
+        write_word(ram, actor + 0x48, read_word(bank, (uint16_t)(0x06b8 + aim)));
+        write_word(ram, actor + 0x4a, read_word(bank, (uint16_t)(0x06ba + aim)));
+        uint16_t gun = bank_b_effect(ram, actor, 0x0b25);
+        write_word(ram, gun + 0x14, read_word(ram, actor + 0x14));
+        ram[gun + 0x2c] = ram[actor + 0x15];
+        write_word(ram, gun + 0x1e, read_word(ram, actor + 0x1e));
+        write_word(ram, gun + 0x4e, read_word(ram, actor + 0x4e));
+        write_word(ram, actor + 0x46, 0x400);
+        write_word(ram, actor, 0x0957);
+        return 1;
+    }
+    case 0xb0957: {
+        int step = step_flight_script(ram, rom, actor);
+        if (!step) {
+            world_dispatch_detail = "stage-four diver flight script kind";
+            return 0;
+        }
+        if (step < 0) {
+            write_word(ram, actor + 0x2e, 0x80);
+            write_word(ram, actor + 0x42, 0x20);
+            write_word(ram, actor, 0x09b4);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return s4_diver_contacts(ram, rom, actor);
+    }
+    case 0xb09b4:
+        scroll_actor(ram, actor, 0xb71a);
+        if ((!read_word(ram, actor + 0x42) || !decrement(ram, actor + 0x42)) && (read_word(ram, 0x264) & 3)) {
+            uint16_t target = world_enemy_target(ram, actor);
+            uint8_t angle = aim_angle(rom, read_word(ram, target + 0x21) + read_word(ram, actor + 0x48) - read_word(ram, actor + 0x21),
+                                      read_word(ram, target + 0x24) + read_word(ram, actor + 0x4a) - read_word(ram, actor + 0x24));
+            ram[actor + 0x28] = (uint8_t)(angle + 8) & 0xf0;
+            s5_velocity(ram, rom, actor);
+            uint8_t facing = read_word(ram, target + 0x21) >= read_word(ram, actor + 0x21);
+            if (ram[actor + 0x29] != facing) {
+                write_word(ram, actor + 0x42, 0x12);
+                write_word(ram, actor, 0x0a21);
+            } else {
+                write_word(ram, actor + 0x42, 0x40);
+                write_word(ram, actor, 0x0a73);
+            }
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return s4_diver_contacts(ram, rom, actor);
+    case 0xb0a21:
+    case 0xb0a3f:
+        scroll_actor(ram, actor, 0xb71a);
+        if (address == 0xb0a21) {
+            if (read_word(ram, actor + 0x62)) {
+                queue_sprite(ram, rom, actor, 0);
+                return s4_diver_contacts(ram, rom, actor);
+            }
+            write_word(ram, actor + 0x2a, 0xe02a);
+            write_word(ram, actor + 0x60, 1);
+            write_word(ram, actor, 0x0a3f);
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor + 0x2a, 0xe010);
+            write_word(ram, actor + 0x60, 0);
+            write_word(ram, actor, 0x0a73);
+        } else if (read_word(ram, actor + 0x42) == 9)
+            ram[actor + 0x29] ^= 1;
+        queue_sprite(ram, rom, actor, 0);
+        return s4_diver_contacts(ram, rom, actor);
+    case 0xb0a73:
+    case 0xb0aca:
+        scroll_actor(ram, actor, 0xb71a);
+        if (address == 0xb0a73) {
+            move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+            move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+            queue_sprite(ram, rom, actor, 0);
+            if (!decrement(ram, actor + 0x42)) {
+                write_word(ram, actor + 0x40, 0);
+                write_word(ram, actor + 0x42, 0x10);
+                write_word(ram, actor, 0x09b4);
+            }
+            s4_diver_walls(ram, terrain, actor);
+        } else {
+            queue_sprite(ram, rom, actor, 0);
+            if (!decrement(ram, actor + 0x4c)) {
+                write_word(ram, actor + 0x42, 0x40);
+                write_word(ram, actor, 0x0a73);
+            }
+        }
+        if (read_word(ram, 0xb8a8) || !decrement(ram, actor + 0x46)) {
+            write_word(ram, actor + 0x42, 1);
+            write_word(ram, actor + 0x38, 0xff40);
+            write_word(ram, actor + 0x3a, 0);
+            ram[actor + 0x28] = 0x80;
+            ram[actor + 0x29] = 0;
+            write_word(ram, actor, 0x0ae5);
+        }
+        return s4_diver_contacts(ram, rom, actor);
+    case 0xb0ae5: {
+        scroll_actor(ram, actor, 0xb71a);
+        s4_cruiser_evade(ram, rom, terrain, actor);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21);
+        if (x > 0x1c0 || x < 0x40) {
+            decrement(ram, 0xc0);
+            finish_animation(ram, actor);
+            return 1;
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return s4_diver_contacts(ram, rom, actor);
+    }
+
+    /* The gun. */
+    case 0xb0b25: {
+        ram[actor + 0x2d] = 0x20;
+        ram[actor + 0x0c] = 4;
+        write_word(ram, actor + 0x2a, 0xdf96);
+        uint16_t row = read_word(bank, (uint16_t)(0x06c8 + (read_word(ram, actor + 0x1e) & 0x20) + read_word(ram, 0x88))) + 0x708;
+        write_word(ram, actor + 0x50, read_word(bank, row));
+        write_word(ram, actor + 0x52, read_word(bank, row));
+        write_word(ram, actor + 0x54, read_word(bank, (uint16_t)(row + 2)));
+        write_word(ram, actor + 0x56, read_word(bank, (uint16_t)(row + 2)));
+        write_word(ram, actor + 0x58, read_word(bank, (uint16_t)(row + 4)));
+        write_word(ram, actor + 0x5a, read_word(bank, (uint16_t)(row + 4)));
+        write_word(ram, actor + 0x5c, read_word(bank, (uint16_t)(row + 6)));
+        write_word(ram, actor, 0x0b70);
+        return 1;
+    }
+    case 0xb0b70:
+    case 0xb0c0f: {
+        parent = s5_parent(ram, actor);
+        if (ram[parent + 0x0a]) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (address == 0xb0b70 && read_word(ram, parent + 0x60)) return 1;
+        uint16_t y = read_word(ram, parent + 0x24) + ((read_word(ram, 0x274) & 0x20) >> 5);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, y);
+        if (address == 0xb0c0f) {
+            if (!decrement(ram, actor + 0x44)) {
+                uint16_t index = (ram[actor + 0x28] >> 3) + read_word(ram, actor + 0x40);
+                write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x07a8 + index)));
+                write_word(ram, actor + 0x44, 0x0b);
+                uint16_t back = read_word(ram, actor + 0x40);
+                write_word(ram, actor + 0x40, back - 0x20);
+                if (back < 0x20) {
+                    write_word(ram, parent + 0x62, 0);
+                    write_word(ram, actor, 0x0b70);
+                }
+            }
+            queue_sprite(ram, rom, actor, 0);
+            return 1;
+        }
+        ram[actor + 0x29] = ram[parent + 0x29];
+        /* 0DD2: fire unless a player is inside the box; the counter test
+           uses AX as D3FE leaves it. */
+        uint16_t ax = (y & 0xff00) | ram[parent + 0x29];
+        int fire = 0;
+        if (!s4_near_player_ax(ram, rom, actor, &ax)) {
+            if (!(read_word(ram, actor + 0x50) & ax))
+                fire = !decrement(ram, actor + 0x50);
+            else if (!decrement(ram, actor + 0x54)) {
+                write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+                if (!decrement(ram, actor + 0x58)) {
+                    write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
+                    write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+                }
+                fire = 1;
+            }
+        }
+        if (fire) {
+            uint16_t shot = bank_b_effect(ram, actor, 0x0c8d);
+            ram[shot + 0x2c] = ram[actor + 0x14];
+            uint8_t heading = ram[actor + 0x28];
+            ram[shot + 0x28] = heading;
+            write_word(ram, shot + 0x2e, read_word(ram, actor + 0x5c));
+            uint16_t frames = read_word(bank, (uint16_t)(0x07e8 + (heading >> 3)));
+            write_word(ram, shot + 0x5e, frames);
+            uint16_t dx = read_word(bank, (uint16_t)(0x0838 + (frames >> 1)));
+            ram[shot + 0x29] = ram[actor + 0x29];
+            write_word(ram, shot + 0x31, (ram[actor + 0x29] & 1) ? (uint16_t)-dx : dx);
+            write_word(ram, shot + 0x34, read_word(bank, (uint16_t)(0x083a + (frames >> 1))));
+            world_queue_sound(ram, 0x77);
+            write_word(ram, parent + 0x62, 1);
+            write_word(ram, actor + 0x40, 0x20);
+            write_word(ram, actor + 0x44, 5);
+            write_word(ram, actor, 0x0c0f);
+        }
+        if ((fire || (read_word(ram, 0x274) & 7) == read_word(ram, actor + 0x4e)) && (read_word(ram, 0x264) & 3)) {
+            uint16_t target = world_enemy_target(ram, actor);
+            uint8_t angle = aim_angle(rom, read_word(ram, target + 0x21) - read_word(ram, actor + 0x21),
+                                      read_word(ram, target + 0x24) - read_word(ram, actor + 0x24));
+            uint16_t index = (uint8_t)(angle + 8) >> 4;
+            if (ram[actor + 0x29] & 1) index += 0x10;
+            uint8_t heading = bank[(uint16_t)(0x0788 + index)];
+            ram[actor + 0x28] = heading;
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x07a8 + (heading >> 3))));
+        }
+        queue_sprite(ram, rom, actor, 0);
+        return 1;
+    }
+
+    /* The gun's shot: grows at the muzzle, then flies. */
+    case 0xb0c8d:
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x3c, 0xf2bb);
+        write_word(ram, actor + 0x26, 0x7f00);
+        write_word(ram, actor + 0x36, 0x100);
+        write_word(ram, actor + 0x44, 1);
+        s5_velocity(ram, rom, actor);
+        write_word(ram, actor, 0x0caf);
+        /* fall through */
+    case 0xb0caf:
+        parent = s5_parent(ram, actor);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) + read_word(ram, actor + 0x31));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24) + read_word(ram, actor + 0x34));
+        if (decrement(ram, actor + 0x44)) {
+            queue_sprite(ram, rom, actor, 0);
+            return 1;
+        }
+        {
+            uint16_t index = read_word(ram, actor + 0x40), frames = read_word(ram, actor + 0x5e);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x0808 + index + frames)));
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0x0830 + index)));
+            write_word(ram, actor + 0x40, index + 2);
+            if (index + 2 < 8) {
+                queue_sprite(ram, rom, actor, 0);
+                return 1;
+            }
+            write_word(ram, actor + 0x40, 0);
+            uint8_t facing = bank[(uint16_t)(0x0874 + (frames >> 3))];
+            if (!(read_word(ram, actor + 0x38) & 0x8000)) facing |= 1;
+            ram[actor + 0x29] = facing;
+            ram[actor + 0x2d] = 4;
+            write_word(ram, actor, 0x0d24);
+        }
+        goto shot_fly;
+    case 0xb0d24:
+        scroll_actor(ram, actor, 0xb71a);
+    shot_fly: {
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        if (x > 0x1c0 || x < 0x40 || bottom < y || (int16_t)y < top) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x084c + (read_word(ram, actor + 0x40) & 6) + read_word(ram, actor + 0x5e))));
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        queue_sprite(ram, rom, actor, 0);
+        if (world_terrain_mask(ram, terrain, x, y) & 0xff0a) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        ram[actor + 0x0d] = 2;
+        if (world_player_contact(ram, rom, actor)) finish_animation(ram, actor);
+        return 1;
+    }
+    }
+    return 0;
+}
+
+/* B000:7C2E..7EE5: the hopper's spread shots. 7C2E (a muzzle flash that
+   follows its parent) fans three 7D77 pellets along the 78C4 headings;
+   7CDA fans four 7E2F lobs with 78D0 x speeds that fall under gravity.
+   Pellets and lobs spin through 78D8 and die on walls, in water (0:6BCC
+   splash) or on a player. */
+static int stage_four_spread(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    switch (address) {
+    case 0xb7c2e:
+    case 0xb7cda: {
+        int lobs = address == 0xb7cda;
+        world_acquire_resource(ram, actor, 0x15);
+        ram[actor + 0x2d] = 0x21;
+        if (lobs) {
+            for (uint16_t count = 4; count; --count) {
+                uint16_t lob = bank_b_effect(ram, actor, 0x7e2f);
+                write_word(ram, lob + 0x21, read_word(ram, actor + 0x21));
+                write_word(ram, lob + 0x24, read_word(ram, actor + 0x24));
+                write_word(ram, lob + 0x3a, read_word(ram, actor + 0x2e));
+                write_word(ram, lob + 0x38, read_word(bank, (uint16_t)(0x78d0 + 2 * (count - 1))));
+            }
+        } else {
+            uint16_t index = (uint16_t)((ram[actor + 0x29] & 1) << 2) + read_word(ram, actor + 0x42);
+            for (unsigned count = 3; count; --count, ++index) {
+                uint16_t pellet = bank_b_effect(ram, actor, 0x7d77);
+                write_word(ram, pellet + 0x21, read_word(ram, actor + 0x21));
+                write_word(ram, pellet + 0x24, read_word(ram, actor + 0x24));
+                write_word(ram, pellet + 0x2e, read_word(ram, actor + 0x2e));
+                ram[pellet + 0x28] = bank[(uint16_t)(0x78c4 + index)];
+            }
+        }
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, lobs ? 0x7d22 : 0x7c80);
+    }
+        /* fall through */
+    case 0xb7c80:
+    case 0xb7d22: {
+        int lobs = read_word(ram, actor) == 0x7d22;
+        uint16_t parent = s5_parent(ram, actor);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            uint16_t frame = lobs ? read_word(bank, (uint16_t)(0x78b6 + index))
+                                  : read_word(bank, (uint16_t)(0x78a6 + index + 2 * read_word(ram, actor + 0x42)));
+            if (frame == 0xffff) {
+                finish_animation(ram, actor);
+                return 1;
+            }
+            write_word(ram, actor + 0x2a, frame);
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0x78b8 + index)));
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, rom, actor, 1);
+        return 1;
+    }
+    case 0xb7d77:
+    case 0xb7e2f:
+        world_acquire_resource(ram, actor, address == 0xb7d77 ? 0x12 : 0x14);
+        ram[actor + 0x2d] = 4;
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 0x80);
+        write_word(ram, actor + 0x3c, 0xf4e3);
+        if (address == 0xb7d77) s5_velocity(ram, rom, actor);
+        write_word(ram, actor, address == 0xb7d77 ? 0x7d9c : 0x7e4f);
+        /* fall through */
+    case 0xb7d9c:
+    case 0xb7e4f: {
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (read_word(ram, actor) == 0x7e4f)
+            write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x20);
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        if (x > 0x1c0 || x < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        uint16_t spin = read_word(ram, actor + 0x40) + 0x80;
+        if (spin >= 0x600) spin = 0;
+        write_word(ram, actor + 0x40, spin);
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x78d8 + 2 * (spin >> 8))));
+        queue_sprite(ram, rom, actor, 1);
+        if (world_terrain_mask(ram, terrain, x, y) & 0xff02) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (terrain_material(ram, terrain, x, y) == 3) {
+            /* 0:6BCC */
+            uint16_t splash = effect_slot(ram, actor, 0x6efe);
+            write_word(ram, splash + 0x4c, 0x7507);
+            write_word(ram, splash + 0x4a, 0x76e2);
+            write_word(ram, splash + 0x44, 0x0b);
+            ram[splash + 0x2d] = 0x20;
+            write_word(ram, splash + 0x56, 0x30);
+            write_word(ram, splash + 0x58, 0x80);
+            finish_animation(ram, actor);
+            return 1;
+        }
+        ram[actor + 0x0d] = 2;
+        if (world_player_contact(ram, rom, actor)) finish_animation(ram, actor);
+        return 1;
+    }
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -15408,6 +15938,17 @@ stage2_jumper_terrain:
     case 0x76a00: case 0x76aaa:
         if (!tiles) return 0;
         if (!stage_four_creature(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0xb0893: case 0xb0957: case 0xb09b4: case 0xb0a21: case 0xb0a3f: case 0xb0a73:
+    case 0xb0aca: case 0xb0ae5: case 0xb0b25: case 0xb0b70: case 0xb0c0f: case 0xb0c8d:
+    case 0xb0caf: case 0xb0d24:
+        if (!tiles) return 0;
+        if (!stage_four_diver(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0xb7c2e: case 0xb7c80: case 0xb7cda: case 0xb7d22: case 0xb7d77: case 0xb7d9c:
+    case 0xb7e2f: case 0xb7e4f:
+        if (!tiles) return 0;
+        if (!stage_four_spread(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
