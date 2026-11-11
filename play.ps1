@@ -39,7 +39,7 @@ else {
     if (!$build -or $newest.LastWriteTimeUtc -gt $build.LastWriteTimeUtc) { Build-WorldNative -Root $PSScriptRoot }
 }
 $artScript = Join-Path $PSScriptRoot 'tools/get_border_art.ps1'
-if ((Test-Path -LiteralPath $artScript) -and !(Test-Path -LiteralPath (Join-Path $PSScriptRoot '.local/art-sources/world-marquee.jpg'))) {
+if ((Test-Path -LiteralPath $artScript) -and !(Test-Path -LiteralPath (Join-Path $PSScriptRoot '.local/art-sources/world-fan-background.jpg'))) {
     try { & $artScript | Out-Null } catch { Write-Warning "Border art download skipped: $($_.Exception.Message)" }
 }
 Write-Host '5 inserts a coin. 1 starts Player 1. Arrow keys move. Z and X fire. F1 (or L3+R3) opens the menu.'

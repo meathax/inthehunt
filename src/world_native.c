@@ -41,14 +41,14 @@ static WorldMenu menu;
 /* Border presets fetched by tools/get_border_art.ps1 into .local/art-sources. */
 static void menu_borders(const char *dir)
 {
-    static char paths[4][4096];
-    static const char *const files[3] = {"world-marquee.jpg", "inthunt-cpo.jpg", "world-fan-background.jpg"};
-    static const char *const labels[3] = {"MARQUEE", "CONTROL PANEL", "FAN ART"};
-    const char *names[5], *list[5];
+    static char paths[2][4096];
+    static const char *const files[1] = {"world-fan-background.jpg"};
+    static const char *const labels[1] = {"UNDERSEA"};
+    const char *names[3], *list[3];
     unsigned count = 0;
     names[count] = "BLACK";
     list[count++] = "";
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < 1; ++i) {
         snprintf(paths[i], sizeof paths[i], "%s/../art-sources/%s", dir, files[i]);
         if (GetFileAttributesA(paths[i]) == INVALID_FILE_ATTRIBUTES) continue;
         names[count] = labels[i];
@@ -56,10 +56,16 @@ static void menu_borders(const char *dir)
     }
     int known = 0;
     for (unsigned i = 1; i < count; ++i) known |= !strcmp(list[i], settings.border_image);
+    if (settings.border_image[0] && !known &&
+        GetFileAttributesA(settings.border_image) == INVALID_FILE_ATTRIBUTES) {
+        /* A saved border whose file is gone (for example a retired preset) reverts to black. */
+        strcpy(settings.border, "black");
+        settings.border_image[0] = 0;
+    }
     if (settings.border_image[0] && !known) {
-        snprintf(paths[3], sizeof paths[3], "%s", settings.border_image);
+        snprintf(paths[1], sizeof paths[1], "%s", settings.border_image);
         names[count] = "CUSTOM";
-        list[count++] = paths[3];
+        list[count++] = paths[1];
     }
     world_menu_set_borders(&menu, count, names, list, &settings);
 }
@@ -584,8 +590,8 @@ int main(int argc, char **argv)
         return 1;
     }
     world_window_set_display(settings.fullscreen, settings.window_scale);
-    apply_border();
     menu_borders(dir);
+    apply_border();
     LARGE_INTEGER rate, now;
     QueryPerformanceFrequency(&rate);
     QueryPerformanceCounter(&now);
