@@ -7819,12 +7819,12 @@ static uint16_t bank_7_effect(uint8_t *ram, uint16_t parent, uint16_t handler)
     return child;
 }
 
-/* 7000:D5B0..DA98: stage-three wildlife. D860 is a leader that walks, then
+/* 7000:D5B0..DA98: stage-three background figures. D860 is a leader that walks, then
    hops (D935) until it dives (D970/D9BE); its D5B0 followers walk until the
    leader sets byte 0B, and step off ledges into the water (D6AF..D6E7).
    D7B9 lays out four D734 idlers, D813 is a still figure and DA10 a
    sprite-less mover that only registers as a target. */
-static int stage_three_wildlife(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
+static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
                                 uint16_t actor, uint32_t address)
 {
     const uint8_t *bank = rom + 0x70000;
@@ -10932,10 +10932,10 @@ stage2_jumper_terrain:
     case 0x7d834: case 0x7d860: case 0x7d8d6: case 0x7d908: case 0x7d91d:
     case 0x7d935: case 0x7d970: case 0x7d9be: case 0x7da10: case 0x7da36:
         if (!tiles) return 0;
-        if (!stage_three_wildlife(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        if (!stage_three_figures(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
     /* 7000:D2DD (init), D308 (perched), D390 (falling), D412 (sinking): a
-       perch that falls when the object at B8B0 touches it, releasing two
+       prop that falls when the object at B8B0 touches it, releasing two
        D45F runners, and two D50B swimmers when it reaches the water. */
     case 0x7d2dd:
         world_acquire_resource(ram, actor, 0xd0);
@@ -11010,7 +11010,7 @@ stage2_jumper_terrain:
         queue_sprite(ram, main_rom, actor, 0);
         break;
     }
-    /* 7000:D45F/D4B4 (runner) and D50B/D560 (swimmer) leave the perch. */
+    /* 7000:D45F/D4B4 (runner) and D50B/D560 (swimmer) leave the prop. */
     case 0x7d45f:
     case 0x7d50b: {
         const uint8_t *bank = main_rom + 0x70000;
