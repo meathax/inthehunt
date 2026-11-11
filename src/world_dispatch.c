@@ -2834,7 +2834,7 @@ static void queue_palette(uint8_t *ram, unsigned slot, uint16_t palette, uint16_
 {
     if (read_word(ram, 0x262) & 0x8800)
         return;
-    uint16_t dest = 0x9e06 + 8 * slot;
+    uint16_t dest = 0x9e06 + 8 * (slot & 0x3f);
     write_word(ram, dest, palette);
     write_word(ram, dest + 2, 0x80);
     write_word(ram, dest + 4, speed);
@@ -11825,6 +11825,60 @@ stage2_jumper_terrain:
         if (!tiles) return 0;
         if (!stage_three_building(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
         break;
+    /* 1000:FE8F: take palettes 80, 7F and 81 and start each fading. */
+    case 0x1fe8f: {
+        static const uint16_t palette[3] = {0x80, 0x7f, 0x81};
+        for (unsigned i = 0; i < 3; ++i) {
+            world_acquire_resource(ram, actor, palette[i]);
+            uint16_t job = 0x9e06 + 8 * (ram[actor + 0x2c] & 0x3f);
+            write_word(ram, job + 2, 0x80);
+            write_word(ram, job + 4, 5);
+            ram[job + 6] = 0x20;
+            ram[job + 7] = 0x10;
+        }
+        finish_animation(ram, actor);
+        break;
+    }
+    /* 1000:FF27 (init), FF30 (pick a cycle) and FF4B (run it): palette slot
+       11h cycles through one of four random lists until 262h bit 7. */
+    case 0x1ff27:
+        ram[actor + 0x2c] = 0x11;
+        /* fall through */
+    case 0x1ff30:
+        write_word(ram, actor + 0x40, read_word(main_rom + 0x10000, 0xe458 + (world_random_byte(ram) & 6)));
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor, 0xff4b);
+        /* fall through */
+    case 0x1ff4b: {
+        const uint8_t *bank = main_rom + 0x10000;
+        if (ram[0x262] & 0x80) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (decrement(ram, actor + 0x42)) break;
+        uint16_t entry = read_word(ram, actor + 0x40);
+        uint16_t palette = read_word(bank, entry);
+        if (palette == 0xffff) {
+            write_word(ram, actor, 0xff30);
+            break;
+        }
+        queue_palette(ram, ram[actor + 0x2c], palette, read_word(bank, (uint16_t)(entry + 2)));
+        write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(entry + 4)));
+        write_word(ram, actor + 0x40, entry + 6);
+        break;
+    }
+    /* 1000:FF98: four palette jobs from the E53E list, then retire. */
+    case 0x1ff98: {
+        const uint8_t *bank = main_rom + 0x10000;
+        for (uint16_t i = 0; i < 0x10; i += 4) {
+            uint16_t job = 0x9e06 + read_word(bank, (uint16_t)(0xe53e + i));
+            write_word(ram, job, read_word(bank, (uint16_t)(0xe540 + i)));
+            write_word(ram, job + 2, 0x40);
+        }
+        finish_animation(ram, actor);
+        leave_si(0x10);
+        break;
+    }
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
         queue_palette(ram, 0x10, 0x1cb, 8);
