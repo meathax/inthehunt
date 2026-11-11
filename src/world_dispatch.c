@@ -11249,6 +11249,168 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     return 0;
 }
 
+/* 7000:9C3D: does this block touch the ice boss pieces at B8C4, B8C6 or
+   B8C8 (B8C6/B8C8 also through their 7DA6 pose shapes)? */
+static int s5_touches_boss(const uint8_t *ram, const uint8_t *rom, uint16_t actor)
+{
+    const uint8_t *bank = rom + 0x70000;
+    uint16_t own = read_word(ram, actor + 0x3c);
+    uint16_t head = read_word(ram, 0xb8c4);
+    if (world_shape_overlap(ram, rom, actor, head, own, read_word(ram, head + 0x3c))) return 1;
+    for (unsigned i = 0; i < 2; ++i) {
+        uint16_t piece = read_word(ram, i ? 0xb8c8 : 0xb8c6);
+        if (world_shape_overlap(ram, rom, actor, piece, own, read_word(ram, piece + 0x3c))) return 1;
+        uint16_t shape = read_word(bank, (uint16_t)(0x7da6 + 2 * (read_word(ram, piece + 0x40) - 2)));
+        if (shape && world_shape_overlap(ram, rom, actor, piece, own, shape)) return 1;
+    }
+    return 0;
+}
+
+/* 7000:9A32..9D92: stage-five ice bridges. 9A32 anchors a row of 9AD1
+   blocks laid 20h apart; a block falls when it is shot, when the anchor
+   gives way (word 36), or when the ice boss touches it. The first fall
+   sets the anchor's word 60, which after 20h ticks redraws the bridge's
+   map blocks as broken ice. 9CB0 is a slab that, when the boss head
+   touches it, clears 20h rows of six map cells to plain water. */
+static int stage_five_ice_bridge(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
+                                 uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0x70000;
+    uint16_t kind = read_word(ram, actor + 0x1e) & 0x0e, child;
+    int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+    switch (address) {
+    case 0x79a32:
+        write_word(ram, actor + 0x36, 1);
+        write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(0x9746 + kind)));
+        ram[actor + 0x29] = bank[(uint16_t)(0x9a2c + (kind >> 1))];
+        child = s5_spawn(ram, actor, 0x9ad1);
+        write_word(ram, child + 0x21, read_word(ram, actor + 0x21));
+        write_word(ram, child + 0x24, read_word(ram, actor + 0x24));
+        ram[child + 0x29] = ram[actor + 0x29];
+        write_word(ram, child + 0x42, read_word(ram, actor + 0x42));
+        write_word(ram, child + 0x62, read_word(ram, actor + 8));
+        write_word(ram, actor, 0x9a81);
+        return 1;
+    case 0x79a81:
+        if (read_word(ram, actor + 0x60)) {
+            write_word(ram, actor + 0x42, 0x20);
+            write_word(ram, actor, 0x9a93);
+        }
+        return 1;
+    case 0x79a93:
+        if (decrement(ram, actor + 0x42)) return 1;
+        if ((int16_t)read_word(ram, actor + 0x24) >= 0x90) {
+            copy_tile_blocks(ram, tiles, rom, 0x4000, read_word(bank, (uint16_t)(0x975e + kind)),
+                             read_word(bank, (uint16_t)(0x9752 + kind)), read_word(bank, (uint16_t)(0x976a + kind)));
+            leave_si(0x40);
+        }
+        finish_animation(ram, actor);
+        return 1;
+    case 0x79ad1: {
+        uint16_t index = read_word(ram, actor + 0x1e);
+        write_word(ram, actor + 0x3c, 0xfa93);
+        write_word(ram, actor + 0x26, 1);
+        write_word(ram, actor + 0x36, 1);
+        ram[actor + 0x2c] = 0x1b;
+        ram[actor + 0x2d] = 1;
+        write_word(ram, actor + 0x2a, index ? 0x2b61 : 0x2b47);
+        if ((uint16_t)(index + 1) < read_word(ram, actor + 0x42)) {
+            child = s5_spawn(ram, actor, 0x9ad1);
+            ram[child + 0x29] = ram[actor + 0x29];
+            write_word(ram, child + 0x21, read_word(ram, actor + 0x21) + ((ram[actor + 0x29] & 1) ? -0x20 : 0x20));
+            write_word(ram, child + 0x24, read_word(ram, actor + 0x24));
+            write_word(ram, child + 0x1e, index + 1);
+            write_word(ram, child + 0x42, read_word(ram, actor + 0x42));
+            write_word(ram, child + 0x62, read_word(ram, actor + 0x62));
+        }
+        write_word(ram, actor, 0x9b43);
+        return 1;
+    }
+    case 0x79b43: {
+        scroll_actor(ram, actor, 0xb71a);
+        if ((int16_t)read_word(ram, actor + 0x24) < top) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        queue_sprite(ram, rom, actor, 0);
+        int fall = !read_word(ram, actor + 0x26) || !read_word(ram, s5_parent(ram, actor) + 0x36)
+                   || s5_touches_boss(ram, rom, actor);
+        if (!fall) return 1;
+        uint16_t levels = (uint16_t)(read_word(ram, actor + 8) - read_word(ram, actor + 0x62)) >> 1;
+        write_word(ram, s2b_ancestor(ram, actor, levels) + 0x60, 1);
+        ram[actor + 0x2c] |= 0x80;
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor + 0x3a, 0x100);
+        write_word(ram, actor + 0x42, 0x20);
+        write_word(ram, actor, 0x9bd0);
+        return 1;
+    }
+    case 0x79bd0:
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if ((int16_t)read_word(ram, actor + 0x3a) > (int16_t)0xff00)
+            write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 8);
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            uint16_t frame = read_word(bank, (uint16_t)(0x9776 + index));
+            if (frame == 0xffff) {
+                finish_animation(ram, actor);
+                return 1;
+            }
+            write_word(ram, actor + 0x2a, frame);
+            write_word(ram, actor + 0x44, read_word(bank, (uint16_t)(0x9794 + index)));
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x36, 0);
+            write_word(ram, s5_parent(ram, actor) + 0x26, 0);
+        }
+        return 1;
+
+    case 0x79cb0:
+        ram[actor + 0x2c] = 0x9b;
+        ram[actor + 0x2d] = 1;
+        write_word(ram, actor + 0x2a, 0x24dd);
+        write_word(ram, actor + 0x3c, 0xfa9b);
+        write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) - read_word(ram, 0xb70a));
+        write_word(ram, actor, 0x9cce);
+        return 1;
+    case 0x79cce: {
+        scroll_actor(ram, actor, 0xb71a);
+        if ((int16_t)read_word(ram, actor + 0x24) < top) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        queue_sprite(ram, rom, actor, 0);
+        uint16_t head = read_word(ram, 0xb8c4);
+        if (!world_shape_overlap(ram, rom, actor, head, read_word(ram, actor + 0x3c), read_word(ram, head + 0x3c)))
+            return 1;
+        uint16_t cell = 0x974;
+        for (unsigned row = 0x20; row; --row) {
+            for (unsigned column = 6; column; --column) {
+                uint16_t at = 0x4000 + cell + 2;
+                write_word(tiles, at, (read_word(tiles, at) & 0x7ff) | 0x3000);
+                cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+            }
+            cell = (cell & 0xff00) | (uint8_t)(cell - 0x18);
+            cell = (cell & 0x00ff) | ((((cell >> 8) + 1) & 0x3f) << 8);
+        }
+        write_word(ram, actor + 0x3a, 0x100);
+        write_word(ram, actor, 0x9d50);
+        return 1;
+    }
+    case 0x79d50:
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 8);
+        if ((int16_t)read_word(ram, actor + 0x24) < top) finish_animation(ram, actor);
+        else queue_sprite(ram, rom, actor, 0);
+        return 1;
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -14346,6 +14508,11 @@ stage2_jumper_terrain:
     case 0x15af5: case 0x15b3a: case 0x15b53:
         if (!tiles) return 0;
         if (!stage_three_end_boss(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    case 0x79a32: case 0x79a81: case 0x79a93: case 0x79ad1: case 0x79b43: case 0x79bd0:
+    case 0x79cb0: case 0x79cce: case 0x79d50:
+        if (!tiles) return 0;
+        if (!stage_five_ice_bridge(ram, main_rom, tiles, actor, address)) return 0;
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
