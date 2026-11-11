@@ -11554,11 +11554,11 @@ stage2_jumper_terrain:
         uint16_t row = read_word(ram, actor + 0x40);
         uint16_t limits = read_word(ram, actor + 0x68), trigger = read_word(ram, actor + 0x6a);
         update_camera_layers(ram, main_rom, tiles, actor, address == 0x3f68, address == 0x3ca1);
-        if (address == 0x3ca1) {
-            /* 3CA1: 46A5 always loads SI with the limits cursor it entered
-               with; 43AF never loads it; a 390B column copy then leaves 40h
-               and 4621 the advanced script cursor. The 46D9 call into 0:6015
-               is excluded above. */
+        if (address == 0x3ca1 || address == 0x3ca4) {
+            /* 3CA1 (450A, then 3CA4): 46A5 always loads SI with the limits
+               cursor it entered with; 43AF never loads it; a 390B column copy
+               then leaves 40h and 4621 the advanced script cursor. The 46D9
+               call into 0:6015 is excluded above. */
             if (read_word(ram, actor + 0x40) != row) leave_si(read_word(ram, actor + 0x40));
             else if (read_word(ram, actor + 0x6a) != trigger) leave_si(0x40);
             else leave_si(limits);
