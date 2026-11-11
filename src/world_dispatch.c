@@ -1792,6 +1792,20 @@ static void spawn_impact(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     write_word(ram, child + 0x58, read_word(rom, 0x6af0));
 }
 
+static void s5_break_ice(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t actor, uint16_t bw);
+
+/* 0:A3B7: in stage five (word 84 = 4), a weapon whose impact probe at
+   (x, y) found material 1 breaks that ice cell through 7000:9D93. */
+static void weapon_ice_impact(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
+                              uint16_t actor, uint16_t x, uint16_t y)
+{
+    if (read_word(ram, 0x84) != 4) return;
+    uint16_t cell = world_tile_address(x - 0x60 + read_word(ram, 0xb70a),
+                                       0x177 - y + read_word(ram, 0xb70c));
+    if ((terrain[cell + 3] >> 3) != 1) return;
+    s5_break_ice(ram, rom, (uint8_t *)terrain - 0x4000, actor, cell);
+}
+
 static void update_standard_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain,
                                     uint16_t actor, int accelerating)
 {
@@ -1819,8 +1833,10 @@ static void update_standard_torpedo(uint8_t *ram, const uint8_t *rom, const uint
         write_word(ram, actor + 0x21, shot.x);
         write_word(ram, actor + 0x24, shot.y);
         impact = (world_terrain_mask(ram, terrain, shot.x, shot.y) & 0x5502) != 0;
-        if (impact)
+        if (impact) {
             write_word(ram, actor + 0x40, 0);
+            weapon_ice_impact(ram, rom, terrain, actor, shot.x, shot.y);
+        }
     }
     if (impact || shot.x < 0x40 || shot.x > 0x1c0) {
         if (impact) {
@@ -1896,7 +1912,7 @@ static int update_powered_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_
                                       0x177 - y + read_word(ram, 0xb70c));
     unsigned material = terrain[cell + 3] >> 3;
     int solid = !!(0x5502 & (1u << (material & 15)));
-    if (solid && read_word(ram, 0x84) == 4 && material == 1) return 0;
+    if (solid) weapon_ice_impact(ram, rom, terrain, actor, x, y);
     if (solid || x > 0x1c0 || x < 0x40) {
         if (solid) {
             spawn_impact(ram, rom, actor);
@@ -2161,8 +2177,7 @@ static int update_blast_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_t 
                 if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
                 return 1;
             }
-            /* A3B7 calls 7000:9D93 for this stage-five material. */
-            if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+            weapon_ice_impact(ram, rom, terrain, actor, x + 0x10, read_word(ram, actor + 0x24));
             spawn_impact(ram, rom, actor);
         }
     } else
@@ -3148,7 +3163,7 @@ static int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_
 {
     int rising = handler != 0xa0a9;
     int surface = handler == 0x9fcd || handler == 0x9fda;
-    if ((ram[actor + 0x0b] & 0x80) || read_word(ram, 0x84) == 4)
+    if (ram[actor + 0x0b] & 0x80)
         return 0;
     uint16_t velocity = read_word(ram, actor + 0x3a);
     int accelerate = (handler == 0x9eb2 || handler == 0x9fcd) &&
@@ -3199,7 +3214,10 @@ static int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_
         uint16_t limit = (ram[0x26e] & 2) ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
         int impact = (mask & 0x5502) || (y <= limit && !read_word(ram, actor + 0x26));
         if (impact || y > limit) {
-            if (impact) spawn_impact(ram, rom, actor);
+            if (impact) {
+                weapon_ice_impact(ram, rom, terrain, actor, x, y);
+                spawn_impact(ram, rom, actor);
+            }
             write_word(ram, parent + 0x46, read_word(ram, parent + 0x46) + 1);
             finish_animation(ram, actor);
         } else if (read_word(ram, actor + 0x3c) != 0xffff) {
@@ -3223,8 +3241,10 @@ static int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_
         if (impact || y > top || material == 3) {
             if (material == 3) {
                 spawn_surface_splash(ram, rom, actor, x, y);
-            } else if (impact)
+            } else if (impact) {
+                weapon_ice_impact(ram, rom, terrain, actor, x, y);
                 spawn_impact(ram, rom, actor);
+            }
             write_word(ram, parent + 0x46, read_word(ram, parent + 0x46) + 1);
             finish_animation(ram, actor);
             return 1;
@@ -3236,6 +3256,7 @@ static int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_
             uint16_t count = read_word(ram, parent + 0x48);
             write_word(ram, parent + 0x48, (int16_t)count > 0 ? count - 1 : 0);
             if (impact) {
+                weapon_ice_impact(ram, rom, terrain, actor, x, y);
                 release_actor_resources(ram, actor);
                 write_word(ram, actor + 0x36, 0x20);
                 write_word(ram, actor, 0xa199);
@@ -3691,6 +3712,30 @@ static void s5_break_ice(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
         write_word(ram, shard + 0x1e, 2);
         write_word(ram, shard + 0x42, 0x14);
     }
+}
+
+/* 0:867B: in stage five the surfacing submarine breaks a 3 x 6 block of
+   ice cells from (x - 14h, y + 0Ch), each shard thrown from that cell. */
+void world_stage_five_entry_ice(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t sub)
+{
+    if (read_word(ram, 0x84) != 4) return;
+    uint16_t x = read_word(ram, sub + 0x21), y = read_word(ram, sub + 0x24);
+    uint16_t bw = s5_cell(ram, x - 0x14, y + 0x0c);
+    write_word(ram, sub + 0x21, x - 0x14);
+    write_word(ram, sub + 0x24, y + 0x0c);
+    for (unsigned row = 3; row; --row) {
+        for (unsigned column = 6; column; --column) {
+            s5_break_ice(ram, rom, tiles, sub, bw);
+            bw = (bw & 0xff00) | (uint8_t)(bw + 4);
+            write_word(ram, sub + 0x21, read_word(ram, sub + 0x21) + 8);
+        }
+        bw = (bw & 0xff00) | (uint8_t)(bw - 0x18);
+        bw = (uint16_t)(bw + 0x100) & 0x3fff;
+        write_word(ram, sub + 0x21, read_word(ram, sub + 0x21) - 0x30);
+        write_word(ram, sub + 0x24, read_word(ram, sub + 0x24) - 8);
+    }
+    write_word(ram, sub + 0x21, x);
+    write_word(ram, sub + 0x24, y);
 }
 
 /* 7000:95A8 / 95E8 / 9628: four rows of `columns` cells, walking upward. */
@@ -9704,8 +9749,7 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
                                                0x177 - y + read_word(ram, 0xb70c));
             unsigned material = terrain[(uint16_t)(cell + 3)] >> 3;
             if ((1u << (material & 15)) & 0xff02) {
-                /* A3B7 calls 7000:9D93 for this stage-five material. */
-                if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                weapon_ice_impact(ram, rom, terrain, actor, x + 0x20, y);
                 burst = 1;
             } else {
                 uint16_t behind = (cell & 0xff00) | (uint8_t)(cell - 0x10);
@@ -9824,8 +9868,7 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
             uint16_t cell = world_tile_address(x - 0x60 + read_word(ram, 0xb70a), 0x177 - y + read_word(ram, 0xb70c));
             unsigned material = terrain[(uint16_t)(cell + 3)] >> 3;
             if ((1u << (material & 15)) & 0xff0a) {
-                /* A3B7 calls 7000:9D93 for this stage-five material. */
-                if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                weapon_ice_impact(ram, rom, terrain, actor, x, y);
                 spent = 1;
             } else if (x > 0x1c0 || x < 0x40) {
                 finish_animation(ram, actor);
@@ -12640,9 +12683,12 @@ stage2_jumper_terrain:
         int outside = outside_pickup_area(ram, actor);
         int impact = (0x5502 & (1u << (material & 15))) ||
                      (material != 3 && !outside && !read_word(ram, actor + 0x26));
-        if (impact && read_word(ram, 0x84) == 4) return 0;
         if (impact || material == 3 || outside) {
-            if (impact) spawn_impact(ram, main_rom, actor);
+            if (impact) {
+                weapon_ice_impact(ram, main_rom, tiles + 0x4000, actor,
+                                  read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
+                spawn_impact(ram, main_rom, actor);
+            }
             else if (material == 3)
                 spawn_surface_splash(ram, main_rom, actor, read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
             uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
@@ -12924,10 +12970,10 @@ stage2_jumper_terrain:
     case 0x7b3c:
     case 0x7b6f: {
         unsigned owner = ram[actor + 0x0b] & 3;
-        if (!tiles || !owner || owner > 2 || read_word(ram, 0x84) == 4 ||
+        if (!tiles || !owner || owner > 2 ||
             (ram[0x262] & 0x40) || (ram[0xb8b2] & (1u << (owner & 2)))) {
             world_dispatch_detail = !tiles ? "no tile memory" : !owner || owner > 2 ? "sub owner"
-                : read_word(ram, 0x84) == 4 ? "word 84 = 4" : (ram[0x262] & 0x40) ? "262h bit 6" : "B8B2 owner bit";
+                : (ram[0x262] & 0x40) ? "262h bit 6" : "B8B2 owner bit";
             return 0;
         }
         uint16_t config = read_word(ram, actor + 0x70);
@@ -18214,8 +18260,8 @@ stage2_jumper_terrain:
                 if (read_word(ram, actor + 0x3c) != 0xffff) world_append_candidate(ram + 0xa6e2, actor);
                 unsigned material = terrain_material(ram, tiles + 0x4000, x, y + 8);
                 if (0x5502 & (1u << (material & 15))) {
-                    /* A3B7 calls 7000:9D93 for this stage-five material. */
-                    if (read_word(ram, 0x84) == 4 && material == 1) return 0;
+                    weapon_ice_impact(ram, main_rom, tiles + 0x4000, actor,
+                                      read_word(ram, actor + 0x21), read_word(ram, actor + 0x24) + 8);
                     expire = 1;
                 } else if (material == 3) {
                     write_word(ram, actor + 0x31, x);
@@ -18275,7 +18321,7 @@ stage2_jumper_terrain:
         break;
     case 0x9c33:
     case 0x9c82:
-        if (!tiles || (ram[actor + 0x0b] & 0x80) || read_word(ram, 0x84) == 4 ||
+        if (!tiles || (ram[actor + 0x0b] & 0x80) ||
             (address == 0x9c33 && !read_word(ram, actor + 0x42)))
             return 0;
         update_standard_torpedo(ram, main_rom, tiles + 0x4000, actor, address == 0x9c33);

@@ -1,3 +1,4 @@
+#include "world_dispatch.h"
 #include <stdint.h>
 #include "world_tile_address.h"
 #include "world_torpedo.h"
@@ -242,6 +243,7 @@ void world_sub_entry_step(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
     int16_t ceiling = (int16_t)word(ram + 0x25c);
     put(a + 0x21, x > 0x188 ? 0x188 : x < 0x70 ? 0x70 : x);
     put(a + 0x24, y < 0xa0 ? 0xa0 : y > ceiling ? ceiling : y);
+    world_stage_five_entry_ice(ram, rom, tiles, sub);
     update_water_medium(ram, rom, a, cfg[10], cfg[14] & 8 ? 3 : 0);
     put(a + 0x6c, 0);
     if (delay == 1) {

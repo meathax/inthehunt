@@ -27,6 +27,8 @@ void world_dispatch_return(WorldDispatch *, uint8_t *ram, uint16_t actor);
 /* Names the untranslated branch when a recovered handler stops. */
 extern const char *world_dispatch_detail;
 extern uint16_t world_dispatch_port4;
+/* 0:867B: stage-five ice broken by the surfacing submarine. */
+void world_stage_five_entry_ice(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t sub);
 
 #endif
 
