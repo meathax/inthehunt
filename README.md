@@ -32,14 +32,48 @@ Each controller drives its own player. Key and button assignments are stored in 
 Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears in the game's own lettering and colours. Up and down select, left and right change a value, Enter/A confirms, Esc/B goes back. Each line has a short description at the bottom of the screen.
 
 - **Resume**
-- **Options**: three tabs (Q/E or the shoulder buttons switch tabs)
-  - **Video**: window or full screen; window size (sharp ×1 to ×8 integer scaling); border art (Black or Undersea); border brightness
-  - **Sound**: master volume, 0–100 %
-  - **Game**: slowdown mode (Arcade keeps the original slowdown; Remove Slowdown runs busy scenes at full speed); reset all options
+- **Options**: four tabs (Q/E or the shoulder buttons switch tabs; long lists scroll)
+  - **Video**
+    - Display: window or full screen
+    - Window size: sharp ×1 to ×8
+    - Scaling: Integer (sharpest), Fit 4:3 (largest picture that keeps the shape) or Stretch (fill the window)
+    - V-Sync: wait for the display refresh
+    - FPS limit: Arcade (60.01 Hz), 90, 120, 180, 240 or Uncapped
+    - Show FPS: frame rate and game speed in the corner
+    - Border art (Black or Undersea) and border brightness
+  - **Sound**: master volume, plus separate levels for the FM synth (YM2151) and the PCM samples (GA20)
+  - **Game**
+    - Slowdown: Arcade keeps the original slowdown; Off runs busy scenes at full speed
+    - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2–5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on, so they apply from the next launch
+    - Auto pause: open the pause menu when the window loses focus
+    - Reset options
+  - **Enhance**: optional picture enhancements (see below)
 - **Controls**: the keyboard and controller layout
 - **Quit game**: asks for confirmation
 
 Settings are saved when the menu closes. Esc no longer quits the game outright.
+
+**About the FPS limit.** The game advances exactly one board frame per picture, as the arcade did, so there are no in-between frames to draw. A limit above Arcade therefore runs the game proportionally faster (a fast-forward), and sound is muted while it is active. Arcade is the correct setting for normal play.
+
+### Enhancements
+
+The **Enhance** tab adds effects the arcade board never had. They are a post-process of the finished 320×240 frame: nothing feeds back into the game, and with the master switch off the picture is the untouched arcade output. Every effect has its own switch. Hold **P** (or **Y** on a controller) on this tab to hide the menu and see the result on the paused picture.
+
+| Effect | What it does |
+|---|---|
+| Caustics | A rippling net of light across open water |
+| Light shafts | Slanted sunbeams from the surface that fade with depth |
+| Dynamic lights | Explosions, flames and tracer light up their surroundings |
+| Bloom | Soft glow around the brightest pixels |
+| Depth shading | Water loses red, then green, toward the sea bed |
+| Marine snow | Drifting particles on two parallax layers |
+| Water shimmer | A gentle one-pixel refraction wobble |
+| Vivid color | Richer saturation and contrast |
+| Vignette | Darker corners |
+| Motion trails | Phosphor-style persistence behind bright objects |
+| Scanlines | CRT beam lines (integer scaling, ×2 and up) |
+
+The master switch is off by default. Water is recognised by colour (blue-dominant, not bright), so the water effects can also touch other dark blue scenery and can miss water of an unusual colour; the HUD strip is always left alone.
 
 ### Border art
 
@@ -64,7 +98,7 @@ InTheHunt.exe <data-dir> [--timing=arcade|remove-slowdown]
 | Two-player co-op, continues, game over | Native C |
 | Sound: V35 sequencer, YM2151 (ymfm), GA20 PCM | Native C/C++ |
 | Video: M92 tilemaps, sprites, palette, raster effects | Native C framebuffer, 320×240 |
-| Pause/options menu, border art, controller support | New, native |
+| Pause/options menu, border art, controller support, optional enhancements | New, native |
 
 If play ever reaches a routine that was not translated, the game stops instead of guessing. It names the routine's address on screen and logs it to `.local/world/native-stops.tsv`. Recent long runs have not hit this (see Verification).
 
@@ -112,6 +146,7 @@ python tools/package_source.py     # → .local/release/inthehunt-source.zip (ev
 | `src/world_audio_driver.c`, `world_audio_notes.c`, `world_ga20.c`, `world_ym.cpp`, `world_audio_output.c` | V35 sound driver, chip synthesis, Windows output |
 | `src/world_clock.c`, `world_cycle_costs.c`, `world_timing_options.c` | Board clock and the slowdown model |
 | `src/world_window.c`, `world_input.c`, `world_border.c`, `world_menu.c`, `world_settings.c` | Window, XInput/keyboard, border art, pause menu, settings |
+| `src/world_enhance.c` | Optional picture enhancements (post-process only) |
 | `src/world_boot.c` | ROM import checks and cold-boot state |
 | `src/world_io.c`, `world_motion.c`, `world_sound.c`, `world_tile_v33.c` | Early V33 reference routines used by the MAME hybrid tools |
 | `src/third_party/ymfm` | Aaron Giles's YM2151 emulator (BSD-3-Clause) |
@@ -130,7 +165,8 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 |---|---|
 | `WORLD_SNAPSHOT_SAVE=frame,path` / `WORLD_SNAPSHOT_LOAD=path` | Save or resume full machine state |
 | `WORLD_MENU_SHOT=frame` | Render every pause-menu page over that frame |
-| `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset at 1920×1080 and 1280×1024 using the real window painter |
+| `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset, each scaling mode and scanlines at 1920×1080 using the real window painter |
+| `WORLD_FX_SHOT=frame` | Save that frame with no enhancement, each enhancement alone, and all together |
 
 ### Developer reference tools (MAME)
 

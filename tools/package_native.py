@@ -26,6 +26,8 @@ images stay under .local/world. Later launches can run without the archive.
 On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
 F1 (or L3 + R3 together on a controller) opens the pause menu: resume,
 video, sound, game timing, border, controls and quit. Esc goes back in the menu.
+Options also has an ENHANCE tab: optional caustics, light shafts, dynamic
+lights, bloom and more, all off by default (pure arcade picture).
 On first launch the game downloads an optional undersea border image;
 turn it on under OPTIONS > VIDEO > BORDER ART.
 

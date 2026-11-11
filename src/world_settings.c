@@ -23,7 +23,28 @@ static const NumberSetting numbers[] = {
     {"fullscreen", offsetof(WorldSettings, fullscreen), 0, 1},
     {"vsync", offsetof(WorldSettings, vsync), 0, 1},
     {"window_scale", offsetof(WorldSettings, window_scale), 1, 12},
-    {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1}
+    {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1},
+    {"scaling", offsetof(WorldSettings, scaling), 0, 2},
+    {"fps_limit", offsetof(WorldSettings, fps_limit), 0, 5},
+    {"show_fps", offsetof(WorldSettings, show_fps), 0, 1},
+    {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1},
+    {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100},
+    {"pcm_volume", offsetof(WorldSettings, pcm_volume), 0, 100},
+    {"dip_lives", offsetof(WorldSettings, dip_lives), 0, 3},
+    {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3},
+    {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
+    {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
+    {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
+    {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
+    {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1},
+    {"fx_bloom", offsetof(WorldSettings, fx_bloom), 0, 1},
+    {"fx_shimmer", offsetof(WorldSettings, fx_shimmer), 0, 1},
+    {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
+    {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
+    {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
+    {"fx_vignette", offsetof(WorldSettings, fx_vignette), 0, 1},
+    {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
+    {"fx_scanlines", offsetof(WorldSettings, fx_scanlines), 0, 1}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -56,6 +77,15 @@ void world_settings_defaults(WorldSettings *settings)
     settings->volume = 100;
     settings->window_scale = 3;
     settings->achievement_popups = 1;
+    settings->pause_unfocused = 1;
+    settings->fm_volume = 100;
+    settings->pcm_volume = 100;
+    settings->dip_lives = 1;         /* factory: 3 submarines */
+    settings->dip_difficulty = 2;    /* factory: normal */
+    settings->dip_demo_sound = 1;
+    /* The master switch is off, so the first picture is the arcade's own. */
+    settings->fx_caustics = settings->fx_rays = settings->fx_lights = settings->fx_bloom = 1;
+    settings->fx_depth = settings->fx_snow = settings->fx_vignette = 1;
     strcpy(settings->shader, "pixels");
     strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);

@@ -12,6 +12,10 @@ void world_window_close(void);
 /* Pause-menu buttons (see world_window.c); *toggle bit 0 = F1 or L3+R3, bit 1 = Esc. */
 unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad);
 void world_window_set_display(int fullscreen, unsigned scale);
+/* scaling: 0 whole-number, 1 largest 4:3 fit, 2 fill the window. Scanlines
+ * need whole-number scaling of at least x2. vsync waits for the compositor. */
+void world_window_set_view(int scaling, int scanlines, int vsync);
+int world_window_focused(void);
 /* Headless: paint border plus frame into a width x height BMP file. */
 int world_window_compose_bmp(const uint32_t *pixels, int width, int height, const char *path);
 #endif

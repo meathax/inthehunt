@@ -6,7 +6,8 @@
 /* Menu buttons, sampled as held levels each frame. */
 enum {
     WORLD_MENU_UP = 1, WORLD_MENU_DOWN = 2, WORLD_MENU_LEFT = 4, WORLD_MENU_RIGHT = 8,
-    WORLD_MENU_ACCEPT = 16, WORLD_MENU_BACK = 32, WORLD_MENU_TAB_PREV = 64, WORLD_MENU_TAB_NEXT = 128
+    WORLD_MENU_ACCEPT = 16, WORLD_MENU_BACK = 32, WORLD_MENU_TAB_PREV = 64, WORLD_MENU_TAB_NEXT = 128,
+    WORLD_MENU_PEEK = 256           /* hold on the enhancements page to see the picture */
 };
 
 /* Result bits from world_menu_update. */
@@ -17,14 +18,19 @@ enum {
     WORLD_MENU_DISPLAY = 8,         /* fullscreen or window_scale changed */
     WORLD_MENU_BORDER = 16,         /* border, border_image or brightness changed */
     WORLD_MENU_TIMING = 32,         /* timing_mode changed */
-    WORLD_MENU_SAVE = 64            /* persist settings (on close) */
+    WORLD_MENU_SAVE = 64,           /* persist settings (on close) */
+    WORLD_MENU_VIEW = 128           /* scaling, v-sync, frame rate, enhancements or cabinet switches changed */
 };
 
-enum { WORLD_MENU_BORDER_LIMIT = 8 };
+enum { WORLD_MENU_BORDER_LIMIT = 8, WORLD_MENU_FPS_CHOICES = 6 };
+/* Frames per second for settings->fps_limit; 0 is the arcade rate and the
+ * last entry (UINT_MAX) is uncapped. */
+extern const unsigned world_menu_fps[WORLD_MENU_FPS_CHOICES];
 
 typedef struct {
     unsigned open, page, tab, row, rows[4];
     unsigned previous, repeat_buttons, gamepad, dirty;
+    unsigned peek;                  /* the menu is hidden while the preview button is held */
     uint32_t repeat_at, opened_at;
     unsigned border_count, border_index;
     char border_name[WORLD_MENU_BORDER_LIMIT][24];

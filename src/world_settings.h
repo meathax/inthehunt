@@ -18,6 +18,26 @@ typedef struct {
     unsigned vsync;
     unsigned window_scale;
     unsigned achievement_popups;
+    unsigned scaling;            /* 0 integer, 1 fit 4:3, 2 stretch */
+    unsigned fps_limit;          /* index into the frame-rate table; 0 is the arcade rate */
+    unsigned show_fps;
+    unsigned pause_unfocused;
+    unsigned fm_volume, pcm_volume;
+    unsigned dip_lives;          /* 0..3 = 2, 3, 4, 5 submarines */
+    unsigned dip_difficulty;     /* 0..3 = very easy, easy, normal, hard */
+    unsigned dip_demo_sound;
+    unsigned fx_enable;
+    unsigned fx_caustics;
+    unsigned fx_rays;
+    unsigned fx_lights;
+    unsigned fx_bloom;
+    unsigned fx_shimmer;
+    unsigned fx_depth;
+    unsigned fx_snow;
+    unsigned fx_vivid;
+    unsigned fx_vignette;
+    unsigned fx_trails;
+    unsigned fx_scanlines;
     char shader[WORLD_SETTINGS_ID_SIZE];
     char border[WORLD_SETTINGS_ID_SIZE];
     char border_image[WORLD_SETTINGS_PATH_SIZE];

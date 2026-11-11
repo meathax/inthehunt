@@ -9,13 +9,44 @@
 
 enum { W = 320, H = 240 };
 enum { PAGE_MAIN, PAGE_OPTIONS, PAGE_CONTROLS, PAGE_QUIT };
-enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_COUNT };
+enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_ENHANCE, TAB_COUNT };
 enum {
     ITEM_RESUME, ITEM_OPTIONS, ITEM_CONTROLS, ITEM_QUIT,
     ITEM_DISPLAY, ITEM_SCALE, ITEM_BORDER, ITEM_LIGHT,
     ITEM_VOLUME, ITEM_SLOWDOWN, ITEM_DEFAULTS, ITEM_BACK,
-    ITEM_NO, ITEM_YES, ITEM_TABS
+    ITEM_NO, ITEM_YES, ITEM_TABS,
+    ITEM_SCALING, ITEM_VSYNC, ITEM_FPS, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
+    ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
+    ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM, ITEM_FX_SHIMMER,
+    ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES
 };
+enum { MAX_ITEMS = 20, VISIBLE_ROWS = 6, ROW_STEP = 15 };
+
+const unsigned world_menu_fps[WORLD_MENU_FPS_CHOICES] = {0, 90, 120, 180, 240, 0xffffffffu};
+
+/* The on/off switch behind an item, or NULL. */
+static unsigned *toggle_field(WorldSettings *s, unsigned id)
+{
+    switch (id) {
+    case ITEM_VSYNC: return &s->vsync;
+    case ITEM_SHOWFPS: return &s->show_fps;
+    case ITEM_FOCUS: return &s->pause_unfocused;
+    case ITEM_DEMOSOUND: return &s->dip_demo_sound;
+    case ITEM_FX: return &s->fx_enable;
+    case ITEM_FX_CAUSTICS: return &s->fx_caustics;
+    case ITEM_FX_RAYS: return &s->fx_rays;
+    case ITEM_FX_LIGHTS: return &s->fx_lights;
+    case ITEM_FX_BLOOM: return &s->fx_bloom;
+    case ITEM_FX_SHIMMER: return &s->fx_shimmer;
+    case ITEM_FX_DEPTH: return &s->fx_depth;
+    case ITEM_FX_SNOW: return &s->fx_snow;
+    case ITEM_FX_VIVID: return &s->fx_vivid;
+    case ITEM_FX_VIGNETTE: return &s->fx_vignette;
+    case ITEM_FX_TRAILS: return &s->fx_trails;
+    case ITEM_FX_SCANLINES: return &s->fx_scanlines;
+    default: return NULL;
+    }
+}
 
 typedef struct { uint32_t pen[16]; } Ramp;
 
@@ -144,6 +175,18 @@ static void arrow(uint32_t *c, int x, int y, int left, uint32_t color)
     }
 }
 
+static void arrow_up(uint32_t *c, int x, int y, uint32_t color)
+{
+    for (int j = 0; j < 4; ++j)
+        for (int i = -j; i <= j; ++i) put(c, x + i, y + j, color);
+}
+
+static void arrow_down(uint32_t *c, int x, int y, uint32_t color)
+{
+    for (int j = 0; j < 4; ++j)
+        for (int i = -(3 - j); i <= 3 - j; ++i) put(c, x + i, y + j, color);
+}
+
 /* ---- items --------------------------------------------------------------- */
 
 typedef struct { unsigned id; const char *label; const char *help; } Item;
@@ -164,13 +207,36 @@ static unsigned page_items(const WorldMenu *m, Item *items)
         if (m->tab == TAB_VIDEO) {
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
+            ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
+            ADD(ITEM_VSYNC, "V-SYNC", "SYNC TO THE DISPLAY REFRESH");
+            ADD(ITEM_FPS, "FPS LIMIT", "ABOVE ARCADE THE GAME RUNS FASTER");
+            ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
             ADD(ITEM_BORDER, "BORDER ART", "ARTWORK AROUND THE PICTURE");
             ADD(ITEM_LIGHT, "BORDER LIGHT", "BRIGHTNESS OF THE BORDER ART");
         } else if (m->tab == TAB_SOUND) {
             ADD(ITEM_VOLUME, "VOLUME", "MASTER VOLUME. 0 IS MUTE");
-        } else {
+            ADD(ITEM_FM, "FM SYNTH", "YM2151 MUSIC LEVEL");
+            ADD(ITEM_PCM, "PCM SAMPLES", "GA20 SAMPLE LEVEL");
+        } else if (m->tab == TAB_GAME) {
             ADD(ITEM_SLOWDOWN, "SLOWDOWN", "ARCADE KEEPS ORIGINAL SLOWDOWN");
+            ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT LAUNCH");
+            ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT LAUNCH");
+            ADD(ITEM_DEMOSOUND, "DEMO SOUND", "CABINET SWITCH. NEXT LAUNCH");
+            ADD(ITEM_FOCUS, "AUTO PAUSE", "PAUSE WHEN THE WINDOW LOSES FOCUS");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
+        } else {
+            ADD(ITEM_FX, "ENHANCEMENTS", "MASTER SWITCH. OFF IS PURE ARCADE");
+            ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING LIGHT IN OPEN WATER");
+            ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS FROM THE SURFACE");
+            ADD(ITEM_FX_LIGHTS, "DYNAMIC LIGHTS", "BLASTS LIGHT UP THE SCENE");
+            ADD(ITEM_FX_BLOOM, "BLOOM", "SOFT GLOW ON BRIGHT PIXELS");
+            ADD(ITEM_FX_DEPTH, "DEPTH SHADING", "DEEPER WATER IS DARKER");
+            ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
+            ADD(ITEM_FX_SHIMMER, "WATER SHIMMER", "GENTLE REFRACTION WOBBLE");
+            ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
+            ADD(ITEM_FX_VIGNETTE, "VIGNETTE", "DARKER CORNERS");
+            ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
+            ADD(ITEM_FX_SCANLINES, "SCANLINES", "CRT LINES. INTEGER SCALING X2+");
         }
         ADD(ITEM_BACK, "BACK", "RETURN TO THE PAUSE MENU");
         break;
@@ -190,6 +256,7 @@ static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id
 {
     if (id == ITEM_SCALE) return s->fullscreen != 0;
     if (id == ITEM_LIGHT) return m->border_index == 0;
+    if (id > ITEM_FX && id <= ITEM_FX_SCANLINES) return !s->fx_enable;
     return 0;
 }
 
@@ -203,7 +270,23 @@ static void item_value(const WorldMenu *m, const WorldSettings *s, unsigned id, 
         snprintf(out, 32, "%s", m->border_index < m->border_count ? m->border_name[m->border_index] : "BLACK");
         break;
     case ITEM_SLOWDOWN: strcpy(out, s->timing_mode == WORLD_TIMING_ARCADE ? "ARCADE" : "OFF"); break;
-    default: break;
+    case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
+    case ITEM_FPS:
+        if (!s->fps_limit) strcpy(out, "ARCADE");
+        else if (s->fps_limit == WORLD_MENU_FPS_CHOICES - 1) strcpy(out, "UNCAPPED");
+        else snprintf(out, 32, "%u", world_menu_fps[s->fps_limit]);
+        break;
+    case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
+    case ITEM_DIFFICULTY: {
+        static const char *const names[4] = {"VERY EASY", "EASY", "NORMAL", "HARD"};
+        strcpy(out, names[s->dip_difficulty & 3]);
+        break;
+    }
+    default: {
+        unsigned *field = toggle_field((WorldSettings *)s, id);
+        if (field) strcpy(out, *field ? "ON" : "OFF");
+        break;
+    }
     }
 }
 
@@ -211,6 +294,8 @@ static int slider(unsigned id, const WorldSettings *s)
 {
     if (id == ITEM_VOLUME) return (int)s->volume;
     if (id == ITEM_LIGHT) return (int)s->border_brightness;
+    if (id == ITEM_FM) return (int)s->fm_volume;
+    if (id == ITEM_PCM) return (int)s->pcm_volume;
     return -1;
 }
 
@@ -237,6 +322,7 @@ void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
     m->repeat_buttons = 0;
     m->gamepad = !!gamepad;
     m->dirty = 0;
+    m->peek = 0;
     m->opened_at = now_ms;
 }
 
@@ -282,7 +368,25 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
     case ITEM_SLOWDOWN:
         s->timing_mode = s->timing_mode == WORLD_TIMING_ARCADE ? WORLD_TIMING_REMOVE_SLOWDOWN : WORLD_TIMING_ARCADE;
         return WORLD_MENU_TIMING;
-    default: return 0;
+    case ITEM_FM: case ITEM_PCM: {
+        unsigned *level = id == ITEM_FM ? &s->fm_volume : &s->pcm_volume;
+        unsigned v = step_percent(*level, d);
+        if (v == *level) return 0;
+        *level = v;
+        return WORLD_MENU_VOLUME;
+    }
+    case ITEM_SCALING: s->scaling = (s->scaling + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
+    case ITEM_FPS:
+        s->fps_limit = (s->fps_limit + WORLD_MENU_FPS_CHOICES + (d > 0 ? 1 : -1)) % WORLD_MENU_FPS_CHOICES;
+        return WORLD_MENU_VIEW;
+    case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
+    case ITEM_DIFFICULTY: s->dip_difficulty = (s->dip_difficulty + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
+    default: {
+        unsigned *field = toggle_field(s, id);
+        if (!field || item_disabled(m, s, id)) return 0;
+        *field = !*field;
+        return WORLD_MENU_VIEW;
+    }
     }
 }
 
@@ -308,9 +412,10 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
     }
     m->previous = held;
 
-    Item items[16];
+    Item items[MAX_ITEMS];
     unsigned count = page_items(m, items), result = 0;
     if (m->row >= count) m->row = count - 1;
+    m->peek = m->page == PAGE_OPTIONS && m->tab == TAB_ENHANCE && (held & WORLD_MENU_PEEK);
 
     if (pressed & WORLD_MENU_BACK) {
         if (m->page == PAGE_MAIN) { m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0); }
@@ -356,7 +461,7 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             fresh.bindings = s->bindings;
             *s = fresh;
             m->border_index = 0;
-            result = WORLD_MENU_VOLUME | WORLD_MENU_DISPLAY | WORLD_MENU_BORDER | WORLD_MENU_TIMING;
+            result = WORLD_MENU_VOLUME | WORLD_MENU_DISPLAY | WORLD_MENU_BORDER | WORLD_MENU_TIMING | WORLD_MENU_VIEW;
             break;
         }
         default:
@@ -431,6 +536,8 @@ static void bar(uint32_t *c, int x, int y, int percent, int enabled)
 
 static const char *hints(const WorldMenu *m)
 {
+    if (m->page == PAGE_OPTIONS && m->tab == TAB_ENHANCE)
+        return m->gamepad ? "HOLD Y PREVIEW  B BACK" : "HOLD P PREVIEW  ESC BACK";
     if (m->gamepad)
         return m->page == PAGE_OPTIONS ? "A OK  B BACK  LB RB PAGE" : "A OK  B BACK  L3+R3 CLOSE";
     return m->page == PAGE_OPTIONS ? "ENTER OK  ESC BACK  Q E PAGE" : "ENTER OK  ESC BACK  F1 CLOSE";
@@ -462,7 +569,7 @@ static void controls_page(uint32_t *c, const uint8_t *gfx1, const Ramp *head, co
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
                        const uint8_t *gfx1, uint32_t now_ms)
 {
-    if (!m->open || !c || !gfx1) return;
+    if (!m->open || m->peek || !c || !gfx1) return;
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);
     int top = m->page == PAGE_QUIT ? 66 : 18, bottom = m->page == PAGE_QUIT ? 174 : 224;
@@ -472,38 +579,50 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
     big_text_center(c, gfx1, top + 10, titles[m->page], &title);
     rule(c, top + 30);
 
-    Item items[16];
+    Item items[MAX_ITEMS];
     unsigned count = page_items(m, items);
+    /* The options list scrolls: six rows show, centred on the cursor. */
+    unsigned listed = count ? count - 1 : 0, first = 0;
+    if (m->page == PAGE_OPTIONS && listed > VISIBLE_ROWS) {
+        unsigned cursor = m->row ? m->row - 1 : 0;
+        first = cursor > 3 ? cursor - 3 : 0;
+        if (first > listed - VISIBLE_ROWS) first = listed - VISIBLE_ROWS;
+    }
     int bob = (int)((now_ms / 120) % 4);
     bob = bob == 3 ? 1 : bob;
 
     if (m->page == PAGE_CONTROLS) controls_page(c, gfx1, &title, &normal, &value);
 
     int y = m->page == PAGE_MAIN ? 74 : m->page == PAGE_OPTIONS ? 58 : m->page == PAGE_QUIT ? top + 46 : 188;
-    int step = m->page == PAGE_MAIN ? 22 : 18;
+    int step = m->page == PAGE_MAIN ? 22 : m->page == PAGE_OPTIONS ? ROW_STEP : 18;
     for (unsigned i = 0; i < count; ++i) {
         unsigned id = items[i].id;
         int here = i == m->row;
         if (id == ITEM_TABS) {
-            static const char *names[TAB_COUNT] = {"VIDEO", "SOUND", "GAME"};
+            static const char *names[TAB_COUNT] = {"VIDEO", "SOUND", "GAME", "ENHANCE"};
             int x = 44;
             for (unsigned t = 0; t < TAB_COUNT; ++t) {
-                int w = text_px(names[t]) + 16, active = t == m->tab;
+                int w = text_px(names[t]) + 10, active = t == m->tab;
                 if (active) {
                     shade(c, x, y - 4, w, 15, here ? 0xff1c4c6c : 0xff12324a, 230);
                     fill(c, x, y + 10, w, 1, 0xffd8a848);
                 }
-                text(c, gfx1, x + 8, y, names[t], active ? (here ? &picked : &value) : &faint);
-                x += w + 12;
+                text(c, gfx1, x + 5, y, names[t], active ? (here ? &picked : &value) : &faint);
+                x += w + 6;
             }
             if (here) {
                 arrow(c, 32, y, 1, 0xffd8a848);
                 arrow(c, W - 36, y, 0, 0xffd8a848);
             }
-            y += 26;
+            y += 24;
+            if (first) arrow_up(c, W - 34, y - 9, 0xffd8a848);
             continue;
         }
-        if (m->page == PAGE_OPTIONS && id == ITEM_BACK) y += 6;
+        if (m->page == PAGE_OPTIONS) {
+            if (i - 1 < first || i - 1 >= first + VISIBLE_ROWS) continue;
+            if (i - 1 == first + VISIBLE_ROWS - 1 && first + VISIBLE_ROWS < listed)
+                arrow_down(c, W - 34, y + 11, 0xffd8a848);
+        }
         int disabled = item_disabled(m, s, id);
         if (m->page == PAGE_QUIT) {
             int x = i ? 176 : 112;
@@ -515,8 +634,9 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
             continue;
         }
         if (here) {
-            shade(c, 30, y - 5, W - 60, 17, 0xff1c4c6c, 220);
-            fill(c, 30, y - 5, 2, 17, 0xffd8a848);
+            int tall = m->page == PAGE_OPTIONS ? ROW_STEP : 17, lift = m->page == PAGE_OPTIONS ? 4 : 5;
+            shade(c, 30, y - lift, W - 60, tall, 0xff1c4c6c, 220);
+            fill(c, 30, y - lift, 2, tall, 0xffd8a848);
             torpedo(c, 36 + bob, y + 1, 0);
         }
         int label_x = m->page == PAGE_MAIN ? (W - text_px(items[i].label)) / 2 : 52;

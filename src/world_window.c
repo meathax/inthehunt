@@ -6,6 +6,7 @@
 #include <xinput.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "world_window.h"
 #include "world_border.h"
@@ -28,24 +29,99 @@ static RECT windowed_rect;
 
 static int smaller(int x, int y) { return x < y ? x : y; }
 
+static int view_scaling, view_scanlines, view_vsync;
+static uint32_t *lined;                 /* frame expanded with scanlines */
+static int lined_scale;
+static HDC back_dc;                     /* off-screen copy of the client area */
+static HBITMAP back_bitmap;
+static HGDIOBJ back_previous;
+static int back_width, back_height;
+
+/* The frame enlarged by a whole factor with every source line's last output
+ * row darkened, as a CRT's beam gap. */
+static const uint32_t *scanline_frame(int scale)
+{
+    if (scale != lined_scale) {
+        free(lined);
+        lined = malloc((size_t)WIDTH * scale * HEIGHT * scale * sizeof *lined);
+        lined_scale = lined ? scale : 0;
+    }
+    if (!lined) return NULL;
+    size_t row_pixels = (size_t)WIDTH * scale;
+    for (int y = 0; y < HEIGHT; ++y) {
+        uint32_t *first = lined + (size_t)y * scale * row_pixels;
+        const uint32_t *source = frame + y * WIDTH;
+        for (int x = 0; x < WIDTH; ++x)
+            for (int k = 0; k < scale; ++k) first[x * scale + k] = source[x];
+        for (int k = 1; k < scale - 1; ++k) memcpy(first + k * row_pixels, first, row_pixels * sizeof *first);
+        uint32_t *dark = first + (size_t)(scale - 1) * row_pixels;
+        for (size_t x = 0; x < row_pixels; ++x) {
+            uint32_t p = first[x];
+            dark[x] = 0xff000000u | ((p >> 1) & 0x7f7f7f) + ((p >> 3) & 0x1f1f1f);
+        }
+    }
+    return lined;
+}
+
+/* Border, then the picture: whole-number scale, largest 4:3 fit, or the
+ * whole client area. */
 static void paint_area(HDC dc, RECT rect)
 {
     int scale = smaller(rect.right / WIDTH, rect.bottom / HEIGHT);
     if (scale < 1) scale = 1;
     int w = WIDTH * scale, h = HEIGHT * scale;
+    if (view_scaling == 1) {
+        h = rect.bottom;
+        w = h * 4 / 3;
+        if (w > rect.right) { w = rect.right; h = w * 3 / 4; }
+    } else if (view_scaling == 2) {
+        w = rect.right;
+        h = rect.bottom;
+    }
     int x = (rect.right - w) / 2, y = (rect.bottom - h) / 2;
     world_border_paint(dc, rect.right, rect.bottom);
     SetStretchBltMode(dc, COLORONCOLOR);
-    StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH, HEIGHT, frame, &bitmap,
-                  DIB_RGB_COLORS, SRCCOPY);
+    const uint32_t *wide = view_scanlines && view_scaling == 0 && scale >= 2 ? scanline_frame(scale) : NULL;
+    if (wide) {
+        BITMAPINFO info = bitmap;
+        info.bmiHeader.biWidth = w;
+        info.bmiHeader.biHeight = -h;
+        SetDIBitsToDevice(dc, x, y, (DWORD)w, (DWORD)h, 0, 0, 0, (UINT)h, wide, &info, DIB_RGB_COLORS);
+    } else
+        StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH, HEIGHT, frame, &bitmap,
+                      DIB_RGB_COLORS, SRCCOPY);
 }
 
+/* The window is composed off screen and copied in one blit. Painting the
+ * border and then the picture straight to the window showed the border
+ * through the picture for part of every frame. */
 static void paint(HWND hwnd, HDC dc)
 {
     RECT rect;
     GetClientRect(hwnd, &rect);
-    paint_area(dc, rect);
+    if (rect.right <= 0 || rect.bottom <= 0) return;
+    if (!back_dc) back_dc = CreateCompatibleDC(dc);
+    if (back_dc && (rect.right != back_width || rect.bottom != back_height)) {
+        if (back_bitmap) { SelectObject(back_dc, back_previous); DeleteObject(back_bitmap); }
+        back_bitmap = CreateCompatibleBitmap(dc, rect.right, rect.bottom);
+        if (back_bitmap) back_previous = SelectObject(back_dc, back_bitmap);
+        back_width = back_bitmap ? rect.right : 0;
+        back_height = back_bitmap ? rect.bottom : 0;
+    }
+    if (!back_dc || !back_bitmap) { paint_area(dc, rect); return; }
+    paint_area(back_dc, rect);
+    BitBlt(dc, 0, 0, rect.right, rect.bottom, back_dc, 0, 0, SRCCOPY);
 }
+
+void world_window_set_view(int scaling, int scanlines, int vsync)
+{
+    view_scaling = scaling;
+    view_scanlines = scanlines;
+    view_vsync = vsync;
+    if (window) InvalidateRect(window, NULL, FALSE);
+}
+
+int world_window_focused(void) { return window && GetForegroundWindow() == window; }
 
 /* Headless check of the window picture: the same border and centred
  * integer-scaled frame, painted into an off-screen width x height bitmap. */
@@ -276,6 +352,17 @@ void world_window_present(const uint32_t *pixels)
     if (!IsIconic(window)) {
         InvalidateRect(window, NULL, FALSE);
         UpdateWindow(window);
+        if (view_vsync) {
+            /* Wait for the compositor's next refresh so frames are not torn or doubled. */
+            static HRESULT (WINAPI *flush)(void);
+            static int looked;
+            if (!looked) {
+                HMODULE library = LoadLibraryW(L"dwmapi.dll");
+                if (library) flush = (HRESULT (WINAPI *)(void))(void *)GetProcAddress(library, "DwmFlush");
+                looked = 1;
+            }
+            if (flush) flush();
+        }
     }
 }
 
@@ -293,11 +380,18 @@ void world_window_close(void)
     controller_state = NULL;
     controller_library = NULL;
     memset(retry_at, 0, sizeof retry_at);
+    if (back_bitmap) { SelectObject(back_dc, back_previous); DeleteObject(back_bitmap); back_bitmap = NULL; }
+    if (back_dc) { DeleteDC(back_dc); back_dc = NULL; }
+    back_width = back_height = 0;
+    free(lined);
+    lined = NULL;
+    lined_scale = 0;
     world_border_close();
 }
 
 /* Menu navigation from either keyboard or any pad, as held levels:
- * up 1, down 2, left 4, right 8, accept 16, back 32, page back 64, page on 128.
+ * up 1, down 2, left 4, right 8, accept 16, back 32, page back 64, page on 128,
+ * preview 256 (P or pad Y).
  * The toggle level is F1, Esc, or L3 and R3 held together. */
 unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
 {
@@ -310,6 +404,7 @@ unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
     held |= (keys[VK_BACK] | keys['X']) ? 32 : 0;
     held |= (keys['Q'] | keys[VK_PRIOR]) ? 64 : 0;
     held |= (keys['E'] | keys[VK_NEXT] | keys[VK_TAB]) ? 128 : 0;
+    held |= keys['P'] ? 256 : 0;
     unsigned toggle_level = keys[VK_F1] ? 1 : 0;
     unsigned escape = keys[VK_ESCAPE] ? 1 : 0;
     for (unsigned player = 0; player < 2; ++player) {
@@ -322,6 +417,7 @@ unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
         held |= (b & XINPUT_GAMEPAD_B) ? 32 : 0;
         held |= (b & XINPUT_GAMEPAD_LEFT_SHOULDER) ? 64 : 0;
         held |= (b & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 128 : 0;
+        held |= (b & XINPUT_GAMEPAD_Y) ? 256 : 0;
         if ((b & XINPUT_GAMEPAD_LEFT_THUMB) && (b & XINPUT_GAMEPAD_RIGHT_THUMB)) toggle_level = 1;
     }
     if (toggle) *toggle = toggle_level | escape << 1;

@@ -9,6 +9,7 @@
 #include "world_palette.h"
 #include "world_video.h"
 #include "world_window.h"
+#include "world_enhance.h"
 #include "world_border.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
@@ -70,6 +71,51 @@ static void menu_borders(const char *dir)
     world_menu_set_borders(&menu, count, names, list, &settings);
 }
 
+static uint32_t shown[320 * 240];      /* the frame as presented: enhancements and overlays */
+static int fast_forward;               /* above the arcade rate the sound is not queued */
+static unsigned shown_fps, shown_speed;
+
+static void apply_view(void)
+{
+    world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines, (int)settings.vsync);
+}
+
+static void enhance(const uint32_t *source, uint32_t *target, uint32_t time_ms)
+{
+    if (!settings.fx_enable) {
+        memcpy(target, source, sizeof shown);
+        world_enhance_reset();
+        return;
+    }
+    WorldEnhance fx;
+    fx.caustics = settings.fx_caustics;
+    fx.rays = settings.fx_rays;
+    fx.lights = settings.fx_lights;
+    fx.bloom = settings.fx_bloom;
+    fx.shimmer = settings.fx_shimmer;
+    fx.depth = settings.fx_depth;
+    fx.snow = settings.fx_snow;
+    fx.vivid = settings.fx_vivid;
+    fx.vignette = settings.fx_vignette;
+    fx.trails = settings.fx_trails;
+    world_enhance_apply(source, target, &fx, time_ms);
+}
+
+/* Presents a game frame through the enhancement pass, with the optional
+ * frame-rate readout in the top right corner. */
+static void present_game(const uint32_t *source)
+{
+    enhance(source, shown, GetTickCount());
+    if (settings.show_fps && shown_fps) {
+        char label[32];
+        snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
+        int x = 320 - world_menu_text_width(label, 1) - 4;
+        world_menu_draw_text(shown, 320, 240, x + 1, 5, 1, 0xff000000, label);
+        world_menu_draw_text(shown, 320, 240, x, 4, 1, 0xffffe070, label);
+    }
+    world_window_present(shown);
+}
+
 static void apply_border(void)
 {
     world_window_set_border(strcmp(settings.border, "black") ? settings.border_image : "", settings.border_brightness);
@@ -88,11 +134,15 @@ static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, un
         result = world_menu_update(&menu, &settings, held, gamepad, GetTickCount());
     if (result & WORLD_MENU_DISPLAY) world_window_set_display(settings.fullscreen, settings.window_scale);
     if (result & WORLD_MENU_BORDER) apply_border();
+    if (result & WORLD_MENU_VIEW) apply_view();
     if (result & WORLD_MENU_TIMING) world_clock_request_mode(&board_clock, settings.timing_mode);
     if ((result & WORLD_MENU_SAVE) && world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
         fprintf(stderr, "Could not save native settings.\n");
     if (result & WORLD_MENU_QUIT) return 0;
-    if (menu.open) {
+    if (menu.open && menu.peek) {
+        /* Preview held on the enhancements page: the paused picture alone. */
+        present_game(paused);
+    } else if (menu.open) {
         memcpy(pixels, paused, sizeof pixels);
         world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
         world_window_present(pixels);
@@ -173,7 +223,8 @@ static void sound_frame(void)
         world_ym_render(fm, count);
         for (unsigned i = 0; i < count; ++i) {
             /* Both GA20 outputs route at unity to the mono speaker. */
-            int32_t mixed = (2 * (int32_t)output[done + i] + fm[i]) * (int32_t)settings.volume / 100;
+            int32_t mixed = (2 * (int32_t)output[done + i] * (int32_t)settings.pcm_volume / 100 +
+                             fm[i] * (int32_t)settings.fm_volume / 100) * (int32_t)settings.volume / 100;
             if (mixed > 32767) mixed = 32767;
             if (mixed < -32768) mixed = -32768;
             output[done + i] = (int16_t)mixed;
@@ -185,7 +236,7 @@ static void sound_frame(void)
             world_audio_tick(sound_state, sound_rom, &sound_bus);
         }
     }
-    if (sound_device && !world_audio_output_submit(output, frames)) {
+    if (sound_device && !fast_forward && !world_audio_output_submit(output, frames)) {
         fprintf(stderr, "Windows audio output stopped.\n");
         world_audio_output_close();
         sound_device = 0;
@@ -285,6 +336,8 @@ static void record_stop(const char *dir)
    in the world_window_poll layout, applied from that board frame onward;
    "FRAME end" stops the run. "shot" saves that frame as a BMP in the data
    directory, as does the last frame of the run. */
+static const uint32_t *shot_source = pixels;
+
 static void headless_shot(const char *dir, const char *name)
 {
     char path[4096];
@@ -306,7 +359,7 @@ static void headless_shot(const char *dir, const char *name)
     info.biBitCount = 32;
     fwrite(&file, sizeof file, 1, f);
     fwrite(&info, sizeof info, 1, f);
-    fwrite(pixels, sizeof pixels, 1, f);
+    fwrite(shot_source, sizeof pixels, 1, f);
     fclose(f);
 }
 
@@ -416,7 +469,8 @@ static void headless_run(const char *dir, const char *script_path)
             static uint32_t still[320*240];
             memcpy(still, pixels, sizeof still);
             menu_borders(dir);
-            static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0}};
+            static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0},
+                                                {1,0,6,0},{1,2,3,0},{1,3,1,0},{1,3,9,0}};
             for (unsigned i = 0; i < sizeof pages / sizeof pages[0]; ++i) {
                 world_menu_open(&menu, 0, i & 1, 0);
                 menu.page = pages[i][0];
@@ -430,6 +484,33 @@ static void headless_run(const char *dir, const char *script_path)
             }
             memcpy(pixels, still, sizeof still);
             menu.open = 0;
+        }
+        /* WORLD_FX_SHOT=frame saves that frame with no enhancement, with each
+           one alone, and with all of them (two moments, for the animation). */
+        static int fx_shot_done;
+        const char *fx_shot = getenv("WORLD_FX_SHOT");
+        if (fx_shot && !fx_shot_done && ticks >= strtoul(fx_shot, NULL, 10)) {
+            fx_shot_done = 1;
+            static const char *const names[12] = {"off", "caustics", "rays", "lights", "bloom", "shimmer",
+                                                  "depth", "snow", "vivid", "vignette", "all", "all-later"};
+            WorldSettings keep = settings;
+            for (unsigned i = 0; i < 12; ++i) {
+                unsigned all = i >= 10;
+                settings.fx_enable = i != 0;
+                settings.fx_caustics = all || i == 1; settings.fx_rays = all || i == 2;
+                settings.fx_lights = all || i == 3;   settings.fx_bloom = all || i == 4;
+                settings.fx_shimmer = all || i == 5;  settings.fx_depth = all || i == 6;
+                settings.fx_snow = all || i == 7;     settings.fx_vivid = all || i == 8;
+                settings.fx_vignette = all || i == 9; settings.fx_trails = 0;
+                enhance(pixels, shown, (uint32_t)(ticks * 17 + (i == 11 ? 700 : 0)));
+                char name[32];
+                snprintf(name, sizeof name, "fx-%s", names[i]);
+                shot_source = shown;
+                headless_shot(dir, name);
+                shot_source = pixels;
+            }
+            settings = keep;
+            world_enhance_reset();
         }
         /* WORLD_BORDER_SHOT=frame composes that frame with every border
            preset at 1920x1080 (and 1280x1024) through the window painter. */
@@ -453,6 +534,18 @@ static void headless_run(const char *dir, const char *script_path)
                 }
             }
             world_border_set("", 100);
+            /* The three scaling modes, and scanlines, on a black border. */
+            static const char *const views[4] = {"integer", "fit", "stretch", "scanlines"};
+            for (int v = 0; v < 4 && !border_failed; ++v) {
+                char path[4096];
+                world_window_set_view(v < 3 ? v : 0, v == 3, 0);
+                snprintf(path, sizeof path, "%s/headless-view-%s.bmp", dir, views[v]);
+                if (!world_window_compose_bmp(pixels, 1920, 1080, path)) {
+                    snprintf(failure, sizeof failure, "View composition failed: %s", views[v]);
+                    border_failed = 1;
+                }
+            }
+            world_window_set_view(0, 0, 0);
             if (border_failed) break;
         }
         if (save_path && ticks >= save_at) {
@@ -560,6 +653,15 @@ int main(int argc, char **argv)
         if (!headless) MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
         return 1;
     }
+    if (!headless) {
+        /* Cabinet switch bank 1 as the board reads it (active low): lives on
+           bits 0-1, difficulty on bits 2-3, demo sound on bit 6. Scripted
+           runs keep the factory setting. */
+        static const uint16_t lives[4] = {2, 3, 1, 0}, difficulty[4] = {0x0, 0x8, 0xc, 0x4};
+        world_dispatch_port4 = (uint16_t)((0xffbf & ~0x4f) | lives[settings.dip_lives & 3] |
+                                          difficulty[settings.dip_difficulty & 3] |
+                                          (settings.dip_demo_sound ? 0 : 0x40));
+    }
     if (!world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4)) {
         if (!headless) MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
                                    "In The Hunt", MB_ICONERROR);
@@ -592,14 +694,18 @@ int main(int argc, char **argv)
     world_window_set_display(settings.fullscreen, settings.window_scale);
     menu_borders(dir);
     apply_border();
+    apply_view();
+    timeBeginPeriod(1);                 /* Sleep(1) must mean one millisecond for even pacing */
     LARGE_INTEGER rate, now;
     QueryPerformanceFrequency(&rate);
     QueryPerformanceCounter(&now);
     double deadline = (double)now.QuadPart;
-    double period = (double)rate.QuadPart * (424 * 262) / 6666666;
+    const double arcade_period = (double)rate.QuadPart * (424 * 262) / 6666666;
     uint16_t pads, system;
     static uint32_t paused_frame[320*240];
-    unsigned previous_toggle = 0, hold_input = 0;
+    unsigned previous_toggle = 0, hold_input = 0, counted = 0;
+    int was_focused = 0;
+    LONGLONG counted_from = now.QuadPart;
     while (world_window_poll(&pads, &system)) {
         /* F1, Esc or L3+R3 opens the pause menu; the game stands still. */
         unsigned toggle;
@@ -607,6 +713,16 @@ int main(int argc, char **argv)
         unsigned menu_held = world_window_menu_buttons(&toggle, &gamepad);
         unsigned rising = toggle & ~previous_toggle;
         previous_toggle = toggle;
+        /* Losing the window focus pauses, when that option is on. */
+        int focused = world_window_focused();
+        if (settings.pause_unfocused && was_focused && !focused && !menu.open) rising |= 1;
+        was_focused = focused;
+        /* Frame-rate limit: the arcade rate, a faster cap, or none. The game
+           advances one board frame per presented frame, so a higher limit
+           fast-forwards it; sound is silent then. */
+        unsigned limit = world_menu_fps[settings.fps_limit];
+        double period = !limit ? arcade_period : limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
+        fast_forward = limit != 0;
         if (menu.open) {
             if (!menu_frame(paused_frame, menu_held, toggle, rising, gamepad)) break;
             if (!menu.open) {
@@ -630,6 +746,7 @@ int main(int argc, char **argv)
             else hold_input = 0;
         }
         QueryPerformanceCounter(&now);
+        if (period == 0.0) deadline = (double)now.QuadPart;
         if (now.QuadPart < deadline) { Sleep(1); continue; }
         if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
         if (!tick(pads, system)) break;
@@ -645,8 +762,18 @@ int main(int argc, char **argv)
         deadline += period * elapsed_board_frames;
         ticks += elapsed_board_frames;
         draw();
-        world_window_present(pixels);
+        counted += elapsed_board_frames;
+        QueryPerformanceCounter(&now);
+        if (now.QuadPart - counted_from >= rate.QuadPart / 2) {
+            double seconds = (double)(now.QuadPart - counted_from) / (double)rate.QuadPart;
+            shown_fps = (unsigned)(counted / seconds + 0.5);
+            shown_speed = (unsigned)(counted / seconds * arcade_period / (double)rate.QuadPart * 100.0 + 0.5);
+            counted = 0;
+            counted_from = now.QuadPart;
+        }
+        present_game(pixels);
     }
+    timeEndPeriod(1);
     world_window_close();
     world_audio_output_close();
 finished:
