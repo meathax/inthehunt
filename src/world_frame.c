@@ -298,7 +298,8 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
     *master_command = -1;
     unsigned master = word(ram + 0x80);
     int title_transition = master == 0xa0e || master == 0x1f19;
-    int stage_clear = master == 0x344d || master == 0x3513 || master == 0x3522 || master == 0x355b ||
+    int stage_clear = master == 0x333d || master == 0x33a9 || master == 0x33e4 ||
+                      master == 0x341e || master == 0x342a || master == 0x344d || master == 0x3513 || master == 0x3522 || master == 0x355b ||
                       master == 0x356e || master == 0x35be || master == 0x35f9 ||
                       master == 0xbb3 || master == 0xbed || master == 0xced ||
                       master == 0x24e2 || master == 0x2576 || master == 0x25b5 || master == 0x25ff;
@@ -361,7 +362,8 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
         if (master == 0xa09 || master == 0x1d52) *master_command = 0x20;
     } else if (title_transition || stage_clear) {
         if (!world_title_master(ram, tiles, oam, palette, rom, busy_system)) return 0;
-        if (master == 0xa0e || master == 0x24e2 || master == 0x344d || master == 0x356e) *master_command = 0x20;
+        if (master == 0xa0e || master == 0x24e2 || master == 0x333d || master == 0x344d || master == 0x356e)
+            *master_command = 0x20;
     } else if (gameover) {
         if (!world_gameover_master(ram, tiles, palette, rom, master_command)) return 0;
     } else if (master == 0xb2e) {

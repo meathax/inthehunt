@@ -4,6 +4,7 @@
 #include "world_title.h"
 #include <string.h>
 void world_queue_sound(uint8_t *, uint16_t);
+void world_acquire_private_palette(uint8_t *, uint16_t, unsigned);
 
 static unsigned word(const uint8_t *p) { return p[0] | ((unsigned)p[1] << 8); }
 static void put(uint8_t *p, unsigned value) {
@@ -100,6 +101,58 @@ int world_title_master(uint8_t *ram, uint8_t *tiles, uint8_t *oam,
         }
         return 1;
     }
+    /* 0:333D..3444: the true ending (272 >= 2 at the stage-six clear).
+       Both players sail the 8EE1/8F12 epilogue for 3Ch seconds of B8A0
+       (1 when word 84 is 8); if both are still in play when it runs out the
+       level becomes 3 and 342A waits for word 86, then marks both 126
+       records 8 and goes to 35BE. If either leaves play first the level
+       stays 2, the scene fades and the normal ending at 344D runs. */
+    case 0x333d:
+        memset(tiles, 0, 65536);                                        /* 0:37C7 */
+        world_frame_init_palette(ram, palette, rom, 0xeb3e);
+        world_acquire_private_palette(ram, 0x80, 0x17c);                /* 0:110B, BP=80h */
+        memset(ram + 0xb700, 0, 46);                                    /* 0:439F */
+        put(ram + 0x292, 0);
+        put(ram + 0x262, 3);
+        world_frame_init_actors(ram, 0x1a66, 0x8000);                   /* 0:16DD */
+        world_frame_reset_sound(ram);                                   /* 0:360D */
+        world_queue_sound(ram, 0x15);
+        put(ram + 0x264, 3);
+        put(ram + 0xb8a0, word(ram + 0x84) == 8 ? 1 : 0x3c);
+        put(ram + 0x80, 0x33a9);
+        /* fall through */
+    case 0x33a9:
+        if (word(ram + 0xb8a0)) {
+            if ((word(ram + 0x264) ^ 3) == 0) return 1;
+            put(ram + 0x86, 0x100);
+            put(ram + 0x272, 2);
+            put(ram + 0x80, 0x33e4);
+        } else {
+            put(ram + 0x272, 3);
+            put(ram + 0xb8a0, 0);
+            put(ram + 0x86, 0);
+            put(ram + 0x80, 0x342a);
+        }
+        return 1;
+    case 0x33e4:
+        put(ram + 0x86, word(ram + 0x86) - 1);
+        if (!word(ram + 0x86)) {
+            fade_palette(ram, 0, 5);
+            put(ram + 0x86, 0x30);
+            put(ram + 0x80, 0x341e);
+        }
+        return 1;
+    case 0x341e:
+        put(ram + 0x86, word(ram + 0x86) - 1);
+        if (!word(ram + 0x86)) put(ram + 0x80, 0x344d);
+        return 1;
+    case 0x342a:
+        if (word(ram + 0x86)) {
+            put(ram + 0x126, 8);
+            put(ram + 0x166, 8);
+            put(ram + 0x80, 0x35be);
+        }
+        return 1;
     /* 0:344D..360B: the ending. The first scene (by 272: bonus level)
        draws its picture, records the clear in each player's 126 slot and
        runs the 1A50 actors until one sets word 86; then fades, shows the
