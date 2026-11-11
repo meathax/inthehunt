@@ -41,6 +41,8 @@ static uint32_t si_source;
 static uint16_t queued_sprite_entry;
 static void leave_si(uint16_t value);
 static void keep_si(void);
+static void leave_cx(uint16_t value);
+static void keep_cx(void);
 
 void world_dispatch_begin(WorldDispatch *pass, uint8_t *ram)
 {
@@ -303,8 +305,12 @@ static void apply_radial_impulse(uint8_t *ram, const uint8_t *rom, uint16_t acto
     unsigned x = dx < 0 ? -(int)dx : dx;
     unsigned y = dy < 0 ? -(int)dy : dy;
     uint16_t distance = x + y;
-    if (distance >= read_word(ram, actor + 0x56))
+    /* 0:7421 leaves CX = y - player y, or D459's max(|dx|, |dy|) in range. */
+    if (distance >= read_word(ram, actor + 0x56)) {
+        leave_cx((uint16_t)dy);
         return;
+    }
+    leave_cx((uint16_t)y > (uint16_t)x ? (uint16_t)y : (uint16_t)x);
 
     unsigned angle = vector_angle(rom, dx, dy);
     uint16_t offset = ((angle + 4) & 0xf8) / 2 + (distance & 0xfff0) * 8
@@ -317,6 +323,7 @@ static void apply_radial_impulse(uint8_t *ram, const uint8_t *rom, uint16_t acto
 
 static void update_radial_effect(uint8_t *ram, const uint8_t *rom, uint16_t actor, int attached)
 {
+    keep_cx();      /* 6F84..7021 load CX only inside 7421 */
     if (attached) {
         uint16_t parent = read_word(ram, 0x8500 + read_word(ram, actor + 8) - 2);
         write_word(ram, actor + 0x21, read_word(ram, parent + 0x21) + read_word(ram, actor + 0x31));
