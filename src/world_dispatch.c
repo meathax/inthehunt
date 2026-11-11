@@ -21323,6 +21323,31 @@ stage2_jumper_terrain:
         }
         queue_sprite(ram, main_rom, actor, 1);
         break;
+    /* B000:D09E: a toppled turret's wreck sinks, tumbling, and bursts on
+       the ground. */
+    case 0xbd09e: {
+        if (!tiles) return 0;
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(main_rom + 0xb0000, (uint16_t)(0xcb76 + index)));
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x40, index + 2 < 0x0a ? index + 2 : 0);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        if (world_terrain_mask(ram, tiles + 0x4000, x, read_word(ram, actor + 0x24) - 0x10) & 0xff02) {
+            spawn_kill_blast(ram, actor);
+            finish_animation(ram, actor);
+        }
+        break;
+    }
     case 0xbcea8:
     case 0xbcfd4:
     case 0xbd079: {
