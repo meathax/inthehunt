@@ -264,6 +264,26 @@ void world_sub_entry_step(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
 
 /* 8480 samples horizontal sensors before vertical movement and resolves
    solid tile edges in the scrolling playfield's eight-pixel grid. */
+/* 0:7D5A..7DA6: once the stage is cleared (262 bit 6) the sub hands over
+   to its exit: alone it waits (7DA7) or, with the bonus (272), ends at
+   once; with both players aboard it sails off right (7DB3). */
+static void sub_stage_end(uint8_t *ram, uint16_t sub)
+{
+    if (!(ram[0x262] & 0x40)) return;
+    if ((word(ram + 0x264) & 3) != 3) {
+        if (word(ram + 0x272)) ram[0x263] |= 0xc0;
+        else {
+            put(ram + sub + 0x42, 0x80);
+            put(ram + sub, 0x7da7);
+        }
+    } else {
+        put(ram + sub + 0x38, 0x180);
+        put(ram + sub + 0x42, 0x40);
+        put(ram + 0xb73e, 0x101);
+        put(ram + sub, 0x7db3);
+    }
+}
+
 int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t sub)
 {
     uint8_t *a = ram + sub;
@@ -274,7 +294,7 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
        steer. After the HUD it clears the held directions and resumes at
        7D1B, skipping the velocity and the 8480 terrain step. */
     if ((word(ram + 0xb8b2) & owner_bit) && word(a) == 0x7c3b && !word(a + 0x6e) &&
-        !(flags & 0x40) && !word(ram + 0x2a4)) {
+        !word(ram + 0x2a4)) {
         if (!(flags & 0x8080) && !a[0x0a] && !word(a + 0x26)) put(a + 0x26, 1);
         world_sub_hud(ram, rom, tiles, sub);
         put(ram + 0xb73e, word(ram + 0xb73e) & 0xfff0);
@@ -290,10 +310,11 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
         world_sub_pose(ram, rom, sub);
         world_player_weapons(ram, rom, sub);
         world_sub_wake(ram, rom, sub);
+        sub_stage_end(ram, sub);
         return 1;
     }
     if (word(a + 0x6e) || (!hidden_entry && !word(a + 0x26) && !(flags & 0x8080))
-        || (word(ram + 0xb8b2) & owner_bit) || (flags & 0x40)
+        || (word(ram + 0xb8b2) & owner_bit)
         || (!hidden_entry && word(ram + 0x2a4)))
         return 0;
     uint8_t predicted[128];
@@ -406,5 +427,6 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
         world_sub_pose(ram, rom, sub);
     world_player_weapons(ram, rom, sub);
     world_sub_wake(ram, rom, sub);
+    sub_stage_end(ram, sub);
     return 1;
 }
