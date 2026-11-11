@@ -30,6 +30,10 @@ static void swap_bytes(uint8_t *ram, uint16_t offset)
    there, or the swapped B8A4 word for the two player actors. */
 static int entry_bx_known;
 static uint16_t entry_bx;
+/* CX at handler entry, tracked the same way: the actor loop never loads it. */
+static int cx_known, entry_cx_known;
+static uint16_t cx_value, entry_cx;
+static uint32_t cx_source, entry_cx_source;
 static int si_known;
 static uint32_t si_source;
 /* 0DA4/0DD6 leave SI pointing at the display-list entry they filled, and
@@ -48,6 +52,8 @@ void world_dispatch_begin(WorldDispatch *pass, uint8_t *ram)
     world_dispatch_detail = "";
     si_known = 0;
     si_source = 0;
+    cx_known = 0;
+    cx_source = 0;
     entry_bx_known = 0;
 }
 
@@ -433,6 +439,47 @@ static void si_after_sprite(void)
 {
     if (queued_sprite_entry) leave_si(queued_sprite_entry);
     else keep_si();
+}
+
+
+static void leave_cx(uint16_t value)
+{
+    cx_known = 1;
+    cx_value = value;
+}
+
+/* For a path verified never to load CX. */
+static void keep_cx(void)
+{
+    cx_known = entry_cx_known;
+    cx_value = entry_cx;
+    cx_source = entry_cx_source;
+}
+
+/* Player code in world_player.c / world_fire.c reports CX it leaves. */
+void world_dispatch_set_cx(uint16_t value)
+{
+    leave_cx(value);
+}
+
+int world_dispatch_get_cx(uint16_t *value)
+{
+    if (!cx_known) return 0;
+    *value = cx_value;
+    return 1;
+}
+
+void world_dispatch_forget_cx(void)
+{
+    cx_known = 0;
+}
+
+static const char *untracked_cx_detail(void)
+{
+    static char text[96];
+    snprintf(text, sizeof text, "needs CX left by handler %05lX (0 = frame start)",
+             (unsigned long)entry_cx_source);
+    return text;
 }
 
 static const char *untracked_si_detail(void)
@@ -2229,6 +2276,18 @@ static void update_sub_display(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     }
 }
 
+/* CX left by the launchers (A480/A535/A5EA, A70D, A7FD) when they fire: the
+   shot's 1769 ends with CX = 0, CL then takes the owner index, and the flash
+   1769 clears it again unless that spawn fails. */
+static int primary_fired;
+static uint16_t primary_cx;
+
+static void note_launch_flash(const uint8_t *ram, uint16_t actor, uint16_t flash)
+{
+    primary_fired = 1;
+    primary_cx = flash == 0x8480 ? (uint8_t)((ram[actor + 0x0b] & 3) - 1) : 0;
+}
+
 static void fire_secondary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     unsigned input = ram[0xb73e] & 3;
@@ -2256,6 +2315,7 @@ static void fire_secondary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t a
     ram[shot + 0x28] = (angle + 4) & 0xf8;
     write_word(ram, shot + 0x7a, read_word(ram, actor + 0x7a));
     uint16_t flash = effect_slot(ram, actor, read_word(rom, 0xa7c8));
+    note_launch_flash(ram, actor, flash);
     ram[flash + 0x29] = facing;
     write_word(ram, flash + 0x31, read_word(rom, 0x78c7 + side));
     write_word(ram, flash + 0x34, 4);
@@ -2269,6 +2329,7 @@ static void fire_secondary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t a
 static void secondary_launch_flash(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     uint16_t flash = effect_slot(ram, actor, 0xa2c0);
+    note_launch_flash(ram, actor, flash);
     ram[flash + 0x29] = ram[actor + 0x29];
     write_word(ram, flash + 0x31, read_word(rom, 0x78c7 + 2 * (ram[actor + 0x29] & 1)));
     write_word(ram, flash + 0x34, 4);
@@ -2360,6 +2421,7 @@ static void fire_primary_launcher(uint8_t *ram, const uint8_t *rom, uint16_t act
     ram[shot + 0x2d] = ram[actor + 0x2d] + 1;
     write_word(ram, shot + 0x76, read_word(ram, actor + 0x76) - 1);
     uint16_t flash = effect_slot(ram, actor, 0xa268);
+    note_launch_flash(ram, actor, flash);
     ram[flash + 0x29] = ram[actor + 0x29];
     write_word(ram, flash + 0x31, read_word(rom, 0x9ba9 + side));
     ram[flash + 0x2d] = ram[actor + 0x2d];
@@ -5790,6 +5852,35 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
     uint16_t bottom = low ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
     int16_t top = low ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
     switch (address) {
+    /* B000:DE66: launch a DE26 craft from the right edge whenever the
+       countdown in 42 runs out, faster while the camera scrolls, until B700
+       reaches the high byte of word 1E. */
+    case 0xbde66: {
+        if ((int16_t)read_word(ram, 0xb700) >= (int16_t)(read_word(ram, actor + 0x1e) & 0xff00)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        int16_t wait = (int16_t)(read_word(ram, actor + 0x42) - 4);
+        write_word(ram, actor + 0x42, wait);
+        if (wait > 0) {
+            wait = (int16_t)(wait - (uint16_t)((uint16_t)-read_word(ram, 0xb71a) << 3));
+            write_word(ram, actor + 0x42, wait);
+            if (wait > 0) break;
+        }
+        uint16_t side = read_word(ram, actor + 0x40) & 2;
+        uint16_t craft = world_spawn_child(ram, actor, 0xde26);
+        if (craft) {
+            write_word(ram, craft + 2, 0xb000);
+            write_word(ram, craft + 0x21, 0x1b0);
+            write_word(ram, craft + 0x24, read_word(bank, (uint16_t)(0xde1a + side)) + read_word(ram, 0xb732));
+            write_word(ram, craft + 0x1e, read_word(bank, (uint16_t)(0xde1e + side)));
+            write_word(ram, actor + 0x60, read_word(ram, actor + 0x60) + 1);
+        }
+        write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(0xde22 + side)));
+        write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2);
+        break;
+    }
+    case 0xbde26:
     case 0xbdedd: {
         /* B000:E407 */
         world_acquire_resource(ram, actor, 0x12);
@@ -5806,6 +5897,18 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
         write_word(ram, actor + 0x48, read_word(bank, (uint16_t)(row + 2)));
         write_word(ram, actor + 0x4a, read_word(bank, (uint16_t)(row + 4)));
         write_word(ram, actor + 0x4e, read_word(bank, (uint16_t)(row + 6)));
+        if (address == 0xbde26) {
+            /* DE26: a craft already flying its script, with its gun. */
+            ram[actor + 0x2d] = 0x20;
+            write_word(ram, actor + 0x2a, 0x3584);
+            begin_linear_script(ram, rom, actor, read_word(bank, (uint16_t)(0xdd36 + (read_word(ram, actor + 0x1e) & 0x0e))));
+            uint16_t gun = bank_b_effect(ram, actor, 0xe1e8);
+            ram[gun + 0x2c] = ram[actor + 0x2c];
+            write_word(ram, gun + 0x4c, read_word(ram, actor + 0x4a));
+            write_word(ram, gun + 0x2e, read_word(ram, actor + 0x4e));
+            write_word(ram, actor, 0xe01a);
+            break;
+        }
         write_word(ram, actor + 0x2a, 0x345a);
         write_word(ram, actor + 0x3c, 0xf68b);
         write_word(ram, actor + 0x33, 0x18);
@@ -9731,16 +9834,30 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         queue_sprite(ram, rom, actor, 1);
+        /* 4311, 5E9B and DD6 leave CX alone; a successful 17C3 ends with 0. */
+        int cx_set = 0;
+        uint16_t cx = 0;
         if (!decrement(ram, actor + 0x5c)) {
             write_word(ram, actor + 0x5c, 3);
+            uint16_t free_slots = read_word(ram, 0x8b04);
             spark_trail(ram, actor);
+            if ((int16_t)(free_slots - 1) >= 0) cx_set = 1;
         }
         int burst = 0;
         if (!decrement(ram, actor + 0x42)) {
-            /* A3B7 then tests CX as DD6/17C3 left it. */
+            /* A3B7 tests that CX against material 1 (stage five only). */
             if (read_word(ram, 0x84) == 4) {
-                world_dispatch_detail = "A3B7 on timer expiry reads leftover CX in stage five";
-                return 0;
+                if (!cx_set) {
+                    if (!entry_cx_known) {
+                        world_dispatch_detail = untracked_cx_detail();
+                        return 0;
+                    }
+                    cx = entry_cx;
+                }
+                if (cx == 1) {
+                    world_dispatch_detail = "A3B7 with CX = 1 breaks ice at a leftover BX cell";
+                    return 0;
+                }
             }
             burst = 1;
         } else if (read_word(ram, actor + 0x26)) {
@@ -11748,6 +11865,11 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
     entry_si_source = si_source;
     si_known = 0;
     si_source = address;
+    entry_cx_known = cx_known;
+    entry_cx = cx_value;
+    entry_cx_source = cx_source;
+    cx_known = 0;
+    cx_source = address;
     switch (address) {
     case 0xb7960: {
         const uint8_t *bank = main_rom + 0xb0000;
@@ -17938,8 +18060,12 @@ stage2_jumper_terrain:
         /* fall through */
     case 0xa432:
     case 0xa6b3:
+        primary_fired = 0;
         if (!update_idle_equipment(ram, main_rom, actor, address == 0xa6b3))
             return 0;
+        /* A432/A6B3 and their launchers touch CX only when they fire. */
+        if (primary_fired) leave_cx(primary_cx);
+        else keep_cx();
         break;
     case 0x803f:
         write_word(ram, actor + 0x40, read_word(ram, ram[actor + 0x0b] == 1 ? 0x90 : 0x92));
@@ -21087,6 +21213,7 @@ stage2_jumper_terrain:
         write_word(ram, actor, 0xa1bf);
         /* fall through */
     case 0xa1bf:
+        keep_cx();      /* 4311, DD6 and D3D0 never load CX */
         scroll_actor(ram, actor, 0xb71a);
         if (!decrement(ram, actor + 0x58)) {
             uint16_t frame = read_word(ram, actor + 0x40);
@@ -21109,6 +21236,8 @@ stage2_jumper_terrain:
         break;
     case 0xa268:
     case 0xa2c0:
+        /* A268..A346 never load CX; 1067 (A2C0 with word 60 = 3) is not verified. */
+        if (address == 0xa268 || read_word(ram, actor + 0x60) != 3) keep_cx();
         ram[actor + 0x2c] = 3;
         if (address == 0xa268)
             ram[actor + 0x2d] += main_rom[(uint16_t)(0x9b9b + read_word(ram, actor + 0x52))];
@@ -21126,6 +21255,7 @@ stage2_jumper_terrain:
     case 0xa28e:
     case 0xa2eb:
     case 0xa318:
+        if (address != 0xa2c0 && address != 0xa268) keep_cx();
         update_attached_effect(ram, main_rom, actor, address);
         break;
     case 0x9e17:
@@ -21166,6 +21296,7 @@ stage2_jumper_terrain:
         if (!stage_two_patrol(ram, main_rom, tiles, actor, address)) return 0;
         break;
     /* Stage-two hatch craft B000:DEDD, bomb E0FB, swivel gun E1E8, shot E393. */
+    case 0xbde66: case 0xbde26:
     case 0xbdedd: case 0xbdef4: case 0xbdf89: case 0xbe01a: case 0xbe0fb: case 0xbe120:
     case 0xbe1e8: case 0xbe21d: case 0xbe228: case 0xbe275: case 0xbe393: case 0xbe3b3:
         if (!stage_two_craft(ram, main_rom, tiles, actor, address)) return 0;

@@ -77,6 +77,7 @@ void world_sub_pose(uint8_t *ram, const uint8_t *rom, uint16_t sub)
     uint8_t *a = ram + sub;
     a[0x6c] |= 1;
     if (ram[0x274] & 1) return;
+    world_dispatch_set_cx(10);      /* 8BF5: MUL by CX = 0Ah */
     unsigned row = advance_pose_axis(a + 0x5c);
     unsigned column = 2 * advance_pose_axis(a + 0x58);
     unsigned pose = column + 10 * row;
@@ -116,7 +117,10 @@ void world_sub_wake(uint8_t *ram, const uint8_t *rom, uint16_t sub)
     if (!timer) {
         put(a + 0x64, 6);
         unsigned side = a[0x29] & 1;
+        uint16_t cx;
+        if (world_dispatch_get_cx(&cx)) world_dispatch_set_cx((cx & 0xff00) | side);
         if (ram[0xb73e] & (1u << side)) {
+            if ((int16_t)(word(ram + 0x8b04) - 1) >= 0) world_dispatch_set_cx(0);   /* 17C3 succeeds */
             uint8_t *effect = spawn_wake(ram, word(rom + 0x8c2f), sub);
             uint16_t pose = 2 * word(a + 0x56);
             uint16_t dx = word(rom + (uint16_t)(0x78b3 + pose));
@@ -133,6 +137,7 @@ void world_sub_wake(uint8_t *ram, const uint8_t *rom, uint16_t sub)
     put(a + 0x66, timer);
     if (!timer) {
         put(a + 0x66, 32);
+        if ((int16_t)(word(ram + 0x8b04) - 1) >= 0) world_dispatch_set_cx(0);
         uint8_t *effect = spawn_wake(ram, word(rom + 0x8c78), sub);
         uint16_t sequence = word(a + 0x68);
         put(effect + 0x68, sequence & 6);
@@ -219,6 +224,7 @@ static void update_water_medium(uint8_t *ram, const uint8_t *rom, uint8_t *a,
     if (medium == 3 && word(a + 0x60) != 3) put(a + 0x5a, word(a + 0x5a) - 256);
     put(a + 0x60, medium);
     ram[0xb8ae] &= ~(1u << (a[0x0b] & 2));
+    world_dispatch_set_cx(a[0x0b] & 2);     /* 85CA: CL = owner & 2, CH = 0 */
 }
 
 /* 848F: the surfacing submarine uses two five-tile sensors until both clear. */

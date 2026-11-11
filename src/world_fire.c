@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "world_torpedo.h"
+#include "world_dispatch.h"
 
 static uint16_t word(const uint8_t *p, uint16_t i)
 {
@@ -70,6 +71,9 @@ uint16_t world_fire_standard(uint8_t *ram, const uint8_t *rom, uint16_t sub, Tor
     ram[shot + 0x2d] = ram[sub + 0x2d] + 1;
 
     uint16_t flash = world_spawn_child(ram, sub, word(rom, 0x8294));
+    /* 1769 ends with CX = 0; CL then holds the owner index until the flash
+       1769 clears it again. */
+    world_dispatch_set_cx(flash ? 0 : (uint8_t)((owner & 3) - 1));
     if (!flash) flash = 0x8480; /* allocator's discard slot */
     ram[flash + 0x29] = facing;
     put(ram, flash + 0x31, word(rom, 0x9ba9 + 2 * (facing & 1)));
@@ -107,6 +111,7 @@ static void fire_upward(uint8_t *ram, const uint8_t *rom, uint16_t sub, uint16_t
     ram[shot + 0x2d] = ram[sub + 0x2d] + 1;
     put(ram, shot + 0x60, medium);
     uint16_t flash = world_spawn_child(ram, sub, word(rom, 0x8377));
+    world_dispatch_set_cx(flash ? 0 : (uint8_t)((owner & 3) - 1));
     if (!flash) flash = 0x8480;
     ram[flash + 0x29] = facing;
     ram[flash + 0x2d] = ram[sub + 0x2d] - 1;
@@ -140,6 +145,7 @@ static void fire_downward(uint8_t *ram, const uint8_t *rom, uint16_t sub, uint16
     put(ram, sub + 0x54, sequence + 1);
     put(ram, sub + 0x48, in_flight + 1);
     put(ram, sub + 0x4e, 8);
+    world_dispatch_set_cx((uint8_t)((owner & 3) - 1));
 }
 
 void world_player_weapons(uint8_t *ram, const uint8_t *rom, uint16_t sub)
