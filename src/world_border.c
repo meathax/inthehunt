@@ -12,6 +12,7 @@ static HDC cache_dc;
 static HBITMAP cache_bitmap;
 static HGDIOBJ cache_previous;
 static int cache_width, cache_height;
+static uint32_t *cache_bits;
 
 static void discard_cache(void)
 {
@@ -21,6 +22,7 @@ static void discard_cache(void)
         cache_bitmap = NULL;
     }
     cache_width = cache_height = 0;
+    cache_bits = NULL;
 }
 
 static uint32_t *decode(const wchar_t *path, unsigned *width, unsigned *height)
@@ -151,6 +153,7 @@ static int build_cache(int width, int height)
     }
     cache_width = width;
     cache_height = height;
+    cache_bits = destination;
     return 1;
 }
 
@@ -162,6 +165,13 @@ void world_border_paint(HDC target, int width, int height)
     } else {
         PatBlt(target, 0, 0, width, height, BLACKNESS);
     }
+}
+
+const uint32_t *world_border_scaled(int width, int height)
+{
+    if (!pixels || !light || width <= 0 || height <= 0) return NULL;
+    if ((cache_width != width || cache_height != height) && !build_cache(width, height)) return NULL;
+    return cache_bits;
 }
 
 void world_border_close(void)

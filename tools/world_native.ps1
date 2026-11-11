@@ -201,16 +201,17 @@ function Build-WorldNative {
         'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette')
     $sources = @($names | ForEach-Object { Join-Path $Root "src/world_$_.c" })
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')
-    $cppSources = @('src/world_ym.cpp', 'src/third_party/ymfm/ymfm_opm.cpp')
+    $cppSources = @('src/world_ym.cpp', 'src/third_party/ymfm/ymfm_opm.cpp', 'src/world_gpu.cpp', 'src/post/post_chain.cpp')
     $objects = @()
     try {
         foreach ($source in $cppSources) {
             $object = $temp + '.' + $objects.Count + '.o'
             $objects += $object
-            & $Compiler c++ -target x86_64-windows-gnu -std=c++17 -O2 -c (Join-Path $Root $source) -o $object
-            if ($LASTEXITCODE) { throw "Native FM build failed for $source." }
+            $standard = if ($source -match 'gpu|post') { '-std=c++20' } else { '-std=c++17' }
+            & $Compiler c++ -target x86_64-windows-gnu $standard -O2 -c (Join-Path $Root $source) -o $object
+            if ($LASTEXITCODE) { throw "Native C++ build failed for $source." }
         }
-        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -lc++
+        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -ld3d12 -ldxgi -ld3dcompiler_47 -lc++
         if ($LASTEXITCODE) { throw 'Native Windows build failed.' }
         try {
             Move-Item -Force -LiteralPath $temp -Destination $target -ErrorAction Stop
@@ -221,6 +222,11 @@ function Build-WorldNative {
         foreach ($file in @($temp) + $objects) {
             if (Test-Path -LiteralPath $file) { Remove-Item -Force -LiteralPath $file }
         }
+    }
+    # CRT shader runtime (librashader, MPL-2.0; DirectX Shader Compiler) beside the game.
+    foreach ($dll in 'librashader.dll', 'dxcompiler.dll') {
+        $from = Join-Path $Root "third_party/librashader/$dll"
+        if (Test-Path -LiteralPath $from) { Copy-Item -Force -LiteralPath $from -Destination (Join-Path $dest $dll) }
     }
     Write-Host "Built $target"
 }

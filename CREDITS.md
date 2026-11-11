@@ -91,3 +91,11 @@ Aaron Giles’s ymfm supplies YM2151 waveform generation in src/third_party/ymfm
 ## Native timing reference
 
 The source-annotated V33 instruction timing and prefetch accumulator in src/world_cycle_costs.c use Bryan McPhail’s NEC core as their reference, pinned to MAME revision 73346bee98cd79d605514d14691f40ee5e368915. Its BSD-3-Clause notice accompanies the source and Windows archives in LICENSES/MAME-Timing-BSD-3-Clause.txt. These annotations account for timing without fetching or executing ROM instructions. [Pinned NEC source](https://github.com/mamedev/mame/blob/73346bee98cd79d605514d14691f40ee5e368915/src/devices/cpu/nec/nec.cpp)
+
+## CRT shaders
+
+- [librashader](https://github.com/SnowflakePowered/librashader) v0.12.0 (SnowflakePowered and contributors, MPL-2.0) runs the RetroArch presets; loaded at run time from `librashader.dll`, unmodified. `src/post/librashader*.h` are its MIT-licensed C headers.
+- [libretro slang-shaders](https://github.com/libretro/slang-shaders) at `2345ee9`: CRT-Royale (TroggleMonkey; Kurozumi tuning), CRT-Guest-Advanced (guest(r), Dr. Venom), CRT-Geom (cgwg et al.), CRT-Lottes (Timothy Lottes), CRT-Hyllian (Hyllian), CRT-Easymode (EasyMode), NewPixie (Mattias Gustavsson, port by libretro), crt-consumer, crt-caligari, zfast-crt (Greg Hogan). Shipped unmodified as data in `shaders/`, each with its own notice; `shaders/SOURCES.md` lists them.
+- [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator) by Mark Rejhon and Timothy Lottes (MIT), ported into the post chain's beam pass.
+- [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) v1.9.2609 (LLVM / MIT), `dxcompiler.dll`.
+- `src/post/post_chain.*` comes from the same author's Gauntlet Dark Legacy port; its sharpening follows AMD FidelityFX CAS (MIT).

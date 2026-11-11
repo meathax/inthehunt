@@ -37,6 +37,8 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
     - Display: window or full screen
     - Window size: sharp ×1 to ×8
     - Scaling: Integer (sharpest), Fit 4:3 (largest picture that keeps the shape) or Stretch (fill the window)
+    - CRT shader: Off or one of twelve CRT looks (see below)
+    - Beam simulator: Blur Busters CRT rolling-scan simulation for 120 Hz and faster displays
     - V-Sync: wait for the display refresh
     - FPS limit: Arcade (60.01 Hz), 90, 120, 180, 240 or Uncapped
     - Show FPS: frame rate and game speed in the corner
@@ -54,6 +56,29 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
 Settings are saved when the menu closes. Esc no longer quits the game outright.
 
 **About the FPS limit.** The game always runs at the board's 60.01 Hz with sound. The limit only sets how often the picture is redrawn: above Arcade, the same game frame is shown again with the enhancement animation (caustics, light shafts, snow) moved on, so the water moves more smoothly on high-refresh displays. Uncapped redraws as fast as possible, paced by V-Sync if that is on.
+
+### CRT shaders
+
+**CRT SHADER** runs the picture through real RetroArch shader presets, using [librashader](https://github.com/SnowflakePowered/librashader) on Direct3D 12:
+
+| Menu | Preset | Character |
+|---|---|---|
+| CRT-ROYALE | `crt/crt-royale` | TroggleMonkey's physically modelled tube: aperture grille, halation, bloom |
+| ROYALE PVM | `presets/crt-royale-kurozumi` | Royale tuned as a Sony PVM broadcast monitor |
+| GUEST ADVANCED | `crt/crt-guest-advanced` | guest(r)'s highly configurable modern CRT |
+| GUEST NTSC | `crt/crt-guest-advanced-ntsc` | Guest with composite NTSC signal artefacts |
+| CRT-GEOM | `crt/crt-geom` | cgwg's classic curved tube |
+| CRT-LOTTES | `crt/crt-lottes` | Timothy Lottes's shadow-mask CRT |
+| CRT-HYLLIAN | `crt/crt-hyllian` | Hyllian's sharp scanline CRT |
+| EASYMODE | `crt/crt-easymode` | EasyMode's balanced flat CRT |
+| NEWPIXIE | `crt/newpixie-crt` | Vivid, glowing, slightly curved |
+| CONSUMER TV | `crt/crt-consumer` | A domestic television |
+| CALIGARI | `crt/crt-caligari` | Soft phosphor glow |
+| ZFAST | `crt/zfast-crt` | Lightweight, for slower GPUs |
+
+**BEAM SIMULATOR** is the [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator) (Mark Rejhon and Timothy Lottes): on a display faster than the game's 60 Hz it draws each game frame as a rolling scan over several refreshes, as a tube does, which restores CRT motion clarity. It needs a 120 Hz or faster display and always uses V-Sync. It combines with any CRT shader.
+
+The CRT view is used only while a shader or the beam simulator is selected; otherwise the window draws itself as before. Border art, scaling and the enhancements carry through. If Direct3D 12 or the shader files are missing, the game says so in the corner and falls back to the normal picture. The presets ship in `shaders/` as data files (mostly GPL; `shaders/SOURCES.md` lists every file and its licence).
 
 ### Enhancements
 
@@ -124,10 +149,11 @@ Earlier in the project, encounter replays were compared with MAME's reference ex
 
 ## Building from source
 
-Requirements: Windows 10/11 x64, PowerShell 5+, Python 3 (packaging only). The build downloads Zig 0.16.0 (SHA-256 pinned) into `.local/` and compiles with `zig cc`. No Visual Studio is needed.
+Requirements: Windows 10/11 x64, PowerShell 5+, Python 3 (packaging only). For the CRT shaders, put `librashader.dll` and `dxcompiler.dll` in `third_party/librashader/` (pinned builds, see `tools/shader_pins.md`). The build downloads Zig 0.16.0 (SHA-256 pinned) into `.local/` and compiles with `zig cc`. No Visual Studio is needed.
 
 ```powershell
 . .\tools\world_native.ps1; Build-WorldNative -Root (Get-Location).Path   # → .local/native/InTheHunt.exe
+python -I tools/make_shaders.py --slang D:/path/to/slang-shaders   # → .local/shaders (CRT presets)
 python tools/package_native.py     # → .local/release/InTheHunt-Windows-x64.zip
 python tools/package_source.py     # → .local/release/inthehunt-source.zip (every tracked file)
 ```
@@ -147,6 +173,7 @@ python tools/package_source.py     # → .local/release/inthehunt-source.zip (ev
 | `src/world_clock.c`, `world_cycle_costs.c`, `world_timing_options.c` | Board clock and the slowdown model |
 | `src/world_window.c`, `world_input.c`, `world_border.c`, `world_menu.c`, `world_settings.c` | Window, XInput/keyboard, border art, pause menu, settings |
 | `src/world_enhance.c` | Optional picture enhancements (post-process only) |
+| `src/world_gpu.cpp`, `src/post/` | Direct3D 12 presenter and post chain: librashader presets and the beam simulator |
 | `src/world_boot.c` | ROM import checks and cold-boot state |
 | `src/world_io.c`, `world_motion.c`, `world_sound.c`, `world_tile_v33.c` | Early V33 reference routines used by the MAME hybrid tools |
 | `src/third_party/ymfm` | Aaron Giles's YM2151 emulator (BSD-3-Clause) |
@@ -167,6 +194,8 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_MENU_SHOT=frame` | Render every pause-menu page over that frame |
 | `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset, each scaling mode and scanlines at 1920×1080 using the real window painter |
 | `WORLD_FX_SHOT=frame` | Save that frame with no enhancement, each enhancement alone, and all together |
+| `WORLD_FX_SHOTS=1` | Save every scripted shot with the water effects on, and log the waterline |
+| `WORLD_CRT_SHOT=frame` | Render that frame through every CRT preset off screen at 1920×1080 (Direct3D 12) |
 
 ### Developer reference tools (MAME)
 
@@ -174,4 +203,4 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 
 ## Credits and licences
 
-*In the Hunt* © 1993 Irem. This project is an unofficial, non-commercial preservation and porting effort and ships no original game data. Third-party code and references are listed in [CREDITS.md](CREDITS.md). Their licences are in [LICENSES/](LICENSES): ymfm and the GA20 model (BSD-3-Clause), and MAME timing constants (BSD-3-Clause).
+*In the Hunt* © 1993 Irem. This project is an unofficial, non-commercial preservation and porting effort and ships no original game data. Third-party code and references are listed in [CREDITS.md](CREDITS.md). Their licences are in [LICENSES/](LICENSES): ymfm and the GA20 model (BSD-3-Clause), MAME timing constants (BSD-3-Clause), librashader (MPL-2.0), the DirectX Shader Compiler (LLVM/MIT) and the Blur Busters beam simulator (MIT). The CRT presets keep their own licences (mostly GPL) inside `shaders/`.

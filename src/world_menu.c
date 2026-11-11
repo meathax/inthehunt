@@ -1,4 +1,5 @@
 #include "world_menu.h"
+#include "world_gpu.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -18,7 +19,8 @@ enum {
     ITEM_SCALING, ITEM_VSYNC, ITEM_FPS, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
     ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM, ITEM_FX_SHIMMER,
-    ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES
+    ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
+    ITEM_CRT, ITEM_BEAM
 };
 enum { MAX_ITEMS = 20, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -33,6 +35,7 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FOCUS: return &s->pause_unfocused;
     case ITEM_DEMOSOUND: return &s->dip_demo_sound;
     case ITEM_FX: return &s->fx_enable;
+    case ITEM_BEAM: return &s->crt_beam;
     case ITEM_FX_CAUSTICS: return &s->fx_caustics;
     case ITEM_FX_RAYS: return &s->fx_rays;
     case ITEM_FX_LIGHTS: return &s->fx_lights;
@@ -208,6 +211,8 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
+            ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION. GPU");
+            ADD(ITEM_BEAM, "BEAM SIMULATOR", "ROLLING SCAN. 120 HZ+ DISPLAYS");
             ADD(ITEM_VSYNC, "V-SYNC", "SYNC TO THE DISPLAY REFRESH");
             ADD(ITEM_FPS, "FPS LIMIT", "REDRAW RATE. GAME SPEED IS FIXED");
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
@@ -277,6 +282,10 @@ static void item_value(const WorldMenu *m, const WorldSettings *s, unsigned id, 
         else snprintf(out, 32, "%u", world_menu_fps[s->fps_limit]);
         break;
     case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
+    case ITEM_CRT:
+        snprintf(out, 32, "%s", s->crt_shader && s->crt_shader <= WORLD_GPU_PRESETS
+                                ? world_gpu_preset_name[s->crt_shader - 1] : "OFF");
+        break;
     case ITEM_DIFFICULTY: {
         static const char *const names[4] = {"VERY EASY", "EASY", "NORMAL", "HARD"};
         strcpy(out, names[s->dip_difficulty & 3]);
@@ -380,6 +389,9 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
         s->fps_limit = (s->fps_limit + WORLD_MENU_FPS_CHOICES + (d > 0 ? 1 : -1)) % WORLD_MENU_FPS_CHOICES;
         return WORLD_MENU_VIEW;
     case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
+    case ITEM_CRT:
+        s->crt_shader = (s->crt_shader + WORLD_GPU_PRESETS + 1 + (d > 0 ? 1 : -1)) % (WORLD_GPU_PRESETS + 1);
+        return WORLD_MENU_VIEW;
     case ITEM_DIFFICULTY: s->dip_difficulty = (s->dip_difficulty + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
     default: {
         unsigned *field = toggle_field(s, id);

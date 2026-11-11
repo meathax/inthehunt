@@ -10,6 +10,7 @@
 #include <string.h>
 #include "world_window.h"
 #include "world_border.h"
+#include "world_gpu.h"
 
 enum { WIDTH = 320, HEIGHT = 240 };
 static const wchar_t window_class[] = L"InTheHuntNativeViewport";
@@ -113,11 +114,50 @@ static void paint(HWND hwnd, HDC dc)
     BitBlt(dc, 0, 0, rect.right, rect.bottom, back_dc, 0, 0, SRCCOPY);
 }
 
+static char crt_preset[1024];
+static int crt_beam;
+static double source_time;
+static uint32_t gpu_last[WIDTH * HEIGHT];
+static int gpu_bg_w, gpu_bg_h, gpu_bg_stale = 1;
+
+/* A CRT preset (full .slangp path, "" for none) and the beam simulator use
+ * the Direct3D 12 view; with neither, the window paints itself with GDI.
+ * Returns 0 with a reason when the shader view cannot be used. */
+int world_window_set_crt(const char *preset, int beam, char *error, size_t error_size)
+{
+    int wanted = (preset && *preset) || beam;
+    if (!wanted) {
+        world_gpu_close();
+        crt_preset[0] = 0;
+        crt_beam = 0;
+        if (window) InvalidateRect(window, NULL, FALSE);
+        return 1;
+    }
+    if (!window) return 0;
+    if (!world_gpu_active() && !world_gpu_open(window, error, error_size)) return 0;
+    if (strcmp(preset ? preset : "", crt_preset)) {
+        if (!world_gpu_set_preset(preset ? preset : "", error, error_size)) {
+            if (!crt_preset[0] && !crt_beam) world_gpu_close();
+            return 0;
+        }
+        snprintf(crt_preset, sizeof crt_preset, "%s", preset ? preset : "");
+    }
+    crt_beam = beam;
+    world_gpu_set_options(view_scaling, beam, view_vsync);
+    memset(gpu_last, 0, sizeof gpu_last);
+    gpu_bg_stale = 1;
+    return 1;
+}
+
+void world_window_set_source_time(double time) { source_time = time; }
+int world_window_gpu(void) { return world_gpu_active(); }
+
 void world_window_set_view(int scaling, int scanlines, int vsync)
 {
     view_scaling = scaling;
     view_scanlines = scanlines;
     view_vsync = vsync;
+    if (world_gpu_active()) world_gpu_set_options(scaling, crt_beam, vsync);
     if (window) InvalidateRect(window, NULL, FALSE);
 }
 
@@ -348,6 +388,21 @@ int world_window_poll(uint16_t *pads, uint16_t *system)
 void world_window_present(const uint32_t *pixels)
 {
     if (!window || !pixels) return;
+    if (world_gpu_active()) {
+        if (IsIconic(window)) return;
+        RECT rect;
+        GetClientRect(window, &rect);
+        if (gpu_bg_stale || rect.right != gpu_bg_w || rect.bottom != gpu_bg_h) {
+            world_gpu_set_background(world_border_scaled(rect.right, rect.bottom), (unsigned)rect.right, (unsigned)rect.bottom);
+            gpu_bg_w = rect.right;
+            gpu_bg_h = rect.bottom;
+            gpu_bg_stale = 0;
+        }
+        int changed = memcmp(gpu_last, pixels, sizeof gpu_last) != 0;
+        if (changed) memcpy(gpu_last, pixels, sizeof gpu_last);
+        world_gpu_present(changed ? pixels : NULL, source_time);
+        return;
+    }
     memcpy(frame, pixels, sizeof frame);
     if (!IsIconic(window)) {
         InvalidateRect(window, NULL, FALSE);
@@ -369,12 +424,14 @@ void world_window_present(const uint32_t *pixels)
 int world_window_set_border(const char *path, unsigned brightness)
 {
     if (!world_border_set(path, brightness)) return 0;
+    gpu_bg_stale = 1;
     if (window) InvalidateRect(window, NULL, FALSE);
     return 1;
 }
 
 void world_window_close(void)
 {
+    world_gpu_close();
     if (window) DestroyWindow(window);
     if (controller_library) FreeLibrary(controller_library);
     controller_state = NULL;

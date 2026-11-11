@@ -10,6 +10,7 @@
 #include "world_video.h"
 #include "world_window.h"
 #include "world_enhance.h"
+#include "world_gpu.h"
 #include "world_border.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
@@ -107,9 +108,34 @@ static uint32_t effect_clock(void)
     return (uint32_t)((unsigned long long)counter.QuadPart * 8000ull / (unsigned long long)frequency.QuadPart);
 }
 
+static char notice[96];
+static DWORD notice_until;
+
+/* A short message in the corner of the picture, for a few seconds. */
+static void show_notice(const char *text)
+{
+    snprintf(notice, sizeof notice, "%s", text);
+    notice_until = GetTickCount() + 5000;
+}
+
 static void apply_view(void)
 {
     world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines, (int)settings.vsync);
+    char preset[1200] = "", error[256] = "", folder[1024];
+    if (settings.crt_shader) {
+        if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
+            show_notice("CRT SHADERS NOT FOUND");
+            settings.crt_shader = 0;
+        } else
+            snprintf(preset, sizeof preset, "%s/%s", folder, world_gpu_preset_path[settings.crt_shader - 1]);
+    }
+    if (!world_window_set_crt(preset, (int)settings.crt_beam, error, sizeof error)) {
+        fprintf(stderr, "CRT shader unavailable: %s\n", error);
+        show_notice("CRT SHADER UNAVAILABLE");
+        settings.crt_shader = 0;
+        settings.crt_beam = 0;
+        world_window_set_crt("", 0, NULL, 0);
+    }
 }
 
 static void enhance(const uint32_t *source, uint32_t *target, uint32_t time)
@@ -143,6 +169,11 @@ static void enhance(const uint32_t *source, uint32_t *target, uint32_t time)
 static void present_game(const uint32_t *source)
 {
     enhance(source, shown, effect_clock());
+    if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
+        world_menu_draw_text(shown, 320, 240, 5, 5, 1, 0xff000000, notice);
+        world_menu_draw_text(shown, 320, 240, 4, 4, 1, 0xffff8060, notice);
+    } else
+        notice[0] = 0;
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
@@ -549,6 +580,45 @@ static void headless_run(const char *dir, const char *script_path)
             settings = keep;
             world_enhance_reset();
         }
+        /* WORLD_CRT_SHOT=frame renders that frame through each CRT preset
+           off screen at 1920x1080 (needs Direct3D 12 and the shader package). */
+        static int crt_shot_done;
+        const char *crt_shot = getenv("WORLD_CRT_SHOT");
+        if (crt_shot && !crt_shot_done && ticks >= strtoul(crt_shot, NULL, 10)) {
+            crt_shot_done = 1;
+            char folder[1024];
+            static uint32_t big[1920 * 1080];
+            if (!world_gpu_find_shaders(dir, folder, sizeof folder)) {
+                snprintf(failure, sizeof failure, "CRT shot: shader package not found");
+                break;
+            }
+            for (unsigned i = 0; i <= WORLD_GPU_PRESETS; ++i) {
+                char preset[1200] = "", error[512] = "", path[4096];
+                if (i) snprintf(preset, sizeof preset, "%s/%s", folder, world_gpu_preset_path[i - 1]);
+                snprintf(path, sizeof path, "%s/headless-crt%02u.bmp", dir, i);
+                if (!world_gpu_render_offscreen(pixels, preset, 0, 1920, 1080, big, error, sizeof error)) {
+                    fprintf(stderr, "CRT preset %u (%s) failed: %s\n", i, i ? world_gpu_preset_name[i - 1] : "OFF", error);
+                    continue;
+                }
+                FILE *f = fopen(path, "wb");
+                if (!f) continue;
+                BITMAPFILEHEADER file = {0};
+                BITMAPINFOHEADER info = {0};
+                file.bfType = 0x4d42;
+                file.bfOffBits = sizeof file + sizeof info;
+                file.bfSize = file.bfOffBits + sizeof big;
+                info.biSize = sizeof info;
+                info.biWidth = 1920;
+                info.biHeight = -1080;
+                info.biPlanes = 1;
+                info.biBitCount = 32;
+                fwrite(&file, sizeof file, 1, f);
+                fwrite(&info, sizeof info, 1, f);
+                fwrite(big, sizeof big, 1, f);
+                fclose(f);
+                fprintf(stderr, "CRT preset %u (%s) rendered\n", i, i ? world_gpu_preset_name[i - 1] : "OFF");
+            }
+        }
         /* WORLD_BORDER_SHOT=frame composes that frame with every border
            preset at 1920x1080 (and 1280x1024) through the window painter. */
         static int border_shot_done;
@@ -828,7 +898,10 @@ int main(int argc, char **argv)
            clock; uncapped redraws every pass (v-sync, if on, paces it). */
         int show = 0;
         QueryPerformanceCounter(&now);
-        if (!limit) show = fresh;
+        double into = 1.0 - ((double)deadline - (double)now.QuadPart) / period;
+        world_window_set_source_time((double)ticks + (into < 0.0 ? 0.0 : into > 0.999 ? 0.999 : into));
+        if (settings.crt_beam && world_window_gpu()) show = 1;   /* one sub-frame per display refresh */
+        else if (!limit) show = fresh;
         else if (limit == 0xffffffffu) show = 1;
         else if (now.QuadPart >= present_deadline) {
             show = 1;

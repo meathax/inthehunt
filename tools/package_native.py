@@ -14,6 +14,15 @@ FILES = {
     "tools/world_native.ps1": "tools/world_native.ps1",
     "CREDITS.md": "CREDITS.md",
     "tools/get_border_art.ps1": "tools/get_border_art.ps1",
+    # CRT shader runtime: librashader (MPL-2.0, unmodified v0.12.0 build) and the DirectX Shader Compiler.
+    "librashader.dll": ".local/native/librashader.dll",
+    "dxcompiler.dll": ".local/native/dxcompiler.dll",
+    "LICENSES/librashader-MPL-2.0.md": "LICENSES/librashader-MPL-2.0.md",
+    "LICENSES/dxcompiler-LLVM.txt": "LICENSES/dxcompiler-LLVM.txt",
+    "LICENSES/dxcompiler-MS.txt": "LICENSES/dxcompiler-MS.txt",
+    "LICENSES/dxcompiler-MIT.txt": "LICENSES/dxcompiler-MIT.txt",
+    "LICENSES/BlurBusters-CRT-Beam-Simulator-MIT.txt": "LICENSES/BlurBusters-CRT-Beam-Simulator-MIT.txt",
+    "tools/shader_pins.md": "tools/shader_pins.md",
 }
 INSTRUCTIONS = """In The Hunt World - native Windows build
 
@@ -26,6 +35,9 @@ images stay under .local/world. Later launches can run without the archive.
 On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
 F1 (or L3 + R3 together on a controller) opens the pause menu: resume,
 video, sound, game timing, border, controls and quit. Esc goes back in the menu.
+OPTIONS > VIDEO > CRT SHADER picks a CRT look (CRT-Royale, Guest Advanced,
+CRT-Geom, Lottes and more); BEAM SIMULATOR adds the Blur Busters rolling
+scan on 120 Hz and faster displays. Both need Direct3D 12.
 Options also has an ENHANCE tab: optional caustics, light shafts, dynamic
 lights, bloom and more, all off by default (pure arcade picture).
 On first launch the game downloads an optional undersea border image;
@@ -45,6 +57,13 @@ if __name__ == "__main__":
     with ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
         for target, source in FILES.items():
             archive.write(ROOT / source, target)
+        # The CRT presets (libretro slang-shaders data, mostly GPL; see shaders/SOURCES.md).
+        shaders = ROOT / ".local/shaders"
+        if not (shaders / "SOURCES.md").is_file():
+            raise SystemExit("run tools/make_shaders.py first")
+        for f in sorted(shaders.rglob("*")):
+            if f.is_file():
+                archive.write(f, "shaders/" + f.relative_to(shaders).as_posix())
         archive.writestr("START-HERE.txt", INSTRUCTIONS)
     temporary.replace(output)
     print(output)
