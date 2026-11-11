@@ -15349,6 +15349,50 @@ stage2_jumper_terrain:
         world_queue_sound(ram, 7);
         finish_animation(ram, actor);
         break;
+    /* 7000:748E/7498/74DB: when word 1E bit 8 waits for B8BC to clear,
+       fade the two 6D94 palettes in, hold for word 1E ticks, then stop them. */
+    case 0x7748e:
+        write_word(ram, actor + 0x44, 0x10);
+        write_word(ram, actor, 0x7498);
+        /* fall through */
+    case 0x77498: {
+        const uint8_t *bank = main_rom + 0x70000;
+        if (read_word(ram, actor + 0x1e) & 0x100) {
+            if (read_word(ram, 0xb8bc)) {
+                write_word(ram, actor + 0x44, 0x10);
+                break;
+            }
+            if (decrement(ram, actor + 0x44)) break;
+        }
+        for (unsigned i = 2; i; --i)
+            queue_palette(ram, bank[(uint16_t)(0x6d98 + 2 * (i - 1))], read_word(bank, (uint16_t)(0x6d94 + 2 * (i - 1))), 5);
+        write_word(ram, actor + 0x44, read_word(ram, actor + 0x1e));
+        write_word(ram, actor, 0x74db);
+        break;
+    }
+    case 0x774db: {
+        const uint8_t *bank = main_rom + 0x70000;
+        if (decrement(ram, actor + 0x44)) break;
+        for (unsigned i = 2; i; --i)
+            write_word(ram, (uint16_t)(0x9e08 + 8 * read_word(bank, (uint16_t)(0x6d98 + 2 * (i - 1)))), 0);
+        finish_animation(ram, actor);
+        break;
+    }
+    /* 7000:750D: once B8C2 bit 0 is set (when word 1E bit 8 asks), start
+       one or two 6D88 palette fades and retire. */
+    case 0x7750d: {
+        const uint8_t *bank = main_rom + 0x70000;
+        uint16_t kind = read_word(ram, actor + 0x1e);
+        if ((kind & 0x100) && !(read_word(ram, 0xb8c2) & 1)) break;
+        uint16_t count = ((kind & 1) + 1) * 2;
+        for (; count; --count) {
+            uint16_t index = 2 * (count - 1) + 4 * (kind & 1);
+            queue_palette(ram, bank[(uint16_t)(0x6d98 + index)], read_word(bank, (uint16_t)(0x6d88 + index)), 6);
+        }
+        write_word(ram, actor + 0x44, 0);
+        finish_animation(ram, actor);
+        break;
+    }
     case 0x7711d: case 0x77140:
     case 0x77187: case 0x771af: case 0x771e3: case 0x77239: case 0x7725c: case 0x772a0:
     case 0x772c1: case 0x772f5: case 0x7737b: case 0x773a2: case 0x77448:
