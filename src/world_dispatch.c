@@ -497,6 +497,56 @@ static const char *untracked_si_detail(void)
     return text;
 }
 
+/* SI as 0:65B1 leaves it after picking a target, from the borrows of
+   (player x - actor x) and (player y - actor y). One player (65DA/65F4):
+   bx << 1 | by. Two players: 66A3 (modes 4/6) packs bx1 by1 bx2 by2, 66FA
+   (modes 8/A) bx1 . bx2 ., 672B (modes C/E) by1 by2; picking player one
+   shifts that right by two. Returns 0 when 65B1 leaves SI alone (no player,
+   or modes 10h and up). */
+static int enemy_target_si(const uint8_t *ram, uint16_t actor, uint16_t *si)
+{
+    unsigned active = read_word(ram, 0x264) & 3;
+    if (!active) return 0;
+    uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+    uint16_t p1 = read_word(ram, 0x90), p2 = read_word(ram, 0x92);
+    unsigned bx1 = read_word(ram, p1 + 0x21) < x, by1 = read_word(ram, p1 + 0x24) < y;
+    unsigned bx2 = read_word(ram, p2 + 0x21) < x, by2 = read_word(ram, p2 + 0x24) < y;
+    uint16_t dx1 = read_word(ram, p1 + 0x21) - x, dy1 = read_word(ram, p1 + 0x24) - y;
+    uint16_t dx2 = read_word(ram, p2 + 0x21) - x, dy2 = read_word(ram, p2 + 0x24) - y;
+    if (dx1 & 0x8000) dx1 = -dx1;
+    if (dy1 & 0x8000) dy1 = -dy1;
+    if (dx2 & 0x8000) dx2 = -dx2;
+    if (dy2 & 0x8000) dy2 = -dy2;
+    if (active != 3) {
+        *si = active == 1 ? (bx1 << 1 | by1) : (bx2 << 1 | by2);
+        return 1;
+    }
+    unsigned mode = ram[actor + 0x0c];
+    uint16_t bits;
+    int nearer;
+    switch (mode) {
+    case 0: *si = bx1 << 1 | by1; return 1;
+    case 2: *si = bx2 << 1 | by2; return 1;
+    case 4: case 6:
+        bits = bx1 << 3 | by1 << 2 | bx2 << 1 | by2;
+        nearer = (uint16_t)(dx1 + dy1) < (uint16_t)(dx2 + dy2);
+        break;
+    case 8: case 10:
+        bits = bx1 << 3 | bx2 << 1;
+        nearer = dx1 < dx2;
+        break;
+    case 12: case 14:
+        bits = by1 << 2 | by2;
+        nearer = dy1 < dy2;
+        break;
+    default:
+        return 0;
+    }
+    int first = (mode & 2) ? !nearer : nearer;
+    *si = first ? bits >> 2 : bits;
+    return 1;
+}
+
 static int above_cruiser(const uint8_t *ram, uint16_t enemy, uint16_t player)
 {
     uint16_t y = read_word(ram, enemy + 0x24);
@@ -5659,12 +5709,18 @@ static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         if (mode == 1) turn = !decrement(ram, actor + 0x42);
         else if (mode) {
             unsigned players = read_word(ram, 0x264) & 3;
-            if (players == 3) {
-                world_dispatch_detail = "two-player target; SI after 65B1 not recovered";
-                return 0;
-            }
             /* 65B1 leaves the borrow of player x - actor x in SI bit 1. */
-            if (players) turn = read_word(ram, world_enemy_target(ram, actor) + 0x21) >= x;
+            uint16_t si;
+            if (players == 3) {
+                if (!enemy_target_si(ram, actor, &si)) {
+                    if (!entry_si_known) {
+                        world_dispatch_detail = untracked_si_detail();
+                        return 0;
+                    }
+                    si = entry_si;
+                }
+                turn = !(si & 2);
+            } else if (players) turn = read_word(ram, world_enemy_target(ram, actor) + 0x21) >= x;
         }
         if (turn) {
             write_word(ram, actor, 0xf5c6);
@@ -11934,20 +11990,15 @@ static int stage_three_trooper(uint8_t *ram, const uint8_t *rom, const uint8_t *
     case 0xb21ea: {
         unsigned players = read_word(ram, 0x264) & 3, held = ram[actor + 0x18];
         uint16_t si;
-        if (players == 3) {
-            world_dispatch_detail = "two-player target; SI after 65B1 not recovered";
-            return 0;
-        }
         world_acquire_resource(ram, actor, 0xff);
         ram[actor + 0x0c] = 8;
         write_word(ram, actor + 0x26, 0x20);
         write_word(ram, actor + 0x36, 0x80);
         ram[actor + 0x2d] = 4;
         write_word(ram, actor + 0x3c, 0xf32b);
-        if (players) {
-            uint16_t target = world_enemy_target(ram, actor);
-            si = read_word(ram, target + 0x21) < read_word(ram, actor + 0x21) ? 2 : 0;
-        } else if (ram[actor + 0x18] != held) {
+        if (players && enemy_target_si(ram, actor, &si)) {
+            /* 65B1 picked a target; SI holds its borrows. */
+        } else if (!players && ram[actor + 0x18] != held) {
             si = held;      /* 0:1067 leaves SI at the resource slot it filled */
         } else if (entry_si_known) {
             si = entry_si;
@@ -16116,10 +16167,6 @@ stage2_jumper_terrain:
         int flame = 0;
         if (address == 0xb057b) {
             unsigned players = read_word(ram, 0x264) & 3;
-            if (players == 3) {
-                world_dispatch_detail = "two-player target; SI after 65B1 not recovered";
-                return 0;
-            }
             ram[actor + 0x2d] = 4;
             write_word(ram, actor + 0x42, 0x40);
             write_word(ram, actor + 0x38, 0xff00);
@@ -16128,9 +16175,13 @@ stage2_jumper_terrain:
             if (players) {
                 uint16_t target = world_enemy_target(ram, actor);
                 write_word(ram, actor + 0x50, target);
-                /* 65DA/65F4 leave SI bit 0 set when the target is higher. */
-                write_word(ram, actor + 0x3a,
-                           read_word(ram, target + 0x24) < read_word(ram, actor + 0x24) ? 0xff80 : 0x80);
+                /* B05A0 tests SI bit 0 as 65B1 left it. */
+                uint16_t si;
+                if (!enemy_target_si(ram, actor, &si)) {
+                    world_dispatch_detail = "65B1 mode leaves SI from the previous handler";
+                    return 0;
+                }
+                write_word(ram, actor + 0x3a, (si & 1) ? 0xff80 : 0x80);
             }
             write_word(ram, actor, 0x5b0);
         }
