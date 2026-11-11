@@ -278,12 +278,17 @@ static unsigned headless_autopilot(unsigned fallback)
             actor = next;
         }
         if (!camera) return fallback;
-        int tx = 0x100 - (int)word(ram + sub + 0x21);
+        /* In the descent, sweep across the screen so an ice ceiling over
+           one column cannot hold the sub below word 4C forever. */
+        int column = word(ram + camera) == 0x3e6c ? 0x90 + 0x40 * (int)((ticks / 600) % 5) : 0x100;
+        int tx = column - (int)word(ram + sub + 0x21);
         /* Stage five's descent (0:3E6C) sinks only while a player is at or
            below word 4C (and none above C8h): steer just below it. */
         int depth = word(ram + camera) == 0x3e6c ? 0x10 : -0x20;
         int ty = (int)word(ram + camera + 0x4c) + depth - (int)word(ram + sub + 0x24);
-        unsigned held = fire;
+        /* Breaking the stage-five ice ceiling needs many upward missiles:
+           press each fire button on alternate pairs of frames. */
+        unsigned held = word(ram + camera) == 0x3e6c ? ((ticks & 2) ? 0x40 : 0x80) : fire;
         if (tx > 6) held |= 0x01;
         else if (tx < -6) held |= 0x02;
         if (ty > 6) held |= 0x08;
@@ -297,6 +302,7 @@ static unsigned headless_autopilot(unsigned fallback)
     return held | fire;                         /* both fire buttons in turn */
 }
 
+extern unsigned world_debug_ice[4];
 static void headless_run(const char *dir, const char *script_path)
 {
     FILE *script = fopen(script_path, "r");
@@ -308,6 +314,9 @@ static void headless_run(const char *dir, const char *script_path)
     unsigned long at = 0;
     char first[32], second[32], third[32];
     int fields = fscanf(script, "%lu %31s", &at, first);
+    char trace_path[4096];
+    snprintf(trace_path, sizeof trace_path, "%s/headless-trace.txt", dir);
+    FILE *trace = fopen(trace_path, "w");
     for (;;) {
         int shot = 0;
         while (fields == 2 && ticks >= at) {
@@ -324,7 +333,16 @@ static void headless_run(const char *dir, const char *script_path)
         if (fields != 2) break;
         unsigned input = autopilot ? headless_autopilot(held) : held;
         if (!tick((uint16_t)~input, (uint16_t)~buttons)) break;
+        unsigned long before = ticks;
         ticks += elapsed_board_frames;
+        if (trace && before / 1000 != ticks / 1000) {
+            unsigned sub = word(ram + 0x90);
+            unsigned cfg = word(ram + sub + 0x70);
+            fprintf(trace, "%lu stage %u B700 %04x 26E %04x 264 %04x sub %04x x %04x y %04x input %02x up %04x mid %04x down %04x ice %u/%u last %u\n",
+                    ticks, word(ram + 0x84), word(ram + 0xb700), word(ram + 0x26e), word(ram + 0x264),
+                    word(ram + sub), word(ram + sub + 0x21), word(ram + sub + 0x24), input & 0xff,
+                    word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6), world_debug_ice[0], world_debug_ice[1], world_debug_ice[2]);
+        }
         draw();
         if (shot) {
             char name[32];
@@ -333,6 +351,7 @@ static void headless_run(const char *dir, const char *script_path)
         }
     }
 done:
+    if (trace) fclose(trace);
     fclose(script);
     draw();
     headless_shot(dir, "final");
@@ -341,10 +360,10 @@ done:
     snprintf(path, sizeof path, "%s/headless-actors.txt", dir);
     FILE *list = fopen(path, "w");
     if (list) {
-        fprintf(list, "frame %lu master %04x stage %u B700 %04x B70A %04x B70C %04x 26E %04x 262 %04x 264 %04x B8C2 %04x 28C %04x\n",
+        fprintf(list, "frame %lu master %04x stage %u B700 %04x B70A %04x B70C %04x 26E %04x 262 %04x 264 %04x B8C2 %04x 28C %04x P1 %04x P2 %04x 25C %04x\n",
                 ticks, word(ram + 0x80), word(ram + 0x84), word(ram + 0xb700), word(ram + 0xb70a),
                 word(ram + 0xb70c), word(ram + 0x26e), word(ram + 0x262), word(ram + 0x264),
-                word(ram + 0xb8c2), word(ram + 0x28c));
+                word(ram + 0xb8c2), word(ram + 0x28c), word(ram + 0x90), word(ram + 0x92), word(ram + 0x25c));
         unsigned actor = 0x400;
         for (unsigned steps = 0; steps < 512 && actor; ++steps) {
             fprintf(list, "%04x %04x:%04x x %04x y %04x hp %04x 1E %04x 40 %04x 42 %04x 44 %04x 46 %04x 4C %04x 50 %04x 60 %04x 6A %04x\n",
