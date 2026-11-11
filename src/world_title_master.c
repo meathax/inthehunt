@@ -100,6 +100,81 @@ int world_title_master(uint8_t *ram, uint8_t *tiles, uint8_t *oam,
         }
         return 1;
     }
+    /* 0:344D..360B: the ending. The first scene (by 272: bonus level)
+       draws its picture, records the clear in each player's 126 slot and
+       runs the 1A50 actors until one sets word 86; then fades, shows the
+       second scene (1AF7 actors, sound by 272) and goes on to C466. */
+    case 0x344d: {
+        unsigned bonus = 2 * (word(ram + 0x272) & 3);
+        unsigned clear = word(rom + 0x3445 + bonus);
+        unsigned slot = (word(ram + 0x264) & 2) << 5;
+        put(ram + 0x126 + slot, clear);
+        if (word(ram + 0x272) == 2) put(ram + 0x126 + (slot ^ 0x40), clear - 1);
+        memset(tiles, 0, 65536);
+        world_frame_init_palette(ram, palette, rom, 0xe9a4);
+        memset(ram + 0xb700, 0, 46);
+        put(ram + 0x292, 0);
+        unsigned size = word(rom + 0x3301 + bonus);
+        tile_rectangle(ram, tiles, rom, word(rom + 0x32e9 + bonus), 0x0000, word(rom + 0x32f9 + bonus),
+                       size >> 8, size & 255);
+        tile_rectangle(ram, tiles, rom, word(rom + 0x32f1 + bonus), 0x4000, 0x1330, 10, 4);
+        uint16_t cell = 0x2340;                                         /* 0:5F4A */
+        for (uint16_t text = 0xfeb7; rom[text] != 0xff; ++text) {
+            put(tiles + cell, rom[text]);
+            put(tiles + (uint16_t)(cell + 2), 0);
+            cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+        }
+        put(ram + 0x262, 3);
+        world_frame_init_actors(ram, 0x1a50, 0x8000);
+        world_frame_reset_sound(ram);
+        put(ram + 0x86, 0);
+        put(ram + 0x80, 0x3513);
+    }
+        /* fall through */
+    case 0x3513:
+        if (word(ram + 0x86)) put(ram + 0x80, 0x3522);
+        return 1;
+    case 0x3522:
+        put(ram + 0x86, word(ram + 0x86) - 1);
+        if (!word(ram + 0x86)) {
+            fade_palette(ram, 0, 7);
+            put(ram + 0x86, 0x80);
+            put(ram + 0x80, 0x355b);
+        }
+        return 1;
+    case 0x355b:
+        put(ram + 0x86, word(ram + 0x86) - 1);
+        if (!word(ram + 0x86)) {
+            ram[0x262] &= (uint8_t)~1u;
+            put(ram + 0x80, 0x356e);
+        }
+        return 1;
+    case 0x356e: {
+        unsigned bonus = 2 * (word(ram + 0x272) & 3);
+        memset(tiles, 0, 65536);
+        world_frame_init_palette(ram, palette, rom, word(rom + 0x3309 + bonus));
+        put(ram + 0x262, 3);
+        world_frame_init_actors(ram, 0x1af7, 0x8000);
+        world_frame_reset_sound(ram);
+        world_queue_sound(ram, word(rom + 0x3323 + bonus));
+        put(ram + 0x86, 0);
+        put(ram + 0x80, 0x35be);
+        return 1;
+    }
+    case 0x35be:
+        if (word(ram + 0x86)) {
+            fade_palette(ram, 0, 6);
+            put(ram + 0x86, 0x50);
+            put(ram + 0x80, 0x35f9);
+        }
+        return 1;
+    case 0x35f9:
+        put(ram + 0x86, word(ram + 0x86) - 1);
+        if (!word(ram + 0x86)) {
+            put(ram + 0x262, 0);
+            put(ram + 0x80, 0xc466);
+        }
+        return 1;
     case 0x24e2: {
         stage_difficulty_credit(ram, rom);
         memset(tiles, 0, 65536);

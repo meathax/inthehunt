@@ -179,7 +179,7 @@ static int tick(uint16_t pads, uint16_t system)
     for (unsigned i = 0; i < 3; ++i)
         if (ram[0x29a] & (1u << i)) layer_master[i] = word(ram + 0x29c + 2*i);
     if (master == 0xa0e) layer_master[1] = 1;
-    if (master == 0x24e2)
+    if (master == 0x24e2 || master == 0x344d)       /* OUT 98/9A/9C = 0, 1, 2 */
         for (unsigned i = 0; i < 3; ++i) layer_master[i] = (uint16_t)i;
     if (master == 0xa09 || master == 0x1d52) layer_master[1] = 0x41;
     int busy_system = -1;

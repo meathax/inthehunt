@@ -17377,6 +17377,21 @@ stage2_jumper_terrain:
         if (hit) finish_animation(ram, actor);
         break;
     }
+    /* A000:82C4: scenery weed (frame 82C0 by word 1E bit 1). */
+    case 0xa82c4:
+        world_acquire_resource(ram, actor, 0xe4);
+        ram[actor + 0x2d] = 4;
+        write_word(ram, actor + 0x2a, read_word(main_rom + 0xa0000, (uint16_t)(0x82c0 + (read_word(ram, actor + 0x1e) & 2))));
+        write_word(ram, actor, 0x82e4);
+        /* fall through */
+    case 0xa82e4:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
     case 0xa8309:
         world_acquire_resource(ram, actor, 0xe4);
         ram[actor + 0x2d] = 4;
@@ -19971,6 +19986,345 @@ stage2_jumper_terrain:
                 write_word(ram, actor + 0x40, index + 2);
             }
         }
+        break;
+    /* A000:994C..9AAB: the ending's first scene. A 9A6B picture (by the
+       bonus level 272) shows; after 50h ticks 9978 types the 9712 text
+       (rows 200h apart) into its layer, waits 60h, then lets the master
+       move on (word 86), or for level 3 clears the text and plays 17h. */
+    case 0xa994c: {
+        uint16_t picture = effect_slot(ram, actor, 0x9a6b);
+        if (picture != 0x8480) write_word(ram, picture + 2, 0xa000);
+        write_word(ram, actor + 0x42, 0x50);
+        write_word(ram, actor, 0x9961);
+    }
+        /* fall through */
+    case 0xa9961:
+        if (!decrement(ram, actor + 0x42)) {
+            uint16_t typer = effect_slot(ram, actor, 0x9978);
+            if (typer != 0x8480) write_word(ram, typer + 2, 0xa000);
+            write_word(ram, actor, 0x9977);
+        }
+        break;
+    case 0xa9977:
+        break;
+    case 0xa9978: {
+        if (!tiles) return 0;
+        const uint8_t *bank = main_rom + 0xa0000;
+        uint16_t level = 2 * (read_word(ram, 0x272) & 3);
+        write_word(ram, actor + 0x54, read_word(bank, (uint16_t)(0x98f8 + level)));
+        write_word(ram, actor + 0x56, read_word(bank, (uint16_t)(0x9712 + level)));
+        write_word(ram, 0x84, read_word(bank, (uint16_t)(0x9908 + level)));
+        uint16_t start = level == 6 ? 0x1a48 : 0x2548;
+        write_word(ram, actor + 0x50, start);
+        write_word(ram, actor + 0x52, start);
+        write_word(ram, actor + 0x42, 1);
+        write_word(ram, actor + 0x4a, level == 6 ? 3 : 6);
+        write_word(ram, actor, 0x99d4);
+    }
+        /* fall through */
+    case 0xa99d4: {
+        if (!tiles) return 0;
+        if (decrement(ram, actor + 0x42)) break;
+        const uint8_t *bank = main_rom + 0xa0000;
+        uint32_t layer = (uint32_t)(uint16_t)(read_word(ram, actor + 0x54) - 0xd000) << 4;
+        uint8_t letter = bank[read_word(ram, actor + 0x56)];
+        if (letter == 0xff) {
+            uint16_t line = (read_word(ram, actor + 0x52) + 0x200) & 0x3fff;
+            write_word(ram, actor + 0x50, line);
+            write_word(ram, actor + 0x52, line);
+            write_word(ram, actor + 0x56, read_word(ram, actor + 0x56) + 1);
+            letter = bank[read_word(ram, actor + 0x56)];
+            if (letter == 0xff) {
+                write_word(ram, actor + 0x42, 0x60);
+                write_word(ram, actor, 0x9a2c);
+                break;
+            }
+        }
+        uint16_t cell = read_word(ram, actor + 0x50);
+        write_word(tiles, (uint16_t)(layer + cell), letter);
+        write_word(tiles, (uint16_t)(layer + (uint16_t)(cell + 2)), 0x104);
+        write_word(ram, actor + 0x56, read_word(ram, actor + 0x56) + 1);
+        write_word(ram, actor + 0x50, cell + 4);
+        write_word(ram, actor + 0x42, read_word(ram, actor + 0x4a));
+        break;
+    }
+    case 0xa9a2c:
+        if (decrement(ram, actor + 0x42)) break;
+        if (read_word(ram, 0x272) != 3)
+            write_word(ram, 0x86, 0x80);
+        else {
+            if (!tiles) return 0;
+            memset(tiles, 0, 0x4000);                         /* 0:37BB with D000 */
+            world_queue_sound(ram, 0x17);
+            ram[0x26f] &= 0x7f;
+        }
+        finish_animation(ram, actor);
+        break;
+    case 0xa9a6b: {
+        const uint8_t *bank = main_rom + 0xa0000;
+        uint16_t level = read_word(ram, 0x272) & 3;
+        ram[actor + 0x2c] = (uint8_t)(bank[(uint16_t)(0x96f6 + level)] + ((read_word(ram, 0x264) & 2) >> 1));
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x96fa + 2 * level)));
+        write_word(ram, actor + 0x21, read_word(bank, (uint16_t)(0x9702 + 2 * level)));
+        write_word(ram, actor + 0x24, read_word(bank, (uint16_t)(0x970a + 2 * level)));
+        write_word(ram, actor, 0x9aa6);
+    }
+        /* fall through */
+    case 0xa9aa6:
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    /* 0:9716..9857: the ending submarine. It takes the 8C99 palette by
+       player and jumps to its scene (8C9B by bonus level 272): 974D or
+       977B sail a 8D0D / 8DA3 path, leaving 7F73 wake behind; 9858 retires. */
+    case 0x9716: {
+        ram[actor + 0x2d] = 8;
+        write_word(ram, actor + 0x2a, 0x0e42);
+        ram[actor + 0x2c] = main_rom[0x8c99 + ((read_word(ram, 0x264) & 2) >> 1)];
+        uint16_t level = (read_word(ram, 0x272) & 3) << 2;
+        write_word(ram, actor, read_word(main_rom, (uint16_t)(0x8c9b + level)));
+        write_word(ram, actor + 2, read_word(main_rom, (uint16_t)(0x8c9d + level)));
+        break;
+    }
+    case 0x974d:
+    case 0x977b:
+        if (address == 0x977b) ram[actor + 0x29] = 1;
+        write_word(ram, actor + 0x21, 0x100);
+        write_word(ram, actor + 0x24, address == 0x977b ? 0xd0 : 0xe8);
+        write_word(ram, actor + 0x64, 2);
+        write_word(ram, actor + 0x56, 4);
+        write_word(ram, 0xa2, address == 0x977b ? 0xfef0 : 0x100);
+        if (address == 0x974d) ram[0x264] |= 4;
+        begin_linear_script(ram, main_rom, actor, address == 0x977b ? 0x8da3 : 0x8d0d);
+        write_word(ram, actor, 0x97a7);
+        break;
+    case 0x97a7: {
+        if (!step_flight_script(ram, main_rom, actor)) {
+            world_dispatch_detail = "ending submarine path script kind";
+            return 0;
+        }
+        if (s4_offscreen(ram, actor)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, main_rom, actor, 0);                 /* 0:0D8D */
+        uint16_t speed = read_word(ram, actor + 0x38);
+        if (ram[actor + 0x29] & 1) speed = -speed;
+        if ((int16_t)speed >= 1 && !decrement(ram, actor + 0x64)) {
+            write_word(ram, actor + 0x64, 6);
+            uint16_t wake = effect_slot(ram, actor, 0x7f73);
+            uint16_t at = 2 * read_word(ram, actor + 0x56);
+            uint16_t dx = read_word(main_rom, (uint16_t)(0x78b3 + at));
+            ram[wake + 0x29] = ram[actor + 0x29];
+            if (ram[actor + 0x29] & 1) dx = -dx;
+            write_word(ram, wake + 0x21, read_word(ram, actor + 0x21) + dx);
+            write_word(ram, wake + 0x24, read_word(ram, actor + 0x24) + read_word(main_rom, (uint16_t)(0x78b5 + at)));
+            write_word(ram, wake + 0x7c, actor);
+        }
+        break;
+    }
+    case 0x9858:
+        finish_animation(ram, actor);
+        break;
+    /* 0:9285: a bubble vent on the ending scenery; 0:92E6 emits 93A0
+       bubbles in bursts (50 first delay, 54/56 spacing, 58/5A count, 52
+       pause) at the parent's (31, 34). */
+    case 0x9285: {
+        uint16_t vent = effect_slot(ram, actor, 0x92e6);
+        write_word(ram, vent + 0x10, read_word(main_rom, (uint16_t)(0x8edd + (read_word(ram, actor + 0x1e) & 2))));
+        ram[vent + 0x2d] = 0x1f;
+        write_word(ram, vent + 0x50, 0x10);
+        write_word(ram, vent + 0x54, 0x40);
+        write_word(ram, vent + 0x56, 0x40);
+        write_word(ram, vent + 0x5a, 1);
+        write_word(ram, vent + 0x3a, 0);
+        write_word(ram, vent + 0x5c, 4);
+        write_word(ram, actor, 0x92c7);
+        break;
+    }
+    case 0x92c7:
+        scroll_actor(ram, actor, 0xb71a);
+        if (read_word(ram, actor + 0x21) < 0x40) finish_animation(ram, actor);
+        break;
+    case 0x92e6:
+        world_acquire_resource(ram, actor, read_word(ram, actor + 0x10));
+        write_word(ram, actor, 0x92f3);
+        /* fall through */
+    case 0x92f3: {
+        if (read_word(ram, actor + 0x50)) {
+            if (decrement(ram, actor + 0x50)) break;
+            write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
+        } else {
+            if (decrement(ram, actor + 0x54)) break;
+            write_word(ram, actor + 0x54, read_word(ram, actor + 0x56));
+            if (!decrement(ram, actor + 0x58)) write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+        }
+        uint16_t bubble = effect_slot(ram, actor, 0x93a0);
+        uint16_t parent = s5_parent(ram, actor);
+        uint16_t dx = read_word(ram, actor + 0x31);
+        if (ram[actor + 0x29] & 1) dx = -dx;
+        write_word(ram, bubble + 0x21, read_word(ram, parent + 0x21) + dx);
+        write_word(ram, bubble + 0x24, read_word(ram, parent + 0x24) + read_word(ram, actor + 0x34));
+        ram[bubble + 0x2c] = ram[actor + 0x2c];
+        ram[bubble + 0x2d] = ram[actor + 0x2d];
+        write_word(ram, bubble + 0x3a, read_word(ram, actor + 0x3a));
+        write_word(ram, bubble + 0x5c, read_word(ram, actor + 0x5c));
+        write_word(ram, bubble + 0x40, 0);
+        write_word(ram, bubble + 0x60, 1);
+        break;
+    }
+    /* A000:9CDD: ending debris; every 10h ticks (first 40h) a 1000:F4A9
+       fragment falls from a random x until B700 reaches C80h. */
+    case 0xa9cdd:
+        write_word(ram, actor + 0x42, 0x40);
+        write_word(ram, actor, 0x9ce7);
+        /* fall through */
+    case 0xa9ce7:
+        if (read_word(ram, 0xb700) >= 0xc80) {
+            finish_animation(ram, actor);
+            break;
+        }
+        if (!decrement(ram, actor + 0x42)) {
+            uint16_t piece = effect_slot(ram, actor, 0xf4a9);
+            if (piece != 0x8480) write_word(ram, piece + 2, 0x1000);
+            uint16_t x = (world_random_byte(ram) & 0xff) + 0x80;
+            x += world_random_byte(ram) & 0x3f;
+            write_word(ram, piece + 0x21, x);
+            write_word(ram, piece + 0x24, 0x180);
+            write_word(ram, piece + 0x1e, world_random_byte(ram) & 7);
+            ram[piece + 0x28] = (uint8_t)((world_random_byte(ram) & 7) + 0xbc);
+            write_word(ram, piece + 0x2e, (world_random_byte(ram) & 0xf0) << 1);
+            write_word(ram, actor + 0x42, 0x10);
+        }
+        break;
+    /* A000:9D63: queue one ending palette job (9932 by word 1E) and retire. */
+    case 0xa9d63: {
+        uint16_t kind = read_word(ram, actor + 0x1e) & 6;
+        const uint8_t *bank = main_rom + 0xa0000;
+        if (!(read_word(ram, 0x262) & 0x8800))
+            s4b_job(ram, 8 * (bank[(uint16_t)(0x993e + kind)] & 0x3f), read_word(bank, (uint16_t)(0x9932 + kind)),
+                    read_word(bank, (uint16_t)(0x9938 + kind)));
+        finish_animation(ram, actor);
+        break;
+    }
+    /* A000:9C1F: ending scenery sprite riding the far layer (9912 frames by
+       word 1E bit 4, palette 9910 by bonus level, layer by byte 1F). */
+    case 0xa9c1f: {
+        const uint8_t *bank = main_rom + 0xa0000;
+        ram[actor + 0x2c] = bank[(uint16_t)(0x9910 + (read_word(ram, 0x272) & 1))];
+        write_word(ram, actor + 0x44, 1);
+        ram[actor + 0x2d] = ram[actor + 0x1f];
+        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x9912 + (read_word(ram, actor + 0x1e) & 0x10))));
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x24));
+        write_word(ram, actor, 0x9c54);
+    }
+        /* fall through */
+    case 0xa9c54:
+        scroll_actor(ram, actor, 0xb71a);
+        write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) & 0x1ff);
+        write_word(ram, actor + 0x24, read_word(ram, 0xb70c) + read_word(ram, actor + 0x34));
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(main_rom + 0xa0000,
+                (uint16_t)(0x9912 + (index & 0x0e) + (read_word(ram, actor + 0x1e) & 0x10))));
+            write_word(ram, actor + 0x44, 8);
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    /* A000:9C91: lifts the ending lake (B8CA = 800h) by retinting the
+       rows from 1600h on both layers, then retires. */
+    case 0xa9c91:
+        if (!tiles) return 0;
+        write_word(ram, 0xb8ca, 0x800);
+        for (unsigned i = 0; i < 0x200; ++i) {
+            uint16_t at = 0x8000 + (uint16_t)(0x1600 + 4 * i + 2);
+            write_word(tiles, at, read_word(tiles, at) - 1);
+        }
+        for (unsigned i = 0; i < 0x80; ++i) {
+            uint16_t at = 0x4000 + (uint16_t)(0x1600 + 4 * i + 2);
+            write_word(tiles, at, (read_word(tiles, at) & 0x7ff) | 0x2000);
+        }
+        finish_animation(ram, actor);
+        break;
+    /* A000:9BE4: a picture held for 80h ticks. */
+    case 0xa9be4:
+        ram[actor + 0x2c] = 5;
+        write_word(ram, actor + 0x2a, 0xa4e3);
+        write_word(ram, actor + 0x42, 0x80);
+        write_word(ram, actor + 0x21, 0x100);
+        write_word(ram, actor + 0x24, 0x104);
+        write_word(ram, actor, 0x9c01);
+        /* fall through */
+    case 0xa9c01:
+        queue_sprite(ram, main_rom, actor, 0);
+        if (!decrement(ram, actor + 0x42)) finish_animation(ram, actor);
+        break;
+    /* 0:990B: ending scenery (8EC5 frame, 8ECD resource by word 1E). */
+    case 0x990b: {
+        uint16_t kind = read_word(ram, actor + 0x1e) & 6;
+        write_word(ram, actor + 0x2a, read_word(main_rom, (uint16_t)(0x8ec5 + kind)));
+        world_acquire_resource(ram, actor, read_word(main_rom, (uint16_t)(0x8ecd + kind)));
+        ram[actor + 0x2d] = 0x20;
+        ram[actor + 0x29] = ram[actor + 0x1f];
+        write_word(ram, actor + 0x3c, 0xfb4b);
+        write_word(ram, actor, 0x9900);
+        break;
+    }
+    /* 0:986C: an ending diver figure with its own bubble vent. */
+    case 0x986c: {
+        uint16_t side = read_word(ram, 0x264) & 2;
+        uint8_t slot = main_rom[0x8c99 + (side >> 1)];
+        ram[actor + 0x2c] = slot;
+        uint16_t job = 0x9e06 + 8 * slot;
+        write_word(ram, job, read_word(main_rom, (uint16_t)(0x78cf + side)));
+        write_word(ram, job + 2, 0x80);
+        write_word(ram, job + 4, 0x85);
+        write_word(ram, job + 6, 0x20);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x2a, 0x45d9);
+        uint16_t vent = effect_slot(ram, actor, 0x92e6);
+        ram[vent + 0x29] = ram[actor + 0x29];
+        write_word(ram, vent + 0x10, 0x8d);
+        ram[vent + 0x2d] = 0x1f;
+        write_word(ram, vent + 0x50, 0x10);
+        write_word(ram, vent + 0x52, 0x80);
+        write_word(ram, vent + 0x54, 4);
+        write_word(ram, vent + 0x56, 0x0c);
+        write_word(ram, vent + 0x5a, 0);
+        write_word(ram, vent + 0x31, 4);
+        write_word(ram, vent + 0x34, 0xfffc);
+        write_word(ram, vent + 0x3a, 0x80);
+        write_word(ram, vent + 0x5c, 3);
+        write_word(ram, actor, 0x9900);
+        break;
+    }
+    case 0x9900:
+        scroll_actor(ram, actor, 0xb71a);
+        queue_sprite(ram, main_rom, actor, 0);
+        break;
+    /* 0:9377: a rising ending bubble (9A93 frames, 16 steps). */
+    case 0x9377:
+        world_acquire_resource(ram, actor, read_word(main_rom, (uint16_t)(0x8edd + (read_word(ram, actor + 0x1e) & 2))));
+        ram[actor + 0x2d] = 0x21;
+        write_word(ram, actor + 0x3a, 0x40);
+        write_word(ram, actor + 0x60, 1);
+        write_word(ram, actor + 0x5c, 2);
+        write_word(ram, actor, 0x93a0);
+        /* fall through */
+    case 0x93a0:
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (!decrement(ram, actor + 0x60)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(main_rom, (uint16_t)(0x9a93 + index)));
+            write_word(ram, actor + 0x60, read_word(ram, actor + 0x5c));
+            write_word(ram, actor + 0x40, index + 2);
+            if (index + 2 >= 0x20) {
+                finish_animation(ram, actor);
+                break;
+            }
+        }
+        queue_sprite(ram, main_rom, actor, 0);
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
@@ -23312,6 +23666,27 @@ stage2_jumper_terrain:
         break;
     case 0x1a39:
         break;
+    /* 0:1A50 / 0:1AF7: the ending scene list heads. */
+    case 0x1a50: {
+        uint16_t scene = effect_slot(ram, actor, 0x994c);
+        if (scene != 0x8480) write_word(ram, scene + 2, 0xa000);
+        write_word(ram, actor, 0x1a65);
+        write_word(ram, actor + 2, 0);
+        break;
+    }
+    case 0x1a65:
+        break;
+    case 0x1af7: {
+        uint16_t child = effect_slot(ram, actor, 0x5d98);
+        if (child != 0x8480) write_word(ram, child + 2, 0x1000);
+        write_word(ram, 0x98, child);
+        static const uint16_t parts[4] = {0x3f11, 0x3ad7, 0x3bfa, 0x57e3};
+        for (unsigned i = 0; i < 4; ++i) effect_slot(ram, actor, parts[i]);
+        write_word(ram, 0x90, effect_slot(ram, actor, 0x9716));
+        write_word(ram, actor, 0x1b4b);
+        write_word(ram, actor + 2, 0);
+        break;
+    }
     case 0x1a3a:
         effect_slot(ram, actor, 0xcccb);
         write_word(ram, actor, 0x1a4f);
@@ -23368,6 +23743,133 @@ stage2_jumper_terrain:
         int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
         uint16_t row = read_word(ram, actor + 0x40);
         update_layer_scroll(ram, main_rom, actor);
+        if (script) leave_si(row + 0x0e);
+        else keep_si();
+        break;
+    }
+    /* 0:41F6: the ending camera scrolls 1.25 px a frame and shakes the
+       near layer by a pixel (B70A/B70C), then runs its script (4621). */
+    case 0x41f6: {
+        if (read_word(ram, 0x2a2) && (read_word(ram, 0x2a8) & 8)) {
+            world_dispatch_detail = "debug display 0:46D9";
+            return 0;
+        }
+        uint16_t old = read_word(ram, actor + 0x52);
+        write_word(ram, actor + 0x5a, old);
+        move_actor_axis(ram, actor + 0x51, 0x140);
+        uint16_t delta = read_word(ram, actor + 0x52) - old;
+        write_word(ram, 0xb700, read_word(ram, 0xb700) + delta);
+        write_word(ram, 0xb71a, -delta);
+        write_word(ram, 0xb72a, -delta);
+        write_word(ram, 0xb726, -delta);
+        write_word(ram, 0xb70a, read_word(ram, actor + 0x52) + (world_random_byte(ram) & 2) - 1);
+        write_word(ram, 0xb70c, (world_random_byte(ram) & 1) - 1);
+        uint16_t row = read_word(ram, actor + 0x40);
+        int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
+        advance_scroll_script(ram, main_rom, actor);
+        if (script) leave_si(row + 0x0e);
+        else keep_si();
+        break;
+    }
+    /* 0:558F..56AE: the staff roll. It scrolls the near layer one line per
+       carry of 3A += 38 (speed by bonus level, 340h0000h / 5587 entry);
+       every byte-44 lines it clears two rows and prints the next 5055
+       text row with 0:5F4A (small) or 0:5FC6 (large, when the spacing is
+       10h). Spacing FDh ends it: sound 22h, then word 86 after B4h ticks. */
+    case 0x558f: {
+        if (ram[0x26f] & 0x80) break;
+        acquire_private_palette(ram, actor, 0x101);
+        ram[actor + 0x48] = ram[actor + 0x2c];
+        acquire_private_palette(ram, actor, 0x107);
+        ram[actor + 0x49] = ram[actor + 0x2c];
+        write_word(ram, actor + 0x40, 0x2f30);
+        write_word(ram, actor + 0x42, 0x5055);
+        ram[actor + 0x44] = 8;
+        ram[actor + 0x46] = 8;
+        uint16_t divisor = read_word(main_rom, (uint16_t)(0x5587 + 2 * read_word(ram, 0x272)));
+        if (!divisor || (0x3400000u / divisor) > 0xffff) {
+            world_dispatch_detail = "staff roll DIVU overflow";
+            return 0;
+        }
+        write_word(ram, actor + 0x38, (uint16_t)(0x3400000u / divisor));
+        write_word(ram, actor, 0x55df);
+    }
+        /* fall through */
+    case 0x55df: {
+        if (!tiles) return 0;
+        uint32_t sum = (uint32_t)read_word(ram, actor + 0x3a) + read_word(ram, actor + 0x38);
+        write_word(ram, actor + 0x3a, (uint16_t)sum);
+        if (!(sum >> 16)) break;
+        write_word(ram, 0xb708, (read_word(ram, 0xb708) + 1) & 0x1ff);
+        if (--ram[actor + 0x44]) break;
+        uint16_t text = read_word(ram, actor + 0x42);
+        if (main_rom[text] >= 8) {
+            ram[actor + 0x46] = main_rom[text];
+            write_word(ram, actor + 0x42, ++text);
+        }
+        ram[actor + 0x44] = ram[actor + 0x46];
+        if (ram[actor + 0x46] == 0xfd) {
+            write_word(ram, actor + 0x6c, 0xb4);
+            world_queue_sound(ram, 0x22);
+            write_word(ram, actor, 0x56a3);
+            break;
+        }
+        ram[actor + 0x41] = (ram[actor + 0x41] + 1) & 0x3f;
+        uint32_t layer = (uint32_t)(uint16_t)(read_word(ram, actor + 0x60) - 0xd000) << 4;
+        for (unsigned pass = 0; pass < 2; ++pass) {
+            uint16_t cell = read_word(ram, actor + 0x40);
+            if (pass) cell = (uint16_t)((((cell >> 8) + 1) & 0x3f) << 8) | (cell & 0xff);
+            for (unsigned i = 0; i < 0x28; ++i) {
+                write_word(tiles, (uint16_t)(layer + cell), 0);
+                write_word(tiles, (uint16_t)(layer + (uint16_t)(cell + 2)), 0);
+                cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+            }
+        }
+        uint16_t cell = read_word(ram, actor + 0x40);
+        do {
+            uint16_t colour = 0x100 | ram[actor + 0x48 + (main_rom[text] & 3)];
+            ++text;
+            int large = ram[actor + 0x46] == 0x10;
+            for (; main_rom[text] != 0xff; ++text) {
+                if (!large) {                                           /* 0:5F4A */
+                    write_word(tiles, cell, main_rom[text]);
+                    write_word(tiles, (uint16_t)(cell + 2), colour);
+                    cell = (cell & 0xff00) | (uint8_t)(cell + 4);
+                } else {                                                /* 0:5FC6 */
+                    uint16_t glyph = (uint16_t)((main_rom[text] - 0x30) * 4 + 0x100);
+                    uint16_t at = cell;
+                    for (unsigned k = 0; k < 4; ++k) {
+                        write_word(tiles, at, glyph + k);
+                        write_word(tiles, (uint16_t)(at + 2), colour);
+                        if (k == 0 || k == 2) at = (at & 0xff00) | (uint8_t)(at + 4);
+                        else if (k == 1) {
+                            at = (at & 0xff00) | (uint8_t)(at - 4);
+                            at = (uint16_t)(at + 0x100) & 0x3fff;
+                        }
+                    }
+                    cell = (cell & 0xff00) | (uint8_t)(cell + 8);
+                }
+            }
+            ++text;
+        } while (main_rom[text] != 0xfe);
+        write_word(ram, actor + 0x42, text + 1);
+        if (ram[actor + 0x46] == 0x10) ram[actor + 0x41] = (ram[actor + 0x41] + 1) & 0x3f;
+        break;
+    }
+    case 0x56a3:
+        if (!decrement(ram, actor + 0x6c)) write_word(ram, 0x86, 1);
+        break;
+    /* 0:424C: the ending far layer at half the 41F6 speed. */
+    case 0x424c: {
+        uint16_t old = read_word(ram, actor + 0x52);
+        write_word(ram, actor + 0x5a, old);
+        move_actor_axis(ram, actor + 0x51, 0xa0);
+        write_word(ram, 0xb70e, read_word(ram, actor + 0x52));
+        write_word(ram, 0xb71e, old - read_word(ram, actor + 0x52));
+        write_word(ram, 0xb710, read_word(ram, 0xb70c));
+        uint16_t row = read_word(ram, actor + 0x40);
+        int script = (int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700);
+        advance_scroll_script(ram, main_rom, actor);
         if (script) leave_si(row + 0x0e);
         else keep_si();
         break;
