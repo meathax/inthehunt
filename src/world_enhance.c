@@ -183,7 +183,7 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
                     ridge = ridge * ridge >> 8;
                     ridge = ridge * ridge >> 8;
                     int fade = depth < 300 ? 300 - depth : 0;
-                    int add = ridge * w * fade / (255 * 300) * 7 / 10;   /* 70 percent strength */
+                    int add = ridge * w * fade / (255 * 300) * 7 / 20;   /* 35 percent of the original strength */
                     r += add * 50 >> 8; g += add * 95 >> 8; b += add * 105 >> 8;
                 }
             }
