@@ -13152,6 +13152,177 @@ static int stage_four_eel(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint
     return 0;
 }
 
+/* 0:675C: y (23..25) = base (33..35) + sine((x - dw) * bw >> 8) * cw. */
+static void s4_sine_bob(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t bw, uint16_t cw, uint16_t dw)
+{
+    uint32_t product = (uint32_t)(uint16_t)(read_word(ram, actor + 0x21) - dw) * bw;
+    unsigned index = (product >> 8) & 0xff;
+    int32_t wave = (int32_t)(int16_t)read_word(rom + 0xa0000, (uint16_t)(0x9d92 + 2 * index)) * (int16_t)cw;
+    uint32_t height = (ram[actor + 0x33] | ((uint32_t)read_word(ram, actor + 0x34) << 8)) + (uint32_t)wave;
+    ram[actor + 0x23] = (uint8_t)height;
+    write_word(ram, actor + 0x24, (uint16_t)(height >> 8));
+}
+
+/* 0:D3FE-style box test with the box at IX (D3F8: FB3B). */
+static int s4_near_box(const uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t box)
+{
+    for (unsigned i = 0; i < 2; ++i) {
+        if (!(ram[0x264] & (1u << i))) continue;
+        uint16_t player = read_word(ram, 0x90 + 2 * i);
+        uint16_t dx = read_word(ram, actor + 0x21) + read_word(rom, box) - read_word(ram, player + 0x21);
+        if (dx & 0x8000) dx = -dx;
+        if (dx >= read_word(rom, (uint16_t)(box + 4))) continue;
+        uint16_t dy = read_word(ram, actor + 0x24) + read_word(rom, (uint16_t)(box + 2)) - read_word(ram, player + 0x24);
+        if (dy & 0x8000) dy = -dy;
+        if (dy < read_word(rom, (uint16_t)(box + 6))) return 1;
+    }
+    return 0;
+}
+
+/* B000:C7F8..CA9B: a stage-four drifter that bobs on a sine wave while
+   sliding left, and fires a C97B shot at whichever player just fired
+   (B8A2) unless one is inside its box. */
+static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, uint16_t actor, uint32_t address)
+{
+    const uint8_t *bank = rom + 0xb0000;
+    switch (address) {
+    case 0xbc7f8: {
+        world_acquire_resource(ram, actor, 0x47);
+        world_acquire_resource(ram, actor, 0x46);
+        write_word(ram, actor + 0x0e, 0x17);
+        ram[actor + 0x2d] = 0x20;
+        write_word(ram, actor + 0x3c, 0xf613);
+        write_word(ram, actor + 0x26, 0x60);
+        write_word(ram, actor + 0x36, 0x20);
+        uint16_t row = read_word(bank, (uint16_t)(0xc7a8 + (read_word(ram, actor + 0x1e) & 0x20) + read_word(ram, 0x88)));
+        write_word(ram, actor + 0x52, read_word(bank, (uint16_t)(0xc7e8 + row)));
+        write_word(ram, actor + 0x54, read_word(bank, (uint16_t)(0xc7ea + row)));
+        write_word(ram, actor + 0x50, 0x10);
+        write_word(ram, actor + 0x46, 0x10);
+        write_word(ram, actor + 0x48, 0x100);
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x21));
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x24));
+        write_word(ram, actor + 0x38, 0xff80);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0xc86b);
+        return 1;
+    }
+    case 0xbc86b: {
+        write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));   /* 0:435F */
+        write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
+        write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + read_word(ram, 0xb71a));
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        s4_sine_bob(ram, rom, actor, read_word(ram, actor + 0x48), read_word(ram, actor + 0x46), read_word(ram, actor + 0x31));
+        if (read_word(ram, actor + 0x21) < 0x40) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xc790 + (index & 6))));
+            write_word(ram, actor + 0x44, 4);
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        if (!queue_sprite(ram, rom, actor, 1)) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!s4_near_box(ram, rom, actor, 0xfb3b) && read_word(ram, actor + 0x21) >= 0x60) {
+            if (read_word(ram, actor + 0x50))
+                decrement(ram, actor + 0x50);
+            else if (read_word(ram, 0xb8a2) & 3) {
+                uint16_t target = read_word(ram, (read_word(ram, 0xb8a2) & 1) ? 0x90 : 0x92);
+                uint8_t angle = aim_angle(rom, read_word(ram, target + 0x21) - read_word(ram, actor + 0x21),
+                                          read_word(ram, target + 0x24) - read_word(ram, actor + 0x24));
+                ram[actor + 0x28] = (uint8_t)(angle + 8) & 0xf0;
+                uint16_t shot = world_spawn_child(ram, actor, 0xc97b);
+                if (shot) {
+                    write_word(ram, shot + 2, 0xb000);
+                    ram[shot + 0x2c] = ram[actor + 0x14];
+                    ram[shot + 0x28] = ram[actor + 0x28];
+                    write_word(ram, shot + 0x2e, read_word(ram, actor + 0x54));
+                    world_queue_sound(ram, 0x64);
+                }
+                write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+            }
+        }
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_player_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) {
+            ram[actor + 0x0d] = 0;
+            hit = world_projectile_contact(ram, rom, actor);
+            if (read_word(ram, actor + 0x26)) return 1;
+        }
+        if (!hit) {
+            world_dispatch_detail = "stage-four drifter destroyed without a hit; 6237 reads leftover BX";
+            return 0;
+        }
+        world_award_score(ram, rom, actor, hit);
+        spawn_kill_blast(ram, actor);
+        finish_animation(ram, actor);
+        return 1;
+    }
+    case 0xbc97b:
+        ram[actor + 0x2d] = 4;
+        write_word(ram, actor + 0x3c, 0xf61b);
+        s5_velocity(ram, rom, actor);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0xc993);
+        /* fall through */
+    case 0xbc993: {
+        uint16_t parent = s5_parent(ram, actor);
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        write_word(ram, actor + 0x24, read_word(ram, parent + 0x24));
+        if (decrement(ram, actor + 0x44)) {
+            if (!queue_sprite(ram, rom, actor, 0)) finish_animation(ram, actor);
+            return 1;
+        }
+        uint16_t index = read_word(ram, actor + 0x40);
+        uint16_t frame = read_word(bank, (uint16_t)(0xc798 + index));
+        if (frame != 0xffff) {
+            write_word(ram, actor + 0x2a, frame);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x40, index + 2);
+            if (!queue_sprite(ram, rom, actor, 0)) finish_animation(ram, actor);
+            return 1;
+        }
+        write_word(ram, actor + 0x40, 0);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0xc9e5);
+        goto drifter_shot_fly;
+    }
+    case 0xbc9e5:
+        scroll_actor(ram, actor, 0xb71a);
+    drifter_shot_fly: {
+        move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (s4_offscreen(ram, actor)) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t index = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xc7a0 + (index & 6))));
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x40, index + 2);
+        }
+        if (!queue_sprite(ram, rom, actor, 0)) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        if (world_terrain_mask(ram, terrain, x, y) & 0xff1a) {
+            finish_animation(ram, actor);
+            return 1;
+        }
+        ram[actor + 0x0d] = 2;
+        if (world_player_contact(ram, rom, actor)) finish_animation(ram, actor);
+        return 1;
+    }
+    }
+    return 0;
+}
+
 /* B000:1C16..2760: the stage-three trooper. It walks ledges (1C6F), turns
    at walls (1DF0), hops gaps (1EFE/1F69), falls (2028/2032) and lands
    (20DE), stopping to fire (1E33) a 21EA shell on land or a 2349 homing
@@ -16389,6 +16560,17 @@ stage2_jumper_terrain:
             int16_t gap = (int16_t)(read_word(ram, actor + 0x21) - read_word(ram, player + 0x21) - 0x3c);
             if (gap < 0) write_word(ram, player + 0x21, read_word(ram, player + 0x21) + gap);
         }
+        break;
+    case 0xbc7f8: case 0xbc86b: case 0xbc97b: case 0xbc993: case 0xbc9e5:
+        if (!tiles) return 0;
+        if (!stage_four_drifter(ram, main_rom, tiles + 0x4000, actor, address)) return 0;
+        break;
+    /* 7000:70E9 stamps the 2 x 1 block patch at 5124 onto the near layer
+       at word 1E and retires. */
+    case 0x770e9:
+        if (!tiles) return 0;
+        copy_tile_blocks(ram, tiles, main_rom, 0x4000, read_word(ram, actor + 0x1e), 0x5124, 0x201);
+        finish_animation(ram, actor);
         break;
     /* 1000:E6FE queues palette 1CB into slot 10h and retires. */
     case 0x1e6fe:
@@ -19790,6 +19972,12 @@ stage2_jumper_terrain:
         else keep_si();
         break;
     }
+    /* 0:411B: a parked camera; clears the far-layer step every frame. */
+    case 0x411b:
+        write_word(ram, 0xb716, 0);
+        write_word(ram, 0xb718, 0);
+        keep_si();
+        break;
     case 0x4138:
         /* Boss-arena camera: 450A vertical control only, no horizontal scroll.
            450A's 45C3/45F3 may load SI with a player, so SI is left unknown. */
