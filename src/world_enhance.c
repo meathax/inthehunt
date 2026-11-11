@@ -4,7 +4,7 @@
 
 enum { W = 320, H = 240, N = W * H, HUD = 224, LW = W / 8, LH = H / 8 };
 
-static int16_t sine[1024];          /* 256 * sin */
+static int16_t sine[8192];          /* 256 * sin, 8192 steps per turn */
 static uint8_t corner[N];           /* vignette multiplier, 255 = none */
 static int ready;
 static uint32_t history[N];
@@ -12,7 +12,7 @@ static int have_history;
 
 static void prepare(void)
 {
-    for (int i = 0; i < 1024; ++i) sine[i] = (int16_t)lrint(256.0 * sin(i * 6.283185307179586 / 1024.0));
+    for (int i = 0; i < 8192; ++i) sine[i] = (int16_t)lrint(256.0 * sin(i * 6.283185307179586 / 8192.0));
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             double dx = (x - 159.5) / 160.0, dy = (y - 119.5) / 120.0;
@@ -23,7 +23,8 @@ static void prepare(void)
     ready = 1;
 }
 
-static inline int S(int angle) { return sine[angle & 1023]; }
+static inline int S(int angle) { return sine[(angle * 8) & 8191]; }   /* 1024 steps per turn */
+static inline int F(int angle) { return sine[angle & 8191]; }         /* 8192 steps per turn */
 static inline int clamp255(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
 /* Box blur of one 16-bit plane, radius r, horizontally then vertically. */
@@ -56,13 +57,20 @@ static void blur(uint16_t *plane, int width, int height, int r)
 
 void world_enhance_reset(void) { have_history = 0; }
 
-void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *fx, uint32_t time_ms)
+static int waterline;                 /* screen row where water effects start */
+int world_enhance_waterline(void) { return waterline; }
+
+void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *fx,
+                         const WorldEnhanceScene *scene)
 {
     static uint32_t base[N];
     static uint8_t water[N];
     static uint16_t glow[3][N], lamp[3][LW * LH];
     if (!ready) prepare();
-    int T = (int)(time_ms / 12);                   /* animation phase */
+    uint32_t time_ms = scene->time / 8;
+    int T = (int)(time_ms / 12);                   /* coarse phase for the shimmer */
+    int Q = (int)(scene->time / 12);               /* the same clock in 1/8 steps */
+    int sx0 = scene->scroll_x, sy0 = scene->scroll_y;
 
     /* Refraction: rows of the playfield slide by up to one pixel. */
     if (fx->shimmer) {
@@ -87,6 +95,12 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
         int w = clamp255(blue) * (255 - lum) / 200;
         water[i] = i >= HUD * W ? 0 : (uint8_t)clamp255(w);
     }
+    waterline = scene->waterline < 0 ? 0 : scene->waterline > HUD ? HUD : scene->waterline;
+    for (int y = 0; y < waterline + 8 && y < HUD; ++y) {
+        int keep = y < waterline ? 0 : (y - waterline + 1) * 32;   /* fade in over eight rows */
+        for (int x = 0; x < W; ++x) water[y * W + x] = (uint8_t)(water[y * W + x] * keep >> 8);
+    }
+    int surface_world = scene->waterline + sy0;
 
     /* Bright pass for the bloom, and warm emitters for the dynamic lights. */
     if (fx->bloom) {
@@ -123,7 +137,10 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
     }
 
     for (int y = 0; y < H; ++y) {
-        int ray_fade = y < 190 ? 190 - y : 0;               /* shafts die out with depth */
+        int wy = y + sy0;                                    /* world row */
+        int depth = wy - surface_world;                      /* rows below the surface */
+        if (depth < 0) depth = 0;
+        int ray_fade = depth < 190 ? 190 - depth : 0;        /* shafts die out with depth */
         int ly = y - 4, cy = ly < 0 ? 0 : ly / 8, fy = ly < 0 ? 0 : ly & 7;
         int cy1 = cy + 1 < LH ? cy + 1 : LH - 1;
         for (int x = 0; x < W; ++x) {
@@ -132,9 +149,10 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
             int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
             int w = water[i];
 
+            int wx = x + sx0;                               /* world column, background layer */
             if (fx->depth && w) {
                 /* Deeper water loses red first, then green. */
-                int d = y * w / 255;                        /* 0..239 */
+                int d = (depth > 239 ? 239 : depth) * w / 255;   /* 0..239 */
                 r = r * (256 - d * 110 / 240) >> 8;
                 g = g * (256 - d * 60 / 240) >> 8;
                 b = b * (256 - d * 26 / 240) >> 8;
@@ -155,21 +173,23 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
                 b += (b + 40) * light[2] >> 9;
             }
             if (fx->caustics && w) {
-                int u = x * 27 + (S(y * 19 + T * 3) >> 1);
-                int v = y * 33 + (S(x * 23 - T * 2) >> 1);
-                int n = S(u + T * 2) + S(v - T * 3) + S((u + v) / 2 + T);
+                /* World-anchored: the network moves with the water, not the screen. */
+                int u = wx * 216 + (F(wy * 152 + Q * 3) >> 1) * 8;
+                int v = wy * 264 + (F(wx * 184 - Q * 2) >> 1) * 8;
+                int n = F(u + Q * 2) + F(v - Q * 3) + F((u + v) / 2 + Q);
                 if (n < 0) n = -n;
                 int ridge = 256 - n * 2 / 3;                   /* bright where the waves cancel */
                 if (ridge > 0) {
                     ridge = ridge * ridge >> 8;
                     ridge = ridge * ridge >> 8;
-                    int add = ridge * w * (300 - y) / (255 * 300);
+                    int fade = depth < 300 ? 300 - depth : 0;
+                    int add = ridge * w * fade / (255 * 300) * 7 / 10;   /* 70 percent strength */
                     r += add * 50 >> 8; g += add * 95 >> 8; b += add * 105 >> 8;
                 }
             }
             if (fx->rays && w && ray_fade) {
-                int s = x * 2 + y;
-                int n = S(s * 2 + T) + S(s * 5 - T * 2 + 300) + S(s + T / 2 + 700);
+                int s = (wx * 2 + wy) * 8;
+                int n = F(s * 2 + Q) + F(s * 5 - Q * 2 + 2400) + F(s + Q / 2 + 5600);
                 if (n > 60) {
                     int add = (n - 60) * ray_fade * w / (190 * 255);    /* 0..~700 */
                     r += add * 30 >> 8; g += add * 52 >> 8; b += add * 60 >> 8;
@@ -197,10 +217,13 @@ void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *
             unsigned h = k * 2654435761u;
             int layer = (int)(k & 1);
             unsigned speed = layer ? 9 : 5;
-            int x = (int)((h >> 8) % W) - (int)(time_ms * speed / 1000 % W) + (S((int)(time_ms / 9 + (h >> 4))) >> 6);
-            int y = (int)((h >> 18) % HUD) + (int)(time_ms * (speed + 2) / 1400 % HUD);
+            /* Particles live in the world: the far layer moves with the
+               background, the near one a little faster. */
+            int drift_x = layer ? sx0 * 3 / 2 : sx0, drift_y = layer ? sy0 * 3 / 2 : sy0;
+            int x = (int)((h >> 8) % W) - (int)(time_ms * speed / 1000 % W) + (S((int)(time_ms / 9 + (h >> 4))) >> 6) - drift_x;
+            int y = (int)((h >> 18) % HUD) + (int)(time_ms * (speed + 2) / 1400 % HUD) - drift_y;
             x = ((x % W) + W) % W;
-            y %= HUD;
+            y = ((y % HUD) + HUD) % HUD;
             int i = y * W + x;
             if (water[i] < 70) continue;
             uint32_t p = out[i];

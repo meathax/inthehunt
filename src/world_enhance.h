@@ -18,9 +18,21 @@ typedef struct {
     unsigned trails;     /* phosphor-style persistence behind bright objects */
 } WorldEnhance;
 
-/* in and out are 320x240 ARGB frames and may not alias. time_ms animates
- * the water effects. */
-void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *fx, uint32_t time_ms);
+/* Where the picture is in the game world, so the water effects stay fixed
+ * to the water as the camera moves. */
+typedef struct {
+    uint32_t time;       /* animation clock in 1/8 ms */
+    int scroll_x;        /* background layer horizontal scroll */
+    int scroll_y;        /* background layer vertical scroll */
+    int waterline;       /* screen row where the sea surface ends and the water
+                            begins; may be off screen (negative: all water) */
+} WorldEnhanceScene;
+
+/* in and out are 320x240 ARGB frames and may not alias. */
+void world_enhance_apply(const uint32_t *in, uint32_t *out, const WorldEnhance *fx,
+                         const WorldEnhanceScene *scene);
 /* Forget the persistence history (after a pause or a scene cut). */
 void world_enhance_reset(void);
+/* The screen row where water effects began in the last frame, for tests. */
+int world_enhance_waterline(void);
 #endif

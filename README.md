@@ -53,7 +53,7 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
 
 Settings are saved when the menu closes. Esc no longer quits the game outright.
 
-**About the FPS limit.** The game advances exactly one board frame per picture, as the arcade did, so there are no in-between frames to draw. A limit above Arcade therefore runs the game proportionally faster (a fast-forward), and sound is muted while it is active. Arcade is the correct setting for normal play.
+**About the FPS limit.** The game always runs at the board's 60.01 Hz with sound. The limit only sets how often the picture is redrawn: above Arcade, the same game frame is shown again with the enhancement animation (caustics, light shafts, snow) moved on, so the water moves more smoothly on high-refresh displays. Uncapped redraws as fast as possible, paced by V-Sync if that is on.
 
 ### Enhancements
 
@@ -73,7 +73,7 @@ The **Enhance** tab adds effects the arcade board never had. They are a post-pro
 | Motion trails | Phosphor-style persistence behind bright objects |
 | Scanlines | CRT beam lines (integer scaling, ×2 and up) |
 
-The master switch is off by default. Water is recognised by colour (blue-dominant, not bright), so the water effects can also touch other dark blue scenery and can miss water of an unusual colour; the HUD strip is always left alone.
+The master switch is off by default. The water effects start at the sea surface, which comes from the game's own row-scroll programme for the background layer (the first rippled row), and are anchored to the background layer's scroll so they move with the water. Within the water, pixels are recognised by colour (blue-dominant, not bright), so the effects can also touch other dark blue scenery below the surface; the HUD strip is always left alone. `tools/test_enhance.c` checks the scroll anchoring and that nothing above the waterline changes.
 
 ### Border art
 

@@ -72,15 +72,47 @@ static void menu_borders(const char *dir)
 }
 
 static uint32_t shown[320 * 240];      /* the frame as presented: enhancements and overlays */
-static int fast_forward;               /* above the arcade rate the sound is not queued */
 static unsigned shown_fps, shown_speed;
+static unsigned word(const uint8_t *p);
+
+/* The sea surface on screen. The game ripples the background layer below
+ * the surface with row scroll (0:FC1B, world_frame_rowscroll): when that is
+ * on, the first rippled tilemap row is the waterline, which lands on screen
+ * at that row minus the layer's vertical scroll. Without the ripple there is
+ * no surface in view and the whole picture is treated as water. */
+static int waterline_row(void)
+{
+    if (!(ram[0x292] & 4)) return -1;
+    int row;
+    switch (ram[0x298] & 14) {
+    case 0: row = 112; break;
+    case 2: row = 168; break;
+    case 8: {
+        unsigned shift = (word(ram + 0xb8ca) << 3) & 0xffff;
+        row = (int)((104 - (((shift >> 8) | (shift << 8)) & 0xffff)) & 0x1ff);
+        break;
+    }
+    default: return -1;                         /* 6: rippled from the top */
+    }
+    int y = (row - (int)word(ram + 0xb710)) & 0x1ff;   /* the layer is 512 rows */
+    return y >= 256 ? y - 512 : y;
+}
+
+/* Animation clock for the enhancements, in 1/8 ms. */
+static uint32_t effect_clock(void)
+{
+    LARGE_INTEGER counter, frequency;
+    QueryPerformanceCounter(&counter);
+    QueryPerformanceFrequency(&frequency);
+    return (uint32_t)((unsigned long long)counter.QuadPart * 8000ull / (unsigned long long)frequency.QuadPart);
+}
 
 static void apply_view(void)
 {
     world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines, (int)settings.vsync);
 }
 
-static void enhance(const uint32_t *source, uint32_t *target, uint32_t time_ms)
+static void enhance(const uint32_t *source, uint32_t *target, uint32_t time)
 {
     if (!settings.fx_enable) {
         memcpy(target, source, sizeof shown);
@@ -98,14 +130,19 @@ static void enhance(const uint32_t *source, uint32_t *target, uint32_t time_ms)
     fx.vivid = settings.fx_vivid;
     fx.vignette = settings.fx_vignette;
     fx.trails = settings.fx_trails;
-    world_enhance_apply(source, target, &fx, time_ms);
+    WorldEnhanceScene scene;
+    scene.time = time;
+    scene.scroll_x = word(ram + 0xb70e);           /* background layer x */
+    scene.scroll_y = word(ram + 0xb710);           /* background layer y */
+    scene.waterline = waterline_row();
+    world_enhance_apply(source, target, &fx, &scene);
 }
 
 /* Presents a game frame through the enhancement pass, with the optional
  * frame-rate readout in the top right corner. */
 static void present_game(const uint32_t *source)
 {
-    enhance(source, shown, GetTickCount());
+    enhance(source, shown, effect_clock());
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
@@ -236,7 +273,7 @@ static void sound_frame(void)
             world_audio_tick(sound_state, sound_rom, &sound_bus);
         }
     }
-    if (sound_device && !fast_forward && !world_audio_output_submit(output, frames)) {
+    if (sound_device && !world_audio_output_submit(output, frames)) {
         fprintf(stderr, "Windows audio output stopped.\n");
         world_audio_output_close();
         sound_device = 0;
@@ -502,7 +539,7 @@ static void headless_run(const char *dir, const char *script_path)
                 settings.fx_shimmer = all || i == 5;  settings.fx_depth = all || i == 6;
                 settings.fx_snow = all || i == 7;     settings.fx_vivid = all || i == 8;
                 settings.fx_vignette = all || i == 9; settings.fx_trails = 0;
-                enhance(pixels, shown, (uint32_t)(ticks * 17 + (i == 11 ? 700 : 0)));
+                enhance(pixels, shown, (uint32_t)(ticks * 133 + (i == 11 ? 5600 : 0)));
                 char name[32];
                 snprintf(name, sizeof name, "fx-%s", names[i]);
                 shot_source = shown;
@@ -592,7 +629,29 @@ static void headless_run(const char *dir, const char *script_path)
         if (shot) {
             char name[32];
             snprintf(name, sizeof name, "%06lu", ticks);
+            /* WORLD_FX_SHOTS=1 saves every shot with the water effects on. */
+            int with_fx = getenv("WORLD_FX_SHOTS") != NULL;
+            if (with_fx) {
+                WorldSettings keep = settings;
+                settings.fx_enable = settings.fx_caustics = settings.fx_rays = settings.fx_depth = 1;
+                settings.fx_lights = settings.fx_bloom = settings.fx_snow = settings.fx_shimmer = 0;
+                settings.fx_vivid = settings.fx_vignette = settings.fx_trails = 0;
+                enhance(pixels, shown, (uint32_t)(ticks * 133));
+                settings = keep;
+                shot_source = shown;
+            }
             headless_shot(dir, name);
+            shot_source = pixels;
+            char log_path[4096];
+            snprintf(log_path, sizeof log_path, "%s/headless-scroll.txt", dir);
+            FILE *log = fopen(log_path, "a");
+            if (log) {
+                fprintf(log, "%06lu stage %u", ticks, word(ram + 0x84));
+                for (unsigned i = 0; i < 3; ++i)
+                    fprintf(log, " L%u %04x %04x m%04x", i, word(ram + 0xb706 + 4*i), word(ram + 0xb708 + 4*i), layer_master[i]);
+                fprintf(log, " vc %04x water %d\n", word(ram + 0x8b28), with_fx ? world_enhance_waterline() : -1);
+                fclose(log);
+            }
         }
     }
 done:
@@ -703,9 +762,10 @@ int main(int argc, char **argv)
     const double arcade_period = (double)rate.QuadPart * (424 * 262) / 6666666;
     uint16_t pads, system;
     static uint32_t paused_frame[320*240];
-    unsigned previous_toggle = 0, hold_input = 0, counted = 0;
-    int was_focused = 0;
+    unsigned previous_toggle = 0, hold_input = 0, counted = 0, presented = 0;
+    int was_focused = 0, fresh = 0;
     LONGLONG counted_from = now.QuadPart;
+    double present_deadline = (double)now.QuadPart;
     while (world_window_poll(&pads, &system)) {
         /* F1, Esc or L3+R3 opens the pause menu; the game stands still. */
         unsigned toggle;
@@ -717,12 +777,12 @@ int main(int argc, char **argv)
         int focused = world_window_focused();
         if (settings.pause_unfocused && was_focused && !focused && !menu.open) rising |= 1;
         was_focused = focused;
-        /* Frame-rate limit: the arcade rate, a faster cap, or none. The game
-           advances one board frame per presented frame, so a higher limit
-           fast-forwards it; sound is silent then. */
+        /* The game always runs at the board's 60.01 Hz with sound. The FPS
+           limit only sets how often the picture is redrawn: the same game
+           frame with the enhancement animation moved on. */
         unsigned limit = world_menu_fps[settings.fps_limit];
-        double period = !limit ? arcade_period : limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
-        fast_forward = limit != 0;
+        double period = arcade_period;
+        double display_period = !limit || limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
         if (menu.open) {
             if (!menu_frame(paused_frame, menu_held, toggle, rising, gamepad)) break;
             if (!menu.open) {
@@ -746,32 +806,51 @@ int main(int argc, char **argv)
             else hold_input = 0;
         }
         QueryPerformanceCounter(&now);
-        if (period == 0.0) deadline = (double)now.QuadPart;
-        if (now.QuadPart < deadline) { Sleep(1); continue; }
-        if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
-        if (!tick(pads, system)) break;
-        double present_at = deadline + period * (elapsed_board_frames - 1);
-        int window_open = 1;
-        QueryPerformanceCounter(&now);
-        while (now.QuadPart < present_at && window_open) {
-            window_open = world_window_poll(&pads, &system);
-            if (window_open) Sleep(1);
+        if (now.QuadPart >= deadline) {
+            if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
+            if (!tick(pads, system)) break;
+            double present_at = deadline + period * (elapsed_board_frames - 1);
+            int window_open = 1;
             QueryPerformanceCounter(&now);
+            while (now.QuadPart < present_at && window_open) {
+                window_open = world_window_poll(&pads, &system);
+                if (window_open) Sleep(1);
+                QueryPerformanceCounter(&now);
+            }
+            if (!window_open) break;
+            deadline += period * elapsed_board_frames;
+            ticks += elapsed_board_frames;
+            draw();
+            counted += elapsed_board_frames;
+            fresh = 1;
         }
-        if (!window_open) break;
-        deadline += period * elapsed_board_frames;
-        ticks += elapsed_board_frames;
-        draw();
-        counted += elapsed_board_frames;
+        /* Arcade redraws once per game frame; a limit redraws on its own
+           clock; uncapped redraws every pass (v-sync, if on, paces it). */
+        int show = 0;
         QueryPerformanceCounter(&now);
+        if (!limit) show = fresh;
+        else if (limit == 0xffffffffu) show = 1;
+        else if (now.QuadPart >= present_deadline) {
+            show = 1;
+            present_deadline += display_period;
+            if (now.QuadPart - present_deadline > rate.QuadPart / 4) present_deadline = (double)now.QuadPart;
+        }
+        if (show) {
+            present_game(pixels);
+            ++presented;
+            fresh = 0;
+        } else {
+            double next = deadline;
+            if (limit && limit != 0xffffffffu && present_deadline < next) next = present_deadline;
+            if (next - (double)now.QuadPart > (double)rate.QuadPart / 1000.0) Sleep(1);
+        }
         if (now.QuadPart - counted_from >= rate.QuadPart / 2) {
             double seconds = (double)(now.QuadPart - counted_from) / (double)rate.QuadPart;
-            shown_fps = (unsigned)(counted / seconds + 0.5);
+            shown_fps = (unsigned)(presented / seconds + 0.5);
             shown_speed = (unsigned)(counted / seconds * arcade_period / (double)rate.QuadPart * 100.0 + 0.5);
-            counted = 0;
+            counted = presented = 0;
             counted_from = now.QuadPart;
         }
-        present_game(pixels);
     }
     timeEndPeriod(1);
     world_window_close();
