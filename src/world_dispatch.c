@@ -26925,13 +26925,20 @@ stage2_jumper_terrain:
         }
         break;
     }
-    case 0xb2c07:
-        if (read_word(ram, actor + 0x42) == 1 && !(ram[0x264] & 3)) return 0;
+    case 0xb2c07: {
+        /* As B2B03: with no active player 65B1 leaves SI as the previous
+           actor left it, and B2C1B tests bit 1 of that. */
+        int idle = !(read_word(ram, 0x264) & 3);
+        if (read_word(ram, actor + 0x42) == 1 && idle && !entry_si_known) {
+            world_dispatch_detail = untracked_si_detail();
+            return 0;
+        }
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         if (!decrement(ram, actor + 0x42)) {
             uint16_t target = world_enemy_target(ram, actor);
-            if (read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
+            if (idle ? (entry_si & 2) != 0
+                     : read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
                 ram[actor + 0x29] = 1;
             write_word(ram, actor, 0x2c46);
         }
@@ -26939,6 +26946,7 @@ stage2_jumper_terrain:
         register_surface_enemy(ram, actor);
         surface_enemy_hit(ram, main_rom, actor);
         break;
+    }
     case 0xb2b03: {
         uint16_t velocity = read_word(ram, actor + 0x3a);
         /* With no active player 65B1 leaves SI as the previous actor left it,
