@@ -174,14 +174,52 @@ static void enhance(const uint32_t *source, uint32_t *target, uint32_t time)
 
 /* Presents a game frame through the enhancement pass, with the optional
  * frame-rate readout in the top right corner. */
+/* Corner notices (shader loading, failures), drawn into a 320x240 frame. */
+static void overlay_notices(uint32_t *frame)
+{
+    /* CRT presets compile in the background: say so, and fall back if one fails. */
+    char why[256];
+    int compiling = world_gpu_active() ? world_gpu_preset_status(why, sizeof why) : 0;
+    if (compiling > 0) show_notice("LOADING CRT SHADER");
+    else if (compiling < 0) {
+        fprintf(stderr, "CRT shader failed: %s%c", why, 10);
+        settings.crt_shader = 0;
+        apply_view();
+        show_notice("CRT SHADER FAILED");
+    } else if (notice_until && !strcmp(notice, "LOADING CRT SHADER")) notice_until = GetTickCount();
+    if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
+        world_menu_draw_text(frame, 320, 240, 5, 5, 1, 0xff000000, notice);
+        world_menu_draw_text(frame, 320, 240, 4, 4, 1, 0xffff8060, notice);
+    } else
+        notice[0] = 0;
+}
+
+/* The beam simulator's clock, in emulated refreshes: it advances on every
+ * displayed refresh (by 1/k when locked to the display, by elapsed time
+ * otherwise), in play and in the pause menu alike, and never goes back. */
+static double beam_time;
+static unsigned pacing_k;
+static LONGLONG beam_last;
+
+static void beam_step(int new_frame)
+{
+    LARGE_INTEGER now, rate;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&rate);
+    if (pacing_k) {
+        /* A new game frame starts on a whole emulated refresh. */
+        if (new_frame) beam_time = ceil(beam_time - 1e-6);
+        else beam_time += 1.0 / pacing_k;
+    } else if (beam_last)
+        beam_time += (double)(now.QuadPart - beam_last) * 6666666.0 / ((double)rate.QuadPart * 424.0 * 262.0);
+    beam_last = now.QuadPart;
+    world_window_set_source_time(beam_time);
+}
+
 static void present_game(const uint32_t *source)
 {
     enhance(source, shown, effect_clock());
-    if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
-        world_menu_draw_text(shown, 320, 240, 5, 5, 1, 0xff000000, notice);
-        world_menu_draw_text(shown, 320, 240, 4, 4, 1, 0xffff8060, notice);
-    } else
-        notice[0] = 0;
+    overlay_notices(shown);
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
@@ -221,6 +259,8 @@ static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, un
     } else if (menu.open) {
         memcpy(pixels, paused, sizeof pixels);
         world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
+        overlay_notices(pixels);
+        beam_step(0);
         world_window_present(pixels);
     }
     return 1;
@@ -717,6 +757,7 @@ static void headless_run(const char *dir, const char *script_path)
                 char preset[1200] = "", error[512] = "", path[4096];
                 if (i) snprintf(preset, sizeof preset, "%s/%s", folder, world_gpu_preset_path[i - 1]);
                 snprintf(path, sizeof path, "%s/headless-crt%02u.bmp", dir, i);
+                DWORD started = GetTickCount();
                 if (!world_gpu_render_offscreen(pixels, preset, 0, 1920, 1080, big, error, sizeof error)) {
                     fprintf(stderr, "CRT preset %u (%s) failed: %s\n", i, i ? world_gpu_preset_name[i - 1] : "OFF", error);
                     continue;
@@ -737,7 +778,7 @@ static void headless_run(const char *dir, const char *script_path)
                 fwrite(&info, sizeof info, 1, f);
                 fwrite(big, sizeof big, 1, f);
                 fclose(f);
-                fprintf(stderr, "CRT preset %u (%s) rendered\n", i, i ? world_gpu_preset_name[i - 1] : "OFF");
+                fprintf(stderr, "CRT preset %u (%s) rendered in %lu ms%c", i, i ? world_gpu_preset_name[i - 1] : "OFF", (unsigned long)(GetTickCount() - started), 10);
             }
         }
         /* WORLD_BORDER_SHOT=frame composes that frame with every border
@@ -1025,6 +1066,26 @@ int main(int argc, char **argv)
                 deadline = (double)now.QuadPart;
             }
         }
+        pacing_k = lock_k;
+        /* Test hooks: WORLD_TEST_CRT_CYCLE=n switches to the next CRT preset
+           (beam simulator on) every n refreshes; WORLD_TEST_MENU=1 holds the
+           pause menu open on the Video tab. */
+        static unsigned long test_refreshes;
+        ++test_refreshes;
+        if (getenv("WORLD_TEST_CRT_CYCLE")) {
+            unsigned long every = strtoul(getenv("WORLD_TEST_CRT_CYCLE"), NULL, 10);
+            if (every && test_refreshes % every == 0) {
+                settings.crt_shader = settings.crt_shader % WORLD_GPU_PRESETS + 1;
+                settings.crt_beam = 1;
+                apply_view();
+                if (pacing_log) fprintf(pacing_log, "switch %u%c", settings.crt_shader, 10);
+            }
+        }
+        if (getenv("WORLD_TEST_MENU") && !menu.open && test_refreshes == 180) {
+            memcpy(paused_frame, lock_k ? live : pixels, sizeof paused_frame);
+            world_menu_open(&menu, 0, 0, GetTickCount());
+            menu.page = 1;
+        }
         unsigned limit = world_menu_fps[settings.fps_limit];
         double period = arcade_period;
         double display_period = !limit || limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
@@ -1041,6 +1102,10 @@ int main(int argc, char **argv)
             }
             if (lock_k) world_window_wait_vblank();
             else Sleep(15);
+            if (pacing_log) {
+                QueryPerformanceCounter(&now);
+                fprintf(pacing_log, "%.4f menu %.3f%c", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart, beam_time, 10);
+            }
             continue;
         }
         if (rising) {
@@ -1092,10 +1157,7 @@ int main(int argc, char **argv)
                 lock_phase = 0;
                 lock_ready = 0;
             }
-            /* Where the beam is, for the beam simulator: the frame on show
-               began lock_phase refreshes ago. */
-            world_window_set_source_time((double)live_ticks - (double)lock_span +
-                                         (double)lock_phase / (double)lock_k);
+            beam_step(lock_phase == 0);
             present_game(live);
             ++presented;
             fresh = 0;
@@ -1133,8 +1195,6 @@ int main(int argc, char **argv)
                clock; uncapped redraws every pass (v-sync, if on, paces it). */
             int show = 0;
             QueryPerformanceCounter(&now);
-            double into = 1.0 - ((double)deadline - (double)now.QuadPart) / period;
-            world_window_set_source_time((double)ticks + (into < 0.0 ? 0.0 : into > 0.999 ? 0.999 : into));
             if (settings.crt_beam && world_window_gpu()) show = 1;   /* one sub-frame per display refresh */
             else if (!limit) show = fresh;
             else if (limit == 0xffffffffu) show = 1;
@@ -1144,6 +1204,7 @@ int main(int argc, char **argv)
                 if (now.QuadPart - present_deadline > rate.QuadPart / 4) present_deadline = (double)now.QuadPart;
             }
             if (show) {
+                beam_step(0);
                 present_game(pixels);
                 ++presented;
                 fresh = 0;

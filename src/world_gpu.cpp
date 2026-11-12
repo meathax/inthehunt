@@ -13,6 +13,7 @@
 #include <string>
 
 using gdl::post::PostChain;
+using gdl::post::PreparedPreset;
 
 const char *const world_gpu_preset_name[WORLD_GPU_PRESETS] = {
     "CRT-ROYALE", "ROYALE PVM", "GUEST ADVANCED", "GUEST NTSC", "CRT-GEOM", "CRT-LOTTES",
@@ -170,6 +171,16 @@ struct Presenter {
     int scaling = 0, beam = 0, vsync = 1;
     std::unique_ptr<PostChain> chain;
     LARGE_INTEGER last_present = {};
+    // Preset compilation runs on a worker thread (prepare_preset may run
+    // beside frame()); the result is installed on the render thread.
+    CRITICAL_SECTION lock;
+    HANDLE worker = nullptr;
+    std::string wanted;                       // latest request
+    std::string building;                     // what the worker is compiling
+    std::unique_ptr<PreparedPreset> built;
+    std::string built_path, failed, failed_path;
+    bool busy = false;
+    ~Presenter() { DeleteCriticalSection(&lock); }
     double refresh_hz = 0.0;
     double last_source_time = 0.0;
 
@@ -217,6 +228,39 @@ struct Presenter {
 };
 
 Presenter *gpu;
+
+DWORD WINAPI compile_preset(void *context)
+{
+    Presenter *p = static_cast<Presenter *>(context);
+    for (;;) {
+        EnterCriticalSection(&p->lock);
+        std::string path = p->building;
+        LeaveCriticalSection(&p->lock);
+        std::string why;
+        std::unique_ptr<PreparedPreset> result;
+        try {
+            result = p->chain->prepare_preset(path, &why);
+        } catch (const std::exception &e) {
+            why = e.what();
+        }
+        EnterCriticalSection(&p->lock);
+        if (p->wanted != path) {               // superseded while compiling: build the newest
+            p->building = p->wanted;
+            LeaveCriticalSection(&p->lock);
+            continue;
+        }
+        if (result) {
+            p->built = std::move(result);
+            p->built_path = path;
+        } else {
+            p->failed = why.empty() ? "the preset could not be compiled" : why;
+            p->failed_path = path;
+        }
+        p->busy = false;
+        LeaveCriticalSection(&p->lock);
+        return 0;
+    }
+}
 
 LRESULT CALLBACK child_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
 {
@@ -273,6 +317,7 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
 {
     if (gpu) return 1;
     auto p = std::make_unique<Presenter>();
+    InitializeCriticalSection(&p->lock);
     p->parent = (HWND)parent_window;
     if (!create_device(p->factory, p->device, p->queue, error, error_size)) return 0;
     BOOL allow = FALSE;
@@ -356,6 +401,12 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
 extern "C" void world_gpu_close(void)
 {
     if (!gpu) return;
+    if (gpu->worker) {                        // let a running compile finish first
+        WaitForSingleObject(gpu->worker, INFINITE);
+        CloseHandle(gpu->worker);
+        gpu->worker = nullptr;
+    }
+    gpu->built.reset();
     gpu->wait_all();
     gpu->chain.reset();
     HWND child = gpu->child;
@@ -371,14 +422,41 @@ extern "C" int world_gpu_active(void) { return gpu != nullptr; }
 extern "C" int world_gpu_set_preset(const char *path, char *error, size_t error_size)
 {
     if (!gpu) { say(error, error_size, "The shader view is not open."); return 0; }
-    std::string why;
-    gpu->wait_all();
-    if (!gpu->chain->set_preset(path ? path : "", &why)) {
-        say(error, error_size, why.c_str());
-        return 0;
+    std::string wanted = path ? path : "";
+    EnterCriticalSection(&gpu->lock);
+    gpu->wanted = wanted;
+    gpu->failed.clear();
+    bool start = !gpu->busy;
+    if (start) {
+        gpu->busy = true;
+        gpu->building = wanted;
     }
-    apply(*gpu->chain, gpu->scaling, gpu->beam, gpu->width, gpu->height);
+    LeaveCriticalSection(&gpu->lock);
+    if (start) {
+        if (gpu->worker) {
+            WaitForSingleObject(gpu->worker, INFINITE);
+            CloseHandle(gpu->worker);
+        }
+        gpu->worker = CreateThread(nullptr, 0, compile_preset, gpu, 0, nullptr);
+        if (!gpu->worker) {
+            EnterCriticalSection(&gpu->lock);
+            gpu->busy = false;
+            LeaveCriticalSection(&gpu->lock);
+            say(error, error_size, "Could not start the shader compiler thread.");
+            return 0;
+        }
+    }
     return 1;
+}
+
+extern "C" int world_gpu_preset_status(char *message, size_t size)
+{
+    if (!gpu) return 0;
+    EnterCriticalSection(&gpu->lock);
+    int state = gpu->busy || gpu->built ? 1 : !gpu->failed.empty() ? -1 : 0;
+    if (state < 0) say(message, size, gpu->failed.c_str());
+    LeaveCriticalSection(&gpu->lock);
+    return state;
 }
 
 extern "C" void world_gpu_set_options(int scaling, int beam, int vsync)
@@ -427,6 +505,17 @@ extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
 {
     Presenter *p = gpu;
     if (!p) return;
+    {
+        std::unique_ptr<PreparedPreset> ready;
+        EnterCriticalSection(&p->lock);
+        if (p->built && p->built_path == p->wanted) ready = std::move(p->built);
+        else p->built.reset();
+        LeaveCriticalSection(&p->lock);
+        if (ready) {
+            p->chain->install_preset(std::move(ready));
+            apply(*p->chain, p->scaling, p->beam, p->width, p->height);
+        }
+    }
     RECT rc;
     GetClientRect(p->parent, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;

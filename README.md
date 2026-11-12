@@ -85,7 +85,7 @@ Sound never blocks the game: it is queued and stretched or squeezed by at most 0
 
 **BEAM SIMULATOR** is the [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator) (Mark Rejhon and Timothy Lottes): on a display faster than the game's 60 Hz it draws each game frame as a rolling scan over several refreshes, as a tube does, which restores CRT motion clarity. It needs a 120 Hz or faster display and always uses V-Sync. It combines with any CRT shader.
 
-The CRT view is used only while a shader or the beam simulator is selected; otherwise the window draws itself as before. Border art, scaling and the enhancements carry through. If Direct3D 12 or the shader files are missing, the game says so in the corner and falls back to the normal picture. The presets ship in `shaders/` as data files (mostly GPL; `shaders/SOURCES.md` lists every file and its licence).
+Presets compile in the background (CRT-Royale takes about 5 s), so the game and menu keep running and the previous look stays up, with LOADING CRT SHADER in the corner, until the new one is ready. The CRT view is used only while a shader or the beam simulator is selected; otherwise the window draws itself as before. Border art, scaling and the enhancements carry through. If Direct3D 12 or the shader files are missing, the game says so in the corner and falls back to the normal picture. The presets ship in `shaders/` as data files (mostly GPL; `shaders/SOURCES.md` lists every file and its licence).
 
 ### Enhancements
 
@@ -205,6 +205,7 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_CRT_SHOT=frame` | Render that frame through every CRT preset off screen at 1920×1080 (Direct3D 12) |
 | `WORLD_SCROLL_LOG=path` | Log the layer scroll registers at every board frame |
 | `WORLD_OFFSCREEN=1`, `WORLD_PACING_LOG=path`, `WORLD_RUN_SECONDS=n` | Windowed pacing test on the real display: window off the desktop, never focused; logs every refresh with DXGI present statistics, quits after *n* s |
+| `WORLD_TEST_CRT_CYCLE=n`, `WORLD_TEST_MENU=1` | With the pacing test: switch to the next CRT preset (beam simulator on) every *n* refreshes; hold the pause menu open |
 
 ### Slowdown model
 

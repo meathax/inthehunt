@@ -27,6 +27,9 @@ void world_gpu_close(void);
 int world_gpu_active(void);
 /* Full path of a .slangp, or "" for pass-through. Keeps the old preset on failure. */
 int world_gpu_set_preset(const char *path, char *error, size_t error_size);
+/* Preset compilation status: 1 compiling (or waiting to be installed),
+ * -1 failed (message set), 0 idle. world_gpu_set_preset only queues it. */
+int world_gpu_preset_status(char *message, size_t size);
 /* scaling: 0 integer, 1 fit 4:3, 2 stretch. */
 void world_gpu_set_options(int scaling, int beam, int vsync);
 /* Client-area sized ARGB border art (or NULL for black), shown outside the picture. */
