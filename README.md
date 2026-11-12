@@ -45,6 +45,7 @@ The game opens on a **title menu** over the running attract sequence: **Start Ga
   - **Game**
     - Slowdown: Arcade keeps the original slowdown; Off runs busy scenes at full speed
     - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2–5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on; a changed switch resets the board at the next Start Game or Exit to Menu
+    - Autofire: holding either fire button repeats it
     - Auto pause: open the pause menu when the window loses focus
     - Controls: the keyboard and controller layout
     - Reset options
@@ -95,14 +96,12 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Caustics | A rippling net of light on open water, behind the sprites, fixed to each layer |
 | Light shafts | Slanted sunbeams from the surface that fade with depth |
 | Dynamic lights | Fire, flashes and tracer on sprites light the scenery around them |
-| Bloom | Soft glow around the brightest pixels |
 | Depth shading | Water loses red, then green, toward the sea bed |
 | Marine snow | Drifting particles on two parallax layers |
 | Water shimmer | A gentle refraction wobble (subpixel) |
 | Vivid color | Richer saturation and contrast |
 | Vignette | Darker corners |
 | Motion trails | Phosphor-style persistence behind bright objects |
-| Scanlines | CRT beam lines (integer scaling, ×2 and up) |
 | Smooth scroll | The camera keeps a fraction of a pixel that the scroll registers drop; layers (and sprites moving with them) are drawn at the true position |
 | Motion ×2 | In-between frames on 120 Hz and faster displays: layers and matched sprites are drawn part-way between two game frames |
 | Drop shadows | Sprites cast soft shadows on the scenery behind them (not on open water) |
@@ -116,7 +115,7 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Stereo 3D | Red-cyan anaglyph from the layer depths |
 
 The master switch is off by default. Limits worth knowing:
-- **Smooth scroll and Motion ×2** need the high-resolution compositor, so they are inactive with a CRT shader or the Scanlines effect, and when the display scale has no divisor of 2, 3 or 4 (×5, ×7). Motion ×2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
+- **Smooth scroll and Motion ×2** need the high-resolution compositor, so they are inactive with a CRT shader, and when the display scale has no divisor of 2, 3 or 4 (×5, ×7). Motion ×2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
 - **Sprites are matched between frames by position, shape and palette.** A sprite that changes shape or jumps is shown at its new place without an in-between step; a wrong match would show as a one-frame slide.
 - **Explosions are recognised from the picture** (a large patch of fire appearing where there was none), not from the game's actor list, so an occasional one is missed or a big muzzle flash counts.
 - **Water is recognised by colour** below the sea surface; the surface itself comes from the game's own row-scroll programme for the background layer.
@@ -221,7 +220,7 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_STRICT=1` | Stop on untracked-register branches instead of estimating |
 | `WORLD_MENU_SHOT=frame` | Render every pause-menu and title-menu page over that frame |
 | `WORLD_TEST_TITLE=1` | Windowed self-test: Start Game, play, Exit to Menu, Start Game again (logs the game state) |
-| `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset, each scaling mode and scanlines at 1920×1080 using the real window painter |
+| `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset and each scaling mode at 1920×1080 using the real window painter |
 | `WORLD_FX_SHOT=frame` | Save that frame raw, through the scene renderer with no effect, with each effect alone, and with the default set |
 | `WORLD_SCENE_RUN=K` | Render every frame through the scene renderer at K× (halfway to the frame and on it), report timing and detected explosions; shot frames are saved at full size |
 | `WORLD_FX_SHOTS=1` | Save every scripted shot with the water effects on, and log the waterline |

@@ -131,8 +131,7 @@ static void show_notice(const char *text)
 static void apply_view(void)
 {
     /* 2 = locked to the display: the loop waits for VBlank itself. */
-    world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines,
-                          settings.pacing == 2 ? (int)settings.vsync : 2);
+    world_window_set_view((int)settings.scaling, settings.pacing == 2 ? (int)settings.vsync : 2);
     char preset[1200] = "", error[256] = "", folder[1024];
     if (settings.crt_shader) {
         if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
@@ -143,8 +142,8 @@ static void apply_view(void)
     }
     /* Smooth and Exact pacing present through a DXGI flip-model swap chain:
        it waits for each refresh precisely and shows every frame on the
-       refresh it was meant for. The CPU scanline effect needs the GDI view. */
-    int flip = settings.pacing != 2 && !(settings.fx_enable && settings.fx_scanlines);
+       refresh it was meant for. */
+    int flip = settings.pacing != 2;
     if (!world_window_set_crt(preset, 0, flip, error, sizeof error)) {
         fprintf(stderr, "CRT view unavailable: %s\n", error);
         if (preset[0]) show_notice("CRT SHADER UNAVAILABLE");
@@ -181,7 +180,7 @@ static WorldSceneFx scene_effects(void)
 {
     WorldSceneFx fx;
     fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
-    fx.bloom = settings.fx_bloom; fx.shimmer = settings.fx_shimmer; fx.depth = settings.fx_depth;
+    fx.shimmer = settings.fx_shimmer; fx.depth = settings.fx_depth;
     fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid; fx.vignette = settings.fx_vignette;
     fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
     fx.haze = settings.fx_haze; fx.relief = settings.fx_relief; fx.stereo = settings.fx_stereo;
@@ -192,11 +191,11 @@ static WorldSceneFx scene_effects(void)
 
 /* The scene is composited at K times 320x240 so that layers and sprites can
  * sit between pixels. K divides the display scale (so every game pixel
- * stays the same size); a CRT shader or the CPU scanlines need the plain
+ * stays the same size); a CRT shader needs the plain
  * 240-line picture. */
 static int scene_scale(void)
 {
-    if (!(settings.fx_smooth || settings.fx_interp) || settings.crt_shader || settings.fx_scanlines) return 1;
+    if (!(settings.fx_smooth || settings.fx_interp) || settings.crt_shader) return 1;
     int scale = world_window_scale();
     for (int k = WORLD_SCENE_MAX_K; k > 1; --k)
         if (scale % k == 0) return k;
@@ -811,7 +810,7 @@ static void headless_run(const char *dir, const char *script_path)
             fx_shot_done = 1;
             static const struct { const char *name; size_t offset; } effects[] = {
                 {"caustics", offsetof(WorldSettings, fx_caustics)}, {"rays", offsetof(WorldSettings, fx_rays)},
-                {"lights", offsetof(WorldSettings, fx_lights)}, {"bloom", offsetof(WorldSettings, fx_bloom)},
+                {"lights", offsetof(WorldSettings, fx_lights)},
                 {"shimmer", offsetof(WorldSettings, fx_shimmer)}, {"depth", offsetof(WorldSettings, fx_depth)},
                 {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
                 {"vignette", offsetof(WorldSettings, fx_vignette)}, {"shadows", offsetof(WorldSettings, fx_shadows)},
@@ -912,18 +911,18 @@ static void headless_run(const char *dir, const char *script_path)
                 }
             }
             world_border_set("", 100);
-            /* The three scaling modes, and scanlines, on a black border. */
-            static const char *const views[4] = {"integer", "fit", "stretch", "scanlines"};
-            for (int v = 0; v < 4 && !border_failed; ++v) {
+            /* The three scaling modes on a black border. */
+            static const char *const views[3] = {"integer", "fit", "stretch"};
+            for (int v = 0; v < 3 && !border_failed; ++v) {
                 char path[4096];
-                world_window_set_view(v < 3 ? v : 0, v == 3, 0);
+                world_window_set_view(v, 0);
                 snprintf(path, sizeof path, "%s/headless-view-%s.bmp", dir, views[v]);
                 if (!world_window_compose_bmp(pixels, 1920, 1080, path)) {
                     snprintf(failure, sizeof failure, "View composition failed: %s", views[v]);
                     border_failed = 1;
                 }
             }
-            world_window_set_view(0, 0, 0);
+            world_window_set_view(0, 0);
             if (border_failed) break;
         }
         if (save_path && ticks >= save_at) {
@@ -993,7 +992,7 @@ static void headless_run(const char *dir, const char *script_path)
             world_settings_defaults(&settings);
             settings.bindings = keep.bindings;
             settings.fx_enable = 1;
-            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_relief = settings.fx_shimmer = settings.fx_bloom = 1;
+            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_relief = settings.fx_shimmer = 1;
             scene_submit();
             for (unsigned half = 0; half < 2; ++half) {
                 LARGE_INTEGER t0, t1, hz;
@@ -1136,6 +1135,7 @@ static int starting;
 static int play_tick(uint16_t pads, uint16_t system)
 {
     if (menu.open && menu.title) pads = system = 0xffff;
+    if (settings.autofire && (ticks & 4)) pads |= 0xc0c0;     /* active low: release on the off phase */
     if (starting) {
         unsigned long d = ticks - start_from;
         if (d < 6) system &= (uint16_t)~4;                                /* coin 1 */

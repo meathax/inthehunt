@@ -38,7 +38,7 @@ video, sound, game timing, border, controls and quit. Esc goes back in the menu.
 OPTIONS > VIDEO > CRT SHADER picks a CRT look (CRT-Royale, Guest Advanced,
 CRT-Geom, Lottes and more), always flat with no vignette. Needs Direct3D 12.
 Options also has an ENHANCE tab: optional caustics, light shafts, dynamic
-lights, bloom and more, all off by default (pure arcade picture).
+lights, shadows and more, all off by default (pure arcade picture).
 On first launch the game downloads an optional undersea border image;
 turn it on under OPTIONS > VIDEO > BORDER ART.
 

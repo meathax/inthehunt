@@ -13,7 +13,7 @@
  * only: nothing feeds back into the game. */
 
 typedef struct {
-    unsigned caustics, rays, lights, bloom, shimmer, depth, snow, vivid, vignette, trails;
+    unsigned caustics, rays, lights, shimmer, depth, snow, vivid, vignette, trails;
     unsigned shadows;    /* sprites cast soft shadows on the scenery behind them */
     unsigned dof;        /* far layer slightly out of focus */
     unsigned haze;       /* far layer fades toward water blue */

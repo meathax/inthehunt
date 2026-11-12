@@ -23,7 +23,7 @@ enum {
     ITEM_CRT, ITEM_BEAM, ITEM_PACING,
     ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
     ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
-    ITEM_START
+    ITEM_START, ITEM_AUTOFIRE
 };
 enum { MAX_ITEMS = 40, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -36,19 +36,18 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_VSYNC: return &s->vsync;
     case ITEM_SHOWFPS: return &s->show_fps;
     case ITEM_FOCUS: return &s->pause_unfocused;
+    case ITEM_AUTOFIRE: return &s->autofire;
     case ITEM_DEMOSOUND: return &s->dip_demo_sound;
     case ITEM_FX: return &s->fx_enable;
     case ITEM_FX_CAUSTICS: return &s->fx_caustics;
     case ITEM_FX_RAYS: return &s->fx_rays;
     case ITEM_FX_LIGHTS: return &s->fx_lights;
-    case ITEM_FX_BLOOM: return &s->fx_bloom;
     case ITEM_FX_SHIMMER: return &s->fx_shimmer;
     case ITEM_FX_DEPTH: return &s->fx_depth;
     case ITEM_FX_SNOW: return &s->fx_snow;
     case ITEM_FX_VIVID: return &s->fx_vivid;
     case ITEM_FX_VIGNETTE: return &s->fx_vignette;
     case ITEM_FX_TRAILS: return &s->fx_trails;
-    case ITEM_FX_SCANLINES: return &s->fx_scanlines;
     case ITEM_FX_SHADOWS: return &s->fx_shadows;
     case ITEM_FX_DOF: return &s->fx_dof;
     case ITEM_FX_HAZE: return &s->fx_haze;
@@ -245,6 +244,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_DEMOSOUND, "DEMO SOUND", "CABINET SWITCH. NEXT NEW GAME");
+            ADD(ITEM_AUTOFIRE, "AUTOFIRE", "HOLD EITHER FIRE BUTTON TO REPEAT");
             ADD(ITEM_FOCUS, "AUTO PAUSE", "PAUSE WHEN THE WINDOW LOSES FOCUS");
             ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
@@ -253,14 +253,12 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING LIGHT IN OPEN WATER");
             ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS FROM THE SURFACE");
             ADD(ITEM_FX_LIGHTS, "DYNAMIC LIGHTS", "BLASTS LIGHT UP THE SCENE");
-            ADD(ITEM_FX_BLOOM, "BLOOM", "SOFT GLOW ON BRIGHT PIXELS");
             ADD(ITEM_FX_DEPTH, "DEPTH SHADING", "DEEPER WATER IS DARKER");
             ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
             ADD(ITEM_FX_SHIMMER, "WATER SHIMMER", "GENTLE REFRACTION WOBBLE");
             ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
             ADD(ITEM_FX_VIGNETTE, "VIGNETTE", "DARKER CORNERS");
             ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
-            ADD(ITEM_FX_SCANLINES, "SCANLINES", "CRT LINES. INTEGER SCALING X2+");
             ADD(ITEM_FX_SMOOTH, "SMOOTH SCROLL", "SUBPIXEL CAMERA. NO CRT SHADER");
             ADD(ITEM_FX_INTERP, "MOTION X2", "IN-BETWEEN FRAMES AT 120 HZ+");
             ADD(ITEM_FX_SHADOWS, "DROP SHADOWS", "SPRITES SHADE THE SCENERY");
@@ -376,7 +374,7 @@ void world_menu_open_title(WorldMenu *m, unsigned held, int gamepad, uint32_t no
 }
 
 /* The row of the CONTROLS entry on the options GAME tab. */
-enum { CONTROLS_ROW = 6 };
+enum { CONTROLS_ROW = 7 };
 
 static unsigned step_percent(unsigned value, int direction)
 {

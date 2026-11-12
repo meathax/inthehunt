@@ -35,39 +35,11 @@ static int smaller(int x, int y) { return x < y ? x : y; }
 /* WORLD_OFFSCREEN: pacing tests on the real display without showing the window. */
 static int offscreen(void) { return getenv("WORLD_OFFSCREEN") != NULL; }
 
-static int view_scaling, view_scanlines, view_vsync;
-static uint32_t *lined;                 /* frame expanded with scanlines */
-static int lined_scale;
+static int view_scaling, view_vsync;
 static HDC back_dc;                     /* off-screen copy of the client area */
 static HBITMAP back_bitmap;
 static HGDIOBJ back_previous;
 static int back_width, back_height;
-
-/* The frame enlarged by a whole factor with every source line's last output
- * row darkened, as a CRT's beam gap. */
-static const uint32_t *scanline_frame(int scale)
-{
-    if (scale != lined_scale) {
-        free(lined);
-        lined = malloc((size_t)WIDTH * scale * HEIGHT * scale * sizeof *lined);
-        lined_scale = lined ? scale : 0;
-    }
-    if (!lined) return NULL;
-    size_t row_pixels = (size_t)WIDTH * scale;
-    for (int y = 0; y < HEIGHT; ++y) {
-        uint32_t *first = lined + (size_t)y * scale * row_pixels;
-        const uint32_t *source = frame + y * WIDTH;   /* only used at frame_k == 1 */
-        for (int x = 0; x < WIDTH; ++x)
-            for (int k = 0; k < scale; ++k) first[x * scale + k] = source[x];
-        for (int k = 1; k < scale - 1; ++k) memcpy(first + k * row_pixels, first, row_pixels * sizeof *first);
-        uint32_t *dark = first + (size_t)(scale - 1) * row_pixels;
-        for (size_t x = 0; x < row_pixels; ++x) {
-            uint32_t p = first[x];
-            dark[x] = 0xff000000u | ((p >> 1) & 0x7f7f7f) + ((p >> 3) & 0x1f1f1f);
-        }
-    }
-    return lined;
-}
 
 /* Border, then the picture: whole-number scale, largest 4:3 fit, or the
  * whole client area. */
@@ -87,13 +59,6 @@ static void paint_area(HDC dc, RECT rect)
     int x = (rect.right - w) / 2, y = (rect.bottom - h) / 2;
     world_border_paint(dc, rect.right, rect.bottom);
     SetStretchBltMode(dc, COLORONCOLOR);
-    const uint32_t *wide = view_scanlines && view_scaling == 0 && scale >= 2 && frame_k == 1 ? scanline_frame(scale) : NULL;
-    if (wide) {
-        BITMAPINFO info = bitmap;
-        info.bmiHeader.biWidth = w;
-        info.bmiHeader.biHeight = -h;
-        SetDIBitsToDevice(dc, x, y, (DWORD)w, (DWORD)h, 0, 0, 0, (UINT)h, wide, &info, DIB_RGB_COLORS);
-    } else
     {
         BITMAPINFO info = bitmap;
         info.bmiHeader.biWidth = WIDTH * frame_k;
@@ -166,10 +131,9 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
 void world_window_set_source_time(double time) { source_time = time; }
 int world_window_gpu(void) { return world_gpu_visible(); }
 
-void world_window_set_view(int scaling, int scanlines, int vsync)
+void world_window_set_view(int scaling, int vsync)
 {
     view_scaling = scaling;
-    view_scanlines = scanlines;
     view_vsync = vsync;
     if (world_gpu_active()) world_gpu_set_options(scaling, crt_beam, vsync != 0);
     if (window) InvalidateRect(window, NULL, FALSE);
@@ -547,9 +511,6 @@ void world_window_close(void)
     if (back_bitmap) { SelectObject(back_dc, back_previous); DeleteObject(back_bitmap); back_bitmap = NULL; }
     if (back_dc) { DeleteDC(back_dc); back_dc = NULL; }
     back_width = back_height = 0;
-    free(lined);
-    lined = NULL;
-    lined_scale = 0;
     world_border_close();
 }
 

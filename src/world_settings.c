@@ -35,18 +35,17 @@ static const NumberSetting numbers[] = {
     {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3},
     {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
     {"crt_shader", offsetof(WorldSettings, crt_shader), 0, 12},
+    {"autofire", offsetof(WorldSettings, autofire), 0, 1},
     {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
     {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
     {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
     {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1},
-    {"fx_bloom", offsetof(WorldSettings, fx_bloom), 0, 1},
     {"fx_shimmer", offsetof(WorldSettings, fx_shimmer), 0, 1},
     {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
     {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
     {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
     {"fx_vignette", offsetof(WorldSettings, fx_vignette), 0, 1},
     {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
-    {"fx_scanlines", offsetof(WorldSettings, fx_scanlines), 0, 1},
     {"fx_shadows", offsetof(WorldSettings, fx_shadows), 0, 1},
     {"fx_dof", offsetof(WorldSettings, fx_dof), 0, 1},
     {"fx_haze", offsetof(WorldSettings, fx_haze), 0, 1},
@@ -97,7 +96,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->dip_difficulty = 2;    /* factory: normal */
     settings->dip_demo_sound = 1;
     /* The master switch is off, so the first picture is the arcade's own. */
-    settings->fx_caustics = settings->fx_rays = settings->fx_lights = settings->fx_bloom = 1;
+    settings->fx_caustics = settings->fx_rays = settings->fx_lights = 1;
     settings->fx_depth = settings->fx_snow = settings->fx_vignette = 1;
     settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
     settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;

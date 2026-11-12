@@ -47,13 +47,10 @@ static uint8_t layer_lum[3][LN], layer_wat[3][LN];
 static uint16_t sprite_px[MAXK * MAXK * N];      /* palette index | 0x8000 behind tiles */
 static uint32_t eye[MAXK * MAXK * N], history[MAXK * MAXK * N];
 static int have_history;
-enum { BW = W / 2, BH = H / 2 };
-static uint16_t glow[3][BW * BH];                /* bloom at half size, from the previous refresh */
 static uint16_t lamp[3][GW * GH];                /* sprite light, from the previous refresh */
 static uint32_t hot_sum[3][GW * GH];
 static uint16_t hot_count[GW * GH], hot_before[GW * GH];
 static uint8_t water_map[N];                     /* 1x: open water under this pixel */
-static uint32_t plain_map[N];                    /* 1x: the picture before glow and grading */
 static int8_t field_x[N], field_y[N];            /* shockwave displacement, 1/4 px */
 static int field_on;
 static uint8_t corner[N];
@@ -565,23 +562,17 @@ static void compose_rows(int from, int to)
             }
             if (block_row && X % k == 0) {
                 water_map[y1 * W + x1] = (uint8_t)(id > 0 && id < 3 ? wet : 0);
-                plain_map[y1 * W + x1] = c;
             }
 
             /* Most pixels need none of the screen-space colour work. */
-            int cell = y1 * W + x1, bloom_cell = (y1 >> 1) * BW + (x1 >> 1);
-            int needs = glint || fx->vivid || (fx->vignette && corner[cell] != 255) ||
-                        (fx->bloom && (glow[0][bloom_cell] | glow[1][bloom_cell] | glow[2][bloom_cell]));
+            int cell = y1 * W + x1;
+            int needs = glint || fx->vivid || (fx->vignette && corner[cell] != 255);
             if (needs) {
                 int r = (c >> 16) & 255, gr = (c >> 8) & 255, b = c & 255;
                 if (glint && id != 0) {
                     int wx = x1 + g.scroll_x[1];
                     int n = S(wx * 41 + g.T * 6) + S(wx * 17 - g.T * 4) + S(wx * 7 + y1 * 90 + g.T * 2);
                     if (n > 430) { int add = (n - 430) / 2; r += add; gr += add; b += add; }
-                }
-                if (fx->bloom) {
-                    int i = (y1 >> 1) * BW + (x1 >> 1);
-                    r += glow[0][i] * 120 >> 8; gr += glow[1][i] * 120 >> 8; b += glow[2][i] * 120 >> 8;
                 }
                 if (fx->vivid) {
                     int lum = (r * 3 + gr * 5 + b * 2) / 10;
@@ -865,8 +856,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         compose(out, 0);
     double t4 = stamp();
 
-    /* Light for the next refresh: what the sprites gave off, and the glow of
-       the brightest pixels of this picture. */
+    /* Light for the next refresh: what the sprites gave off. */
     if (fx->lights)
         for (int c = 0; c < 3; ++c) {
             for (int i = 0; i < GW * GH; ++i) {
@@ -876,22 +866,6 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
             blur16(lamp[c], GW, GH, 1);
             blur16(lamp[c], GW, GH, 2);
         }
-    if (fx->bloom) {
-        /* Bright pass of the picture before the glow (so it cannot feed itself). */
-        for (int y = 0; y < BH; ++y)
-            for (int x = 0; x < BW; ++x) {
-                int sum[3] = {0, 0, 0};
-                for (int j = 0; j < 2; ++j)
-                    for (int i = 0; i < 2; ++i) {
-                        uint32_t p = plain_map[(y * 2 + j) * W + x * 2 + i];
-                        int r = (p >> 16) & 255, gr = (p >> 8) & 255, b = p & 255;
-                        int top = r > gr ? (r > b ? r : b) : (gr > b ? gr : b);
-                        if (y * 2 + j < HUD && top > 236) { sum[0] += r; sum[1] += gr; sum[2] += b; }
-                    }
-                for (int c = 0; c < 3; ++c) glow[c][y * BW + x] = (uint16_t)(sum[c] / 4);
-            }
-        for (int c = 0; c < 3; ++c) { blur16(glow[c], BW, BH, 1); blur16(glow[c], BW, BH, 2); }
-    }
     draw_particles(out, fx, dt, time_ms);
 
     if (fx->trails) {
