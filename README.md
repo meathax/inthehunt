@@ -88,23 +88,42 @@ Presets compile in the background (CRT-Royale takes about 5 s), so the game and 
 
 ### Enhancements
 
-The **Enhance** tab adds effects the arcade board never had. They are a post-process of the finished 320×240 frame: nothing feeds back into the game, and with the master switch off the picture is the untouched arcade output. Every effect has its own switch. Hold **P** (or **Y** on a controller) on this tab to hide the menu and see the result on the paused picture.
+The **Enhance** tab adds effects the arcade board never had. Nothing feeds back into the game, and with the master switch off the picture is the untouched arcade output. Every effect has its own switch. Hold **P** (or **Y** on a controller) on this tab to hide the menu and see the result on the paused picture.
+
+They come from a layered renderer (`src/world_scene.c`): the three background layers and the sprites are drawn separately, so effects know what is in front of what, and the picture is composited at up to 4× the resolution so layers and sprites can sit between pixels. With every effect off it is pixel-identical to the plain picture.
 
 | Effect | What it does |
 |---|---|
-| Caustics | A rippling net of light across open water |
+| Caustics | A rippling net of light on open water, behind the sprites, fixed to each layer |
 | Light shafts | Slanted sunbeams from the surface that fade with depth |
-| Dynamic lights | Explosions, flames and tracer light up their surroundings |
+| Dynamic lights | Fire, flashes and tracer on sprites light the scenery around them |
 | Bloom | Soft glow around the brightest pixels |
 | Depth shading | Water loses red, then green, toward the sea bed |
 | Marine snow | Drifting particles on two parallax layers |
-| Water shimmer | A gentle one-pixel refraction wobble |
+| Water shimmer | A gentle refraction wobble (subpixel) |
 | Vivid color | Richer saturation and contrast |
 | Vignette | Darker corners |
 | Motion trails | Phosphor-style persistence behind bright objects |
 | Scanlines | CRT beam lines (integer scaling, ×2 and up) |
+| Smooth scroll | The camera keeps a fraction of a pixel that the scroll registers drop; layers (and sprites moving with them) are drawn at the true position |
+| Motion ×2 | In-between frames on 120 Hz and faster displays: layers and matched sprites are drawn part-way between two game frames |
+| Drop shadows | Sprites cast soft shadows on the scenery behind them (not on open water) |
+| Depth haze | The far layer fades toward water blue |
+| Depth of field | The far layer is slightly out of focus |
+| Relief light | Embossed lighting on rock and ice |
+| Live surface | Ripples just under the waterline and glints along it |
+| Shockwaves | A refraction ring spreads from each explosion |
+| Particles | Embers and bubbles from explosions |
+| Shake + rumble | Big explosions shake the picture and the controller |
+| Stereo 3D | Red-cyan anaglyph from the layer depths |
 
-The master switch is off by default. The water effects start at the sea surface, which comes from the game's own row-scroll programme for the background layer (the first rippled row), and are anchored to the background layer's scroll so they move with the water. Within the water, pixels are recognised by colour (blue-dominant, not bright), so the effects can also touch other dark blue scenery below the surface; the HUD strip is always left alone. `tools/test_enhance.c` checks the scroll anchoring and that nothing above the waterline changes.
+The master switch is off by default. Limits worth knowing:
+- **Smooth scroll and Motion ×2** need the high-resolution compositor, so they are inactive with a CRT shader or the Scanlines effect, and when the display scale has no divisor of 2, 3 or 4 (×5, ×7). Motion ×2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
+- **Sprites are matched between frames by position, shape and palette.** A sprite that changes shape or jumps is shown at its new place without an in-between step; a wrong match would show as a one-frame slide.
+- **Explosions are recognised from the picture** (a large patch of fire appearing where there was none), not from the game's actor list, so an occasional one is missed or a big muzzle flash counts.
+- **Water is recognised by colour** below the sea surface; the surface itself comes from the game's own row-scroll programme for the background layer.
+- The camera fraction is known for horizontal scrolling only.
+- Cost with the default set: about 3.3 ms per refresh at ×3 (a 4K display) and 4.6 ms at ×4, on eight threads.
 
 ### Border art
 
@@ -178,7 +197,7 @@ python tools/package_source.py     # → .local/release/inthehunt-source.zip (ev
 | `src/world_audio_driver.c`, `world_audio_notes.c`, `world_ga20.c`, `world_ym.cpp`, `world_audio_output.c` | V35 sound driver, chip synthesis, Windows output |
 | `src/world_clock.c`, `world_cycle_costs.c`, `world_timing_options.c` | Board clock and the slowdown model |
 | `src/world_window.c`, `world_input.c`, `world_border.c`, `world_menu.c`, `world_settings.c` | Window, XInput/keyboard, border art, pause menu, settings |
-| `src/world_enhance.c` | Optional picture enhancements (post-process only) |
+| `src/world_scene.c` | Layered scene renderer for the optional enhancements |
 | `src/world_gpu.cpp`, `src/post/` | Direct3D 12 presenter and post chain: frame pacing and librashader CRT presets |
 | `src/world_boot.c` | ROM import checks and cold-boot state |
 | `src/world_io.c`, `world_motion.c`, `world_sound.c`, `world_tile_v33.c` | Early V33 reference routines used by the MAME hybrid tools |
@@ -199,7 +218,8 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_SNAPSHOT_SAVE=frame,path` / `WORLD_SNAPSHOT_LOAD=path` | Save or resume full machine state |
 | `WORLD_MENU_SHOT=frame` | Render every pause-menu page over that frame |
 | `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset, each scaling mode and scanlines at 1920×1080 using the real window painter |
-| `WORLD_FX_SHOT=frame` | Save that frame with no enhancement, each enhancement alone, and all together |
+| `WORLD_FX_SHOT=frame` | Save that frame raw, through the scene renderer with no effect, with each effect alone, and with the default set |
+| `WORLD_SCENE_RUN=K` | Render every frame through the scene renderer at K× (halfway to the frame and on it), report timing and detected explosions; shot frames are saved at full size |
 | `WORLD_FX_SHOTS=1` | Save every scripted shot with the water effects on, and log the waterline |
 | `WORLD_CRT_SHOT=frame` | Render that frame through every CRT preset off screen at 1920×1080 (Direct3D 12) |
 | `WORLD_SCROLL_LOG=path` | Log the layer scroll registers at every board frame |

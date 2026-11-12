@@ -37,10 +37,10 @@ int world_gpu_preset_status(char *message, size_t size);
 void world_gpu_set_options(int scaling, int beam, int vsync);
 /* Client-area sized ARGB border art (or NULL for black), shown outside the picture. */
 void world_gpu_set_background(const uint32_t *pixels, unsigned width, unsigned height);
-/* One display refresh. frame is the 320x240 ARGB picture when it changed
- * since the last call (else NULL). source_time counts emulated refreshes
+/* One display refresh. frame is the ARGB picture, k times 320x240, when it
+ * changed since the last call (else NULL). source_time counts emulated refreshes
  * (game frames plus the fraction elapsed), for the beam simulator. */
-void world_gpu_present(const uint32_t *frame, double source_time);
+void world_gpu_present(const uint32_t *frame, int k, double source_time);
 /* Measured display refresh rate (0 until known). */
 double world_gpu_refresh_hz(void);
 /* Wait until the swap chain can take another frame (one per refresh with v-sync). */

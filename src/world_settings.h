@@ -40,6 +40,17 @@ typedef struct {
     unsigned fx_vignette;
     unsigned fx_trails;
     unsigned fx_scanlines;
+    unsigned fx_shadows;
+    unsigned fx_dof;
+    unsigned fx_haze;
+    unsigned fx_relief;
+    unsigned fx_stereo;
+    unsigned fx_shock;
+    unsigned fx_particles;
+    unsigned fx_shake;
+    unsigned fx_surface;
+    unsigned fx_smooth;
+    unsigned fx_interp;
     char shader[WORLD_SETTINGS_ID_SIZE];
     char border[WORLD_SETTINGS_ID_SIZE];
     char border_image[WORLD_SETTINGS_PATH_SIZE];

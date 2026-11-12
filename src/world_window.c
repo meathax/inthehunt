@@ -16,7 +16,9 @@ enum { WIDTH = 320, HEIGHT = 240 };
 static const wchar_t window_class[] = L"InTheHuntNativeViewport";
 static HWND window;
 static BITMAPINFO bitmap;
-static uint32_t frame[WIDTH * HEIGHT];
+enum { MAX_K = 4 };
+static uint32_t frame[WIDTH * HEIGHT * MAX_K * MAX_K];   /* the picture, frame_k times 320x240 */
+static int frame_k = 1;
 static unsigned char keys[256];
 static HMODULE controller_library;
 typedef DWORD (WINAPI *ControllerState)(DWORD, XINPUT_STATE *);
@@ -54,7 +56,7 @@ static const uint32_t *scanline_frame(int scale)
     size_t row_pixels = (size_t)WIDTH * scale;
     for (int y = 0; y < HEIGHT; ++y) {
         uint32_t *first = lined + (size_t)y * scale * row_pixels;
-        const uint32_t *source = frame + y * WIDTH;
+        const uint32_t *source = frame + y * WIDTH;   /* only used at frame_k == 1 */
         for (int x = 0; x < WIDTH; ++x)
             for (int k = 0; k < scale; ++k) first[x * scale + k] = source[x];
         for (int k = 1; k < scale - 1; ++k) memcpy(first + k * row_pixels, first, row_pixels * sizeof *first);
@@ -85,15 +87,20 @@ static void paint_area(HDC dc, RECT rect)
     int x = (rect.right - w) / 2, y = (rect.bottom - h) / 2;
     world_border_paint(dc, rect.right, rect.bottom);
     SetStretchBltMode(dc, COLORONCOLOR);
-    const uint32_t *wide = view_scanlines && view_scaling == 0 && scale >= 2 ? scanline_frame(scale) : NULL;
+    const uint32_t *wide = view_scanlines && view_scaling == 0 && scale >= 2 && frame_k == 1 ? scanline_frame(scale) : NULL;
     if (wide) {
         BITMAPINFO info = bitmap;
         info.bmiHeader.biWidth = w;
         info.bmiHeader.biHeight = -h;
         SetDIBitsToDevice(dc, x, y, (DWORD)w, (DWORD)h, 0, 0, 0, (UINT)h, wide, &info, DIB_RGB_COLORS);
     } else
-        StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH, HEIGHT, frame, &bitmap,
+    {
+        BITMAPINFO info = bitmap;
+        info.bmiHeader.biWidth = WIDTH * frame_k;
+        info.bmiHeader.biHeight = -HEIGHT * frame_k;
+        StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH * frame_k, HEIGHT * frame_k, frame, &info,
                       DIB_RGB_COLORS, SRCCOPY);
+    }
 }
 
 /* The window is composed off screen and copied in one blit. Painting the
@@ -120,7 +127,6 @@ static void paint(HWND hwnd, HDC dc)
 static char crt_preset[1024];
 static int crt_beam;
 static double source_time;
-static uint32_t gpu_last[WIDTH * HEIGHT];
 static int gpu_bg_w, gpu_bg_h, gpu_bg_stale = 1;
 
 /* A CRT preset (full .slangp path, "" for none) and the beam simulator use
@@ -153,7 +159,6 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
     }
     crt_beam = beam;
     world_gpu_set_options(view_scaling, beam, view_vsync != 0);
-    memset(gpu_last, 0, sizeof gpu_last);
     gpu_bg_stale = 1;
     return 1;
 }
@@ -246,7 +251,8 @@ void world_window_wait_vblank(void)
 int world_window_compose_bmp(const uint32_t *pixels, int width, int height, const char *path)
 {
     if (!pixels || width < WIDTH || height < HEIGHT || width > 8192 || height > 8192) return 0;
-    memcpy(frame, pixels, sizeof frame);
+    memcpy(frame, pixels, sizeof(uint32_t) * WIDTH * HEIGHT);
+    frame_k = 1;
     bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bitmap.bmiHeader.biWidth = WIDTH;
     bitmap.bmiHeader.biHeight = -HEIGHT;
@@ -463,9 +469,37 @@ int world_window_poll(uint16_t *pads, uint16_t *system)
     return 1;
 }
 
-void world_window_present(const uint32_t *pixels)
+/* The whole-number scale the picture is shown at (1 when unknown). */
+int world_window_scale(void)
+{
+    if (!window) return 1;
+    RECT rect;
+    GetClientRect(window, &rect);
+    int scale = smaller(rect.right / WIDTH, rect.bottom / HEIGHT);
+    return scale < 1 ? 1 : scale;
+}
+
+typedef DWORD (WINAPI *ControllerRumble)(DWORD, XINPUT_VIBRATION *);
+static DWORD rumble_until;
+
+/* Shake both pads for a moment; strength 0..65535. */
+void world_window_rumble(unsigned strength, unsigned milliseconds)
+{
+    if (!controller_library) return;
+    ControllerRumble set = (ControllerRumble)(void *)GetProcAddress(controller_library, "XInputSetState");
+    if (!set) return;
+    XINPUT_VIBRATION v;
+    v.wLeftMotorSpeed = (WORD)(strength > 65535 ? 65535 : strength);
+    v.wRightMotorSpeed = (WORD)(strength > 65535 ? 65535 : strength) / 2;
+    for (DWORD player = 0; player < 2; ++player) set(player, &v);
+    rumble_until = strength ? GetTickCount() + milliseconds : 0;
+}
+
+void world_window_present(const uint32_t *pixels, int k)
 {
     if (!window || !pixels) return;
+    if (k < 1 || k > MAX_K) k = 1;
+    if (rumble_until && (LONG)(GetTickCount() - rumble_until) >= 0) world_window_rumble(0, 0);
     if (world_gpu_visible()) {
         if (IsIconic(window)) return;
         RECT rect;
@@ -476,12 +510,11 @@ void world_window_present(const uint32_t *pixels)
             gpu_bg_h = rect.bottom;
             gpu_bg_stale = 0;
         }
-        int changed = memcmp(gpu_last, pixels, sizeof gpu_last) != 0;
-        if (changed) memcpy(gpu_last, pixels, sizeof gpu_last);
-        world_gpu_present(changed ? pixels : NULL, source_time);
+        world_gpu_present(pixels, k, source_time);
         return;
     }
-    memcpy(frame, pixels, sizeof frame);
+    memcpy(frame, pixels, sizeof(uint32_t) * WIDTH * HEIGHT * (size_t)k * (size_t)k);
+    frame_k = k;
     if (!IsIconic(window)) {
         InvalidateRect(window, NULL, FALSE);
         UpdateWindow(window);

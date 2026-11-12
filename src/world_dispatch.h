@@ -15,6 +15,7 @@ typedef struct {
 
 void world_draw_tile_block(uint8_t *tiles, const uint8_t *rom, uint16_t base, uint16_t dest, uint16_t descriptor);
 void world_dispatch_begin(WorldDispatch *, uint8_t *ram);
+extern uint16_t world_dispatch_camera_actor;
 /* Returns zero for the terminal handler. Writes the physical address in both cases. */
 int world_dispatch_target(const WorldDispatch *, const uint8_t *ram, uint32_t *address);
 /* Executes a recovered handler and advances the pass. Returns zero at fallback or end. */

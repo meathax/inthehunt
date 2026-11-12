@@ -20,9 +20,11 @@ enum {
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
     ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM, ITEM_FX_SHIMMER,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
-    ITEM_CRT, ITEM_BEAM, ITEM_PACING
+    ITEM_CRT, ITEM_BEAM, ITEM_PACING,
+    ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
+    ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP
 };
-enum { MAX_ITEMS = 20, VISIBLE_ROWS = 6, ROW_STEP = 15 };
+enum { MAX_ITEMS = 40, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
 const unsigned world_menu_fps[WORLD_MENU_FPS_CHOICES] = {0, 90, 120, 180, 240, 0xffffffffu};
 
@@ -46,6 +48,17 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_VIGNETTE: return &s->fx_vignette;
     case ITEM_FX_TRAILS: return &s->fx_trails;
     case ITEM_FX_SCANLINES: return &s->fx_scanlines;
+    case ITEM_FX_SHADOWS: return &s->fx_shadows;
+    case ITEM_FX_DOF: return &s->fx_dof;
+    case ITEM_FX_HAZE: return &s->fx_haze;
+    case ITEM_FX_RELIEF: return &s->fx_relief;
+    case ITEM_FX_STEREO: return &s->fx_stereo;
+    case ITEM_FX_SHOCK: return &s->fx_shock;
+    case ITEM_FX_PARTICLES: return &s->fx_particles;
+    case ITEM_FX_SHAKE: return &s->fx_shake;
+    case ITEM_FX_SURFACE: return &s->fx_surface;
+    case ITEM_FX_SMOOTH: return &s->fx_smooth;
+    case ITEM_FX_INTERP: return &s->fx_interp;
     default: return NULL;
     }
 }
@@ -241,6 +254,17 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_VIGNETTE, "VIGNETTE", "DARKER CORNERS");
             ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
             ADD(ITEM_FX_SCANLINES, "SCANLINES", "CRT LINES. INTEGER SCALING X2+");
+            ADD(ITEM_FX_SMOOTH, "SMOOTH SCROLL", "SUBPIXEL CAMERA. NO CRT SHADER");
+            ADD(ITEM_FX_INTERP, "MOTION X2", "IN-BETWEEN FRAMES AT 120 HZ+");
+            ADD(ITEM_FX_SHADOWS, "DROP SHADOWS", "SPRITES SHADE THE SCENERY");
+            ADD(ITEM_FX_HAZE, "DEPTH HAZE", "FAR SCENERY FADES TO BLUE");
+            ADD(ITEM_FX_DOF, "DEPTH OF FIELD", "SOFT FAR BACKGROUND");
+            ADD(ITEM_FX_RELIEF, "RELIEF LIGHT", "EMBOSSED ROCK AND ICE");
+            ADD(ITEM_FX_SURFACE, "LIVE SURFACE", "RIPPLING, GLINTING WATERLINE");
+            ADD(ITEM_FX_SHOCK, "SHOCKWAVES", "BLASTS BEND THE WATER");
+            ADD(ITEM_FX_PARTICLES, "PARTICLES", "EMBERS AND BUBBLES FROM BLASTS");
+            ADD(ITEM_FX_SHAKE, "SHAKE + RUMBLE", "BLASTS SHAKE SCREEN AND PAD");
+            ADD(ITEM_FX_STEREO, "STEREO 3D", "RED-CYAN GLASSES");
         }
         ADD(ITEM_BACK, "BACK", "RETURN TO THE PAUSE MENU");
         break;
@@ -261,7 +285,8 @@ static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id
     if (id == ITEM_SCALE) return s->fullscreen != 0;
     if (id == ITEM_LIGHT) return m->border_index == 0;
     if (id == ITEM_VSYNC || id == ITEM_FPS) return s->pacing != 2;
-    if (id > ITEM_FX && id <= ITEM_FX_SCANLINES) return !s->fx_enable;
+    if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_SHADOWS && id <= ITEM_FX_INTERP))
+        return !s->fx_enable;
     return 0;
 }
 

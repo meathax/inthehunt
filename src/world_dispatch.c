@@ -3568,6 +3568,9 @@ static int update_vertical_weapon(uint8_t *ram, const uint8_t *rom, const uint8_
 }
 
 int world_horizontal_camera(uint8_t *, const uint8_t *, uint16_t, uint16_t, uint16_t);
+/* The actor running the horizontal camera (its byte 51h is the scroll
+ * fraction), for the presentation layer only. */
+uint16_t world_dispatch_camera_actor;
 
 static void update_vertical_camera(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
@@ -3647,6 +3650,7 @@ static void update_camera_layers(uint8_t *ram, const uint8_t *rom, uint8_t *tile
         if (vertical_control) update_vertical_camera(ram, rom, actor);
         update_camera_limits(ram, rom, actor);
         uint16_t p1 = read_word(ram, 0x90), p2 = read_word(ram, 0x92);
+        world_dispatch_camera_actor = actor;
         if (!world_horizontal_camera(ram, rom, actor, read_word(ram, p1 + 0x21), read_word(ram, p2 + 0x21))) {
             write_word(ram, 0xb71a, 0);
             write_word(ram, 0xb72a, 0);

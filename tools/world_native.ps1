@@ -197,7 +197,7 @@ function Build-WorldNative {
             if ($LASTEXITCODE) { throw 'Could not unpack Zig.' }
         }
     }
-    $names = @('native','clock','cycle_costs','timing_options','settings','input','border','menu','enhance','audio_output','ga20','audio_driver','audio_notes','boot','window','video','dispatch','title','title_master','gameover','enemy_target','stage','fire',
+    $names = @('native','clock','cycle_costs','timing_options','settings','input','border','menu','scene','audio_output','ga20','audio_driver','audio_notes','boot','window','video','dispatch','title','title_master','gameover','enemy_target','stage','fire',
         'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette')
     $sources = @($names | ForEach-Object { Join-Path $Root "src/world_$_.c" })
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')

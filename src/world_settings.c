@@ -46,7 +46,18 @@ static const NumberSetting numbers[] = {
     {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
     {"fx_vignette", offsetof(WorldSettings, fx_vignette), 0, 1},
     {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
-    {"fx_scanlines", offsetof(WorldSettings, fx_scanlines), 0, 1}
+    {"fx_scanlines", offsetof(WorldSettings, fx_scanlines), 0, 1},
+    {"fx_shadows", offsetof(WorldSettings, fx_shadows), 0, 1},
+    {"fx_dof", offsetof(WorldSettings, fx_dof), 0, 1},
+    {"fx_haze", offsetof(WorldSettings, fx_haze), 0, 1},
+    {"fx_relief", offsetof(WorldSettings, fx_relief), 0, 1},
+    {"fx_stereo", offsetof(WorldSettings, fx_stereo), 0, 1},
+    {"fx_shock", offsetof(WorldSettings, fx_shock), 0, 1},
+    {"fx_particles", offsetof(WorldSettings, fx_particles), 0, 1},
+    {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1},
+    {"fx_surface", offsetof(WorldSettings, fx_surface), 0, 1},
+    {"fx_smooth", offsetof(WorldSettings, fx_smooth), 0, 1},
+    {"fx_interp", offsetof(WorldSettings, fx_interp), 0, 1}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -88,6 +99,8 @@ void world_settings_defaults(WorldSettings *settings)
     /* The master switch is off, so the first picture is the arcade's own. */
     settings->fx_caustics = settings->fx_rays = settings->fx_lights = settings->fx_bloom = 1;
     settings->fx_depth = settings->fx_snow = settings->fx_vignette = 1;
+    settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
+    settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
     strcpy(settings->shader, "pixels");
     strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);

@@ -182,6 +182,7 @@ struct Presenter {
     std::string built_path, failed, failed_path;
     bool busy = false;
     bool shown = true;
+    int picture_k = 1;
     ~Presenter() { DeleteCriticalSection(&lock); }
     double refresh_hz = 0.0;
     double last_source_time = 0.0;
@@ -515,10 +516,25 @@ extern "C" void world_gpu_wait_frame(void)
     }
 }
 
-extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
+extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_time)
 {
     Presenter *p = gpu;
     if (!p) return;
+    if (k < 1) k = 1;
+    if (k != p->picture_k) {
+        /* The source picture changed size: new texture and upload buffers. */
+        p->wait_all();
+        p->picture.reset();
+        for (auto &u : p->picture_upload) u.reset();
+        if (FAILED(texture(p->device.get(), (UINT)(W * k), (UINT)(H * k), D3D12_RESOURCE_FLAG_NONE,
+                           D3D12_RESOURCE_STATE_COPY_DEST, p->picture.put())))
+            return;
+        UINT64 bytes = upload_size(p->device.get(), p->picture.get());
+        for (auto &u : p->picture_upload)
+            buffer(p->device.get(), D3D12_HEAP_TYPE_UPLOAD, bytes, D3D12_RESOURCE_STATE_GENERIC_READ, u.put());
+        p->picture_k = k;
+    }
+    if (!p->picture) return;
     {
         std::unique_ptr<PreparedPreset> ready;
         EnterCriticalSection(&p->lock);
@@ -587,7 +603,8 @@ extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
 
     ID3D12Resource *fresh = nullptr;
     if (frame) {
-        upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame, W, H);
+        upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame, (UINT)(W * p->picture_k),
+               (UINT)(H * p->picture_k));
         D3D12_RESOURCE_BARRIER t = barrier(p->picture.get(), D3D12_RESOURCE_STATE_COPY_DEST,
                                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cmd->ResourceBarrier(1, &t);

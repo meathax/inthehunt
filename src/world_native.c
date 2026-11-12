@@ -1,5 +1,6 @@
 /* Native Windows entry point. The imported program image is read-only lookup data. */
 #include <windows.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -10,7 +11,7 @@
 #include "world_palette.h"
 #include "world_video.h"
 #include "world_window.h"
-#include "world_enhance.h"
+#include "world_scene.h"
 #include "world_gpu.h"
 #include "world_slowdown_table.h"
 #include "world_border.h"
@@ -74,7 +75,14 @@ static void menu_borders(const char *dir)
     world_menu_set_borders(&menu, count, names, list, &settings);
 }
 
-static uint32_t shown[320 * 240];      /* the frame as presented: enhancements and overlays */
+/* The frame as presented: enhancements and overlays, shown_k times 320x240. */
+static uint32_t shown[320 * 240 * WORLD_SCENE_MAX_K * WORLD_SCENE_MAX_K];
+static int shown_k = 1;
+static double scene_alpha = 1.0;       /* between the previous game frame (0) and this one (1) */
+/* What draw() last drew, for the scene renderer. */
+static WorldVideoLayer drawn_layers[3];
+static uint8_t drawn_sprites[2048];
+static uint32_t drawn_colors[1024];
 static unsigned shown_fps, shown_speed;
 static unsigned word(const uint8_t *p);
 
@@ -145,36 +153,75 @@ static void apply_view(void)
     }
 }
 
-static void enhance(const uint32_t *source, uint32_t *target, uint32_t time)
+/* Hand the frame draw() just made to the scene renderer. */
+static void scene_submit(void)
 {
-    if (!settings.fx_enable) {
-        memcpy(target, source, sizeof shown);
-        world_enhance_reset();
-        return;
+    WorldSceneFrame frame;
+    memset(&frame, 0, sizeof frame);
+    frame.tiles = tiles;
+    frame.sprites = drawn_sprites;
+    frame.colors = drawn_colors;
+    memcpy(frame.layers, drawn_layers, sizeof frame.layers);
+    frame.video_control = (uint16_t)word(ram + 0x8b28);
+    frame.waterline = waterline_row();
+    frame.scene_id = word(ram + 0x80) | word(ram + 0x84) << 16;
+    /* The camera keeps a fraction of a pixel (byte 51h of its actor) that
+       the whole-pixel scroll registers drop. The background scrolls at half
+       the playfield's rate, so its fraction follows from the same value. */
+    if (word(ram + 0x80) != 0xb2e) world_dispatch_camera_actor = 0;
+    if (world_dispatch_camera_actor) {
+        unsigned fraction = ram[world_dispatch_camera_actor + 0x51], x = word(ram + 0xb70a);
+        frame.frac[1] = (int)fraction;
+        if (word(ram + 0xb70e) == x >> 1) frame.frac[2] = (int)(((x & 1) * 256 + fraction) / 2);
     }
-    WorldEnhance fx;
-    fx.caustics = settings.fx_caustics;
-    fx.rays = settings.fx_rays;
-    fx.lights = settings.fx_lights;
-    fx.bloom = settings.fx_bloom;
-    fx.shimmer = settings.fx_shimmer;
-    fx.depth = settings.fx_depth;
-    fx.snow = settings.fx_snow;
-    fx.vivid = settings.fx_vivid;
-    fx.vignette = settings.fx_vignette;
-    fx.trails = settings.fx_trails;
-    WorldEnhanceScene scene;
-    scene.time = time;
-    scene.scroll_x = word(ram + 0xb70e);           /* background layer x */
-    scene.scroll_y = word(ram + 0xb710);           /* background layer y */
-    scene.waterline = waterline_row();
-    world_enhance_apply(source, target, &fx, &scene);
+    world_scene_submit(&frame);
+}
+
+static WorldSceneFx scene_effects(void)
+{
+    WorldSceneFx fx;
+    fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
+    fx.bloom = settings.fx_bloom; fx.shimmer = settings.fx_shimmer; fx.depth = settings.fx_depth;
+    fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid; fx.vignette = settings.fx_vignette;
+    fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
+    fx.haze = settings.fx_haze; fx.relief = settings.fx_relief; fx.stereo = settings.fx_stereo;
+    fx.shock = settings.fx_shock; fx.particles = settings.fx_particles; fx.shake = settings.fx_shake;
+    fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
+    return fx;
+}
+
+/* The scene is composited at K times 320x240 so that layers and sprites can
+ * sit between pixels. K divides the display scale (so every game pixel
+ * stays the same size); a CRT shader or the CPU scanlines need the plain
+ * 240-line picture. */
+static int scene_scale(void)
+{
+    if (!(settings.fx_smooth || settings.fx_interp) || settings.crt_shader || settings.fx_scanlines) return 1;
+    int scale = world_window_scale();
+    for (int k = WORLD_SCENE_MAX_K; k > 1; --k)
+        if (scale % k == 0) return k;
+    return 1;
+}
+
+/* Render the enhanced picture, or copy the plain one. Returns K. */
+static int enhance(const uint32_t *source, uint32_t *target, uint32_t time, int k, double alpha)
+{
+    if (settings.fx_enable) {
+        WorldSceneFx fx = scene_effects();
+        if (world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
+            unsigned strength = world_scene_take_rumble();
+            if (strength && settings.fx_shake) world_window_rumble(strength, 160);
+            return k;
+        }
+    }
+    memcpy(target, source, sizeof(uint32_t) * 320 * 240);
+    return 1;
 }
 
 /* Presents a game frame through the enhancement pass, with the optional
  * frame-rate readout in the top right corner. */
 /* Corner notices (shader loading, failures), drawn into a 320x240 frame. */
-static void overlay_notices(uint32_t *frame)
+static void overlay_notices(uint32_t *frame, int k)
 {
     /* CRT presets compile in the background: say so, and fall back if one fails. */
     char why[256];
@@ -187,8 +234,8 @@ static void overlay_notices(uint32_t *frame)
         show_notice("CRT SHADER FAILED");
     } else if (notice_until && !strcmp(notice, "LOADING CRT SHADER")) notice_until = GetTickCount();
     if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
-        world_menu_draw_text(frame, 320, 240, 5, 5, 1, 0xff000000, notice);
-        world_menu_draw_text(frame, 320, 240, 4, 4, 1, 0xffff8060, notice);
+        world_menu_draw_text(frame, 320u * k, 240u * k, 5 * k, 5 * k, (unsigned)k, 0xff000000, notice);
+        world_menu_draw_text(frame, 320u * k, 240u * k, 4 * k, 4 * k, (unsigned)k, 0xffff8060, notice);
     } else
         notice[0] = 0;
 }
@@ -217,16 +264,16 @@ static void beam_step(int new_frame)
 
 static void present_game(const uint32_t *source)
 {
-    enhance(source, shown, effect_clock());
-    overlay_notices(shown);
+    int k = shown_k = enhance(source, shown, effect_clock(), scene_scale(), scene_alpha);
+    overlay_notices(shown, k);
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
         int x = 320 - world_menu_text_width(label, 1) - 4;
-        world_menu_draw_text(shown, 320, 240, x + 1, 5, 1, 0xff000000, label);
-        world_menu_draw_text(shown, 320, 240, x, 4, 1, 0xffffe070, label);
+        world_menu_draw_text(shown, 320u * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
+        world_menu_draw_text(shown, 320u * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
     }
-    world_window_present(shown);
+    world_window_present(shown, k);
 }
 
 static void apply_border(void)
@@ -253,14 +300,15 @@ static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, un
         fprintf(stderr, "Could not save native settings.\n");
     if (result & WORLD_MENU_QUIT) return 0;
     if (menu.open && menu.peek) {
+        scene_alpha = 1.0;
         /* Preview held on the enhancements page: the paused picture alone. */
         present_game(paused);
     } else if (menu.open) {
         memcpy(pixels, paused, sizeof pixels);
         world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
-        overlay_notices(pixels);
+        overlay_notices(pixels, 1);
         beam_step(0);
-        world_window_present(pixels);
+        world_window_present(pixels, 1);
     }
     return 1;
 }
@@ -391,13 +439,15 @@ static void draw(void)
         layers[i].scroll_y = word(ram + pos + 2);
         layers[i].scroll_x = word(ram + pos) + 16 + 2*i;
     }
-    uint8_t sprites[2048] = {0};
+    uint8_t *sprites = drawn_sprites;
+    memset(drawn_sprites, 0, sizeof drawn_sprites);
     for (unsigned i = 0, count = (0u - ram[0x8b26]) & 255; i < count; ) {
         memcpy(sprites + i*8, oam + i*8, 8);
         i += 1u << ((oam[i*8+1] >> 3) & 3);
     }
-    uint32_t colors[1024];
+    uint32_t *colors = drawn_colors;
     for (unsigned i = 0; i < 1024; ++i) colors[i] = world_video_rgb(word(palette + 2*i));
+    memcpy(drawn_layers, layers, sizeof drawn_layers);
     for (unsigned y = 0; y < 240; ++y) {
         uint16_t line[320];
         world_video_scanline(line, y, tiles, gfx1, gfx2, sprites, layers, word(ram + 0x8b28));
@@ -565,6 +615,7 @@ static void record_stop(const char *dir)
    "FRAME end" stops the run. "shot" saves that frame as a BMP in the data
    directory, as does the last frame of the run. */
 static const uint32_t *shot_source = pixels;
+static int shot_k = 1;                 /* shot_source is shot_k times 320x240 */
 
 static void headless_shot(const char *dir, const char *name)
 {
@@ -579,15 +630,16 @@ static void headless_shot(const char *dir, const char *name)
     memset(&info, 0, sizeof info);
     file.bfType = 0x4d42;
     file.bfOffBits = sizeof file + sizeof info;
-    file.bfSize = file.bfOffBits + sizeof pixels;
+    size_t shot_bytes = sizeof pixels * (size_t)shot_k * (size_t)shot_k;
+    file.bfSize = (DWORD)(file.bfOffBits + shot_bytes);
     info.biSize = sizeof info;
-    info.biWidth = 320;
-    info.biHeight = -240;
+    info.biWidth = 320 * shot_k;
+    info.biHeight = -240 * shot_k;
     info.biPlanes = 1;
     info.biBitCount = 32;
     fwrite(&file, sizeof file, 1, f);
     fwrite(&info, sizeof info, 1, f);
-    fwrite(shot_source, sizeof pixels, 1, f);
+    fwrite(shot_source, shot_bytes, 1, f);
     fclose(f);
 }
 
@@ -719,26 +771,46 @@ static void headless_run(const char *dir, const char *script_path)
         const char *fx_shot = getenv("WORLD_FX_SHOT");
         if (fx_shot && !fx_shot_done && ticks >= strtoul(fx_shot, NULL, 10)) {
             fx_shot_done = 1;
-            static const char *const names[12] = {"off", "caustics", "rays", "lights", "bloom", "shimmer",
-                                                  "depth", "snow", "vivid", "vignette", "all", "all-later"};
+            static const struct { const char *name; size_t offset; } effects[] = {
+                {"caustics", offsetof(WorldSettings, fx_caustics)}, {"rays", offsetof(WorldSettings, fx_rays)},
+                {"lights", offsetof(WorldSettings, fx_lights)}, {"bloom", offsetof(WorldSettings, fx_bloom)},
+                {"shimmer", offsetof(WorldSettings, fx_shimmer)}, {"depth", offsetof(WorldSettings, fx_depth)},
+                {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
+                {"vignette", offsetof(WorldSettings, fx_vignette)}, {"shadows", offsetof(WorldSettings, fx_shadows)},
+                {"dof", offsetof(WorldSettings, fx_dof)}, {"haze", offsetof(WorldSettings, fx_haze)},
+                {"relief", offsetof(WorldSettings, fx_relief)}, {"stereo", offsetof(WorldSettings, fx_stereo)},
+                {"shock", offsetof(WorldSettings, fx_shock)}, {"particles", offsetof(WorldSettings, fx_particles)},
+                {"surface", offsetof(WorldSettings, fx_surface)},
+            };
+            enum { EFFECTS = sizeof effects / sizeof effects[0] };
             WorldSettings keep = settings;
-            for (unsigned i = 0; i < 12; ++i) {
-                unsigned all = i >= 10;
-                settings.fx_enable = i != 0;
-                settings.fx_caustics = all || i == 1; settings.fx_rays = all || i == 2;
-                settings.fx_lights = all || i == 3;   settings.fx_bloom = all || i == 4;
-                settings.fx_shimmer = all || i == 5;  settings.fx_depth = all || i == 6;
-                settings.fx_snow = all || i == 7;     settings.fx_vivid = all || i == 8;
-                settings.fx_vignette = all || i == 9; settings.fx_trails = 0;
-                enhance(pixels, shown, (uint32_t)(ticks * 133 + (i == 11 ? 5600 : 0)));
+            scene_submit();
+            /* Every effect alone, the plain picture, then the default set. */
+            for (unsigned i = 0; i <= EFFECTS + 1; ++i) {
+                WorldSettings one = keep;
+                for (unsigned e = 0; e < EFFECTS; ++e)
+                    memcpy((char *)&one + effects[e].offset, &(unsigned){i == e + 1}, sizeof(unsigned));
+                one.fx_trails = one.fx_shake = one.fx_smooth = one.fx_interp = 0;
+                if (i == EFFECTS + 1) {
+                    WorldSettings fresh;
+                    world_settings_defaults(&fresh);
+                    fresh.bindings = keep.bindings;
+                    one = fresh;
+                }
+                one.fx_enable = 1;                 /* "off" is the scene renderer with no effect on */
+                if (i == 0) headless_shot(dir, "fx-raw");
+                settings = one;
+                /* Run a few refreshes so light and glow, which lag one, settle. */
+                for (unsigned pass = 0; pass < 3; ++pass)
+                    enhance(pixels, shown, (uint32_t)(ticks * 133 + pass * 67), 1, 1.0);
                 char name[32];
-                snprintf(name, sizeof name, "fx-%s", names[i]);
+                snprintf(name, sizeof name, "fx-%s", i == 0 ? "off" : i == EFFECTS + 1 ? "all" : effects[i - 1].name);
                 shot_source = shown;
                 headless_shot(dir, name);
                 shot_source = pixels;
             }
             settings = keep;
-            world_enhance_reset();
+            world_scene_reset();
         }
         /* WORLD_CRT_SHOT=frame renders that frame through each CRT preset
            off screen at 1920x1080 (needs Direct3D 12 and the shader package). */
@@ -870,6 +942,52 @@ static void headless_run(const char *dir, const char *script_path)
                     word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6));
         }
         draw();
+        /* WORLD_SCENE_RUN=K: render every frame through the scene renderer at
+           K times the size, halfway to the frame and on it, with the default
+           effects; time it, and save both pictures on shot frames. */
+        static int scene_run = -1;
+        static double scene_ms, scene_worst;
+        static unsigned long scene_count;
+        if (scene_run < 0) scene_run = getenv("WORLD_SCENE_RUN") ? atoi(getenv("WORLD_SCENE_RUN")) : 0;
+        if (scene_run > 0) {
+            WorldSettings keep = settings;
+            world_settings_defaults(&settings);
+            settings.bindings = keep.bindings;
+            settings.fx_enable = 1;
+            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_relief = settings.fx_shimmer = settings.fx_bloom = 1;
+            scene_submit();
+            for (unsigned half = 0; half < 2; ++half) {
+                LARGE_INTEGER t0, t1, hz;
+                QueryPerformanceFrequency(&hz);
+                QueryPerformanceCounter(&t0);
+                enhance(pixels, shown, (uint32_t)(ticks * 133 + half * 67), scene_run, half ? 1.0 : 0.5);
+                QueryPerformanceCounter(&t1);
+                double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)hz.QuadPart;
+                scene_ms += ms;
+                if (ms > scene_worst) scene_worst = ms;
+                ++scene_count;
+                if (shot) {
+                    char name[40];
+                    snprintf(name, sizeof name, "scene-%06lu-%s", ticks, half ? "b" : "a");
+                    shot_source = shown; shot_k = scene_run;
+                    headless_shot(dir, name);
+                    shot_source = pixels; shot_k = 1;
+                }
+            }
+            settings = keep;
+            if (ticks % 2000 < elapsed_board_frames)
+                fprintf(stderr, "scene K=%d: mean %.2f ms, worst %.2f ms over %lu renders%c", scene_run,
+                        scene_ms / (double)scene_count, scene_worst, scene_count, 10);
+            if (ticks % 2000 < elapsed_board_frames) {
+                extern double world_scene_stage_ms[6];
+                double n = world_scene_stage_ms[5];
+                extern unsigned world_scene_explosions;
+                fprintf(stderr, "  explosions detected: %u%c", world_scene_explosions, 10);
+                fprintf(stderr, "  colours %.2f, layer fx %.2f, sprites %.2f, compose %.2f, post %.2f ms%c",
+                        world_scene_stage_ms[0] / n, world_scene_stage_ms[1] / n, world_scene_stage_ms[2] / n,
+                        world_scene_stage_ms[3] / n, world_scene_stage_ms[4] / n, 10);
+            }
+        }
         if (shot) {
             char name[32];
             snprintf(name, sizeof name, "%06lu", ticks);
@@ -877,10 +995,13 @@ static void headless_run(const char *dir, const char *script_path)
             int with_fx = getenv("WORLD_FX_SHOTS") != NULL;
             if (with_fx) {
                 WorldSettings keep = settings;
-                settings.fx_enable = settings.fx_caustics = settings.fx_rays = settings.fx_depth = 1;
-                settings.fx_lights = settings.fx_bloom = settings.fx_snow = settings.fx_shimmer = 0;
-                settings.fx_vivid = settings.fx_vignette = settings.fx_trails = 0;
-                enhance(pixels, shown, (uint32_t)(ticks * 133));
+                world_settings_defaults(&settings);
+                settings.bindings = keep.bindings;
+                settings.fx_enable = 1;
+                settings.fx_smooth = settings.fx_interp = 0;
+                scene_submit();
+                for (unsigned pass = 0; pass < 2; ++pass)
+                    enhance(pixels, shown, (uint32_t)(ticks * 133 + pass * 67), 1, 1.0);
                 settings = keep;
                 shot_source = shown;
             }
@@ -893,7 +1014,7 @@ static void headless_run(const char *dir, const char *script_path)
                 fprintf(log, "%06lu stage %u", ticks, word(ram + 0x84));
                 for (unsigned i = 0; i < 3; ++i)
                     fprintf(log, " L%u %04x %04x m%04x", i, word(ram + 0xb706 + 4*i), word(ram + 0xb708 + 4*i), layer_master[i]);
-                fprintf(log, " vc %04x water %d\n", word(ram + 0x8b28), with_fx ? world_enhance_waterline() : -1);
+                fprintf(log, " vc %04x water %d\n", word(ram + 0x8b28), with_fx ? world_scene_waterline() : -1);
                 fclose(log);
             }
         }
@@ -972,6 +1093,18 @@ int main(int argc, char **argv)
         return 1;
     }
     world_ga20_reset(&pcm, samples, sizeof samples);
+    world_scene_init(gfx1, gfx2);
+    /* A game, not a background task: keep Windows from parking it on the
+       efficiency cores or slowing its clock when the window is not in front. */
+    {
+        PROCESS_POWER_THROTTLING_STATE power;
+        memset(&power, 0, sizeof power);
+        power.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        power.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        power.StateMask = 0;
+        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &power, sizeof power);
+        SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    }
     if ((timing_override || settings_status == WORLD_SETTINGS_MISSING) &&
         settings_status != WORLD_SETTINGS_NEWER_VERSION &&
         world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
@@ -1158,6 +1291,7 @@ int main(int argc, char **argv)
             }
             if (!lock_wait) {
                 memcpy(live, pixels, sizeof live);
+                scene_submit();
                 live_ticks = ticks;
                 lock_span = lock_next_span;
                 lock_wait = lock_k * lock_span;
@@ -1165,6 +1299,9 @@ int main(int argc, char **argv)
                 lock_ready = 0;
             }
             beam_step(lock_phase == 0);
+            /* In-between frames: this refresh's place between the last game
+               frame and the one on show; the final refresh shows it exactly. */
+            scene_alpha = (double)(lock_phase + 1) / (double)(lock_k * lock_span);
             present_game(live);
             ++presented;
             fresh = 0;
@@ -1195,6 +1332,8 @@ int main(int argc, char **argv)
                 deadline += period * elapsed_board_frames;
                 ticks += elapsed_board_frames;
                 draw();
+                scene_submit();
+                scene_alpha = 1.0;
                 counted += elapsed_board_frames;
                 fresh = 1;
             }
