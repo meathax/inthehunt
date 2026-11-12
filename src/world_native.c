@@ -137,12 +137,11 @@ static void apply_view(void)
        it waits for each refresh precisely and shows every frame on the
        refresh it was meant for. The CPU scanline effect needs the GDI view. */
     int flip = settings.pacing != 2 && !(settings.fx_enable && settings.fx_scanlines);
-    if (!world_window_set_crt(preset, (int)settings.crt_beam, flip, error, sizeof error)) {
+    if (!world_window_set_crt(preset, 0, flip, error, sizeof error)) {
         fprintf(stderr, "CRT view unavailable: %s\n", error);
-        if (preset[0] || settings.crt_beam) show_notice("CRT SHADER UNAVAILABLE");
+        if (preset[0]) show_notice("CRT SHADER UNAVAILABLE");
         settings.crt_shader = 0;
-        settings.crt_beam = 0;
-        world_window_set_crt("", 0, 0, NULL, 0);
+                world_window_set_crt("", 0, 0, NULL, 0);
     }
 }
 
@@ -179,7 +178,7 @@ static void overlay_notices(uint32_t *frame)
 {
     /* CRT presets compile in the background: say so, and fall back if one fails. */
     char why[256];
-    int compiling = world_gpu_active() ? world_gpu_preset_status(why, sizeof why) : 0;
+    int compiling = world_gpu_visible() ? world_gpu_preset_status(why, sizeof why) : 0;
     if (compiling > 0) show_notice("LOADING CRT SHADER");
     else if (compiling < 0) {
         fprintf(stderr, "CRT shader failed: %s%c", why, 10);
@@ -1076,9 +1075,17 @@ int main(int argc, char **argv)
             unsigned long every = strtoul(getenv("WORLD_TEST_CRT_CYCLE"), NULL, 10);
             if (every && test_refreshes % every == 0) {
                 settings.crt_shader = settings.crt_shader % WORLD_GPU_PRESETS + 1;
-                settings.crt_beam = 1;
-                apply_view();
+                                apply_view();
                 if (pacing_log) fprintf(pacing_log, "switch %u%c", settings.crt_shader, 10);
+            }
+        }
+        if (getenv("WORLD_TEST_PACING_CYCLE")) {
+            unsigned long every = strtoul(getenv("WORLD_TEST_PACING_CYCLE"), NULL, 10);
+            if (every && test_refreshes % every == 0) {
+                settings.pacing = (settings.pacing + 1) % 3;
+                apply_view();
+                if (pacing_log) fprintf(pacing_log, "pacing %u%c", settings.pacing, 10);
+                fprintf(stderr, "pacing switched to %u at refresh %lu%c", settings.pacing, test_refreshes, 10);
             }
         }
         if (getenv("WORLD_TEST_MENU") && !menu.open && test_refreshes == 180) {
@@ -1195,8 +1202,7 @@ int main(int argc, char **argv)
                clock; uncapped redraws every pass (v-sync, if on, paces it). */
             int show = 0;
             QueryPerformanceCounter(&now);
-            if (settings.crt_beam && world_window_gpu()) show = 1;   /* one sub-frame per display refresh */
-            else if (!limit) show = fresh;
+            if (!limit) show = fresh;
             else if (limit == 0xffffffffu) show = 1;
             else if (now.QuadPart >= present_deadline) {
                 show = 1;

@@ -33,7 +33,7 @@ PRESETS = [
     ("CRT-LOTTES", "crt/crt-lottes.slangp"),
     ("CRT-HYLLIAN", "crt/crt-hyllian.slangp"),
     ("EASYMODE", "crt/crt-easymode.slangp"),
-    ("NEWPIXIE", "crt/newpixie-crt.slangp"),
+    ("APERTURE", "crt/crt-aperture.slangp"),
     ("CONSUMER TV", "crt/crt-consumer.slangp"),
     ("CALIGARI", "crt/crt-caligari.slangp"),
     ("ZFAST", "crt/zfast-crt.slangp"),

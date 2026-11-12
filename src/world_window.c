@@ -130,7 +130,12 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
 {
     int wanted = (preset && *preset) || beam || flip;
     if (!wanted) {
-        world_gpu_close();
+        /* The Direct3D view is hidden, never destroyed: re-creating the
+           device during a session could lose it (DXGI_ERROR_DEVICE_REMOVED). */
+        if (world_gpu_active()) {
+            world_gpu_set_preset("", NULL, 0);
+            world_gpu_show(0);
+        }
         crt_preset[0] = 0;
         crt_beam = 0;
         if (window) InvalidateRect(window, NULL, FALSE);
@@ -138,6 +143,7 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
     }
     if (!window) return 0;
     if (!world_gpu_active() && !world_gpu_open(window, error, error_size)) return 0;
+    world_gpu_show(1);
     if (strcmp(preset ? preset : "", crt_preset)) {
         if (!world_gpu_set_preset(preset ? preset : "", error, error_size)) {
             if (!crt_preset[0] && !crt_beam) world_gpu_close();
@@ -153,7 +159,7 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
 }
 
 void world_window_set_source_time(double time) { source_time = time; }
-int world_window_gpu(void) { return world_gpu_active(); }
+int world_window_gpu(void) { return world_gpu_visible(); }
 
 void world_window_set_view(int scaling, int scanlines, int vsync)
 {
@@ -226,7 +232,7 @@ double world_window_refresh_hz(void)
 /* Block until the next display refresh has taken the last presented frame. */
 void world_window_wait_vblank(void)
 {
-    if (world_gpu_active()) {
+    if (world_gpu_visible()) {
         world_gpu_wait_frame();
         return;
     }
@@ -460,7 +466,7 @@ int world_window_poll(uint16_t *pads, uint16_t *system)
 void world_window_present(const uint32_t *pixels)
 {
     if (!window || !pixels) return;
-    if (world_gpu_active()) {
+    if (world_gpu_visible()) {
         if (IsIconic(window)) return;
         RECT rect;
         GetClientRect(window, &rect);

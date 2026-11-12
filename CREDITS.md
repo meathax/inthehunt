@@ -95,7 +95,7 @@ The source-annotated V33 instruction timing and prefetch accumulator in src/worl
 ## CRT shaders
 
 - [librashader](https://github.com/SnowflakePowered/librashader) v0.12.0 (SnowflakePowered and contributors, MPL-2.0) runs the RetroArch presets; loaded at run time from `librashader.dll`, unmodified. `src/post/librashader*.h` are its MIT-licensed C headers.
-- [libretro slang-shaders](https://github.com/libretro/slang-shaders) at `2345ee9`: CRT-Royale (TroggleMonkey; Kurozumi tuning), CRT-Guest-Advanced (guest(r), Dr. Venom), CRT-Geom (cgwg et al.), CRT-Lottes (Timothy Lottes), CRT-Hyllian (Hyllian), CRT-Easymode (EasyMode), NewPixie (Mattias Gustavsson, port by libretro), crt-consumer, crt-caligari, zfast-crt (Greg Hogan). Shipped unmodified as data in `shaders/`, each with its own notice; `shaders/SOURCES.md` lists them.
+- [libretro slang-shaders](https://github.com/libretro/slang-shaders) at `2345ee9`: CRT-Royale (TroggleMonkey; Kurozumi tuning), CRT-Guest-Advanced (guest(r), Dr. Venom), CRT-Geom (cgwg et al.), CRT-Lottes (Timothy Lottes), CRT-Hyllian (Hyllian), CRT-Easymode (EasyMode), CRT-Aperture (EasyMode), crt-consumer, crt-caligari, zfast-crt (Greg Hogan). Shipped unmodified as data in `shaders/`, each with its own notice; `shaders/SOURCES.md` lists them.
 - [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator) by Mark Rejhon and Timothy Lottes (MIT), ported into the post chain's beam pass.
 - [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) v1.9.2609 (LLVM / MIT), `dxcompiler.dll`.
 - `src/post/post_chain.*` comes from the same author's Gauntlet Dark Legacy port; its sharpening follows AMD FidelityFX CAS (MIT).

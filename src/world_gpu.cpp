@@ -17,11 +17,11 @@ using gdl::post::PreparedPreset;
 
 const char *const world_gpu_preset_name[WORLD_GPU_PRESETS] = {
     "CRT-ROYALE", "ROYALE PVM", "GUEST ADVANCED", "GUEST NTSC", "CRT-GEOM", "CRT-LOTTES",
-    "CRT-HYLLIAN", "EASYMODE", "NEWPIXIE", "CONSUMER TV", "CALIGARI", "ZFAST"};
+    "CRT-HYLLIAN", "EASYMODE", "APERTURE", "CONSUMER TV", "CALIGARI", "ZFAST"};
 const char *const world_gpu_preset_path[WORLD_GPU_PRESETS] = {
     "crt/crt-royale.slangp", "presets/crt-royale-kurozumi.slangp", "crt/crt-guest-advanced.slangp",
     "crt/crt-guest-advanced-ntsc.slangp", "crt/crt-geom.slangp", "crt/crt-lottes.slangp",
-    "crt/crt-hyllian.slangp", "crt/crt-easymode.slangp", "crt/newpixie-crt.slangp",
+    "crt/crt-hyllian.slangp", "crt/crt-easymode.slangp", "crt/crt-aperture.slangp",
     "crt/crt-consumer.slangp", "crt/crt-caligari.slangp", "crt/zfast-crt.slangp"};
 
 namespace {
@@ -140,6 +140,7 @@ void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
     s.keep_background = true;
     s.auto_progressive_fix = true;
     s.beam.enabled = beam != 0;
+    s.preset_curvature = false;           // flat screen, no vignette, in every preset
     s.source_fps = 60.0125f;
 }
 
@@ -180,6 +181,7 @@ struct Presenter {
     std::unique_ptr<PreparedPreset> built;
     std::string built_path, failed, failed_path;
     bool busy = false;
+    bool shown = true;
     ~Presenter() { DeleteCriticalSection(&lock); }
     double refresh_hz = 0.0;
     double last_source_time = 0.0;
@@ -419,6 +421,15 @@ extern "C" void world_gpu_close(void)
 
 extern "C" int world_gpu_active(void) { return gpu != nullptr; }
 
+extern "C" void world_gpu_show(int show)
+{
+    if (!gpu || gpu->shown == (show != 0)) return;
+    gpu->shown = show != 0;
+    ShowWindow(gpu->child, show ? SW_SHOWNA : SW_HIDE);
+}
+
+extern "C" int world_gpu_visible(void) { return gpu && gpu->shown; }
+
 extern "C" int world_gpu_set_preset(const char *path, char *error, size_t error_size)
 {
     if (!gpu) { say(error, error_size, "The shader view is not open."); return 0; }
@@ -498,7 +509,10 @@ extern "C" int world_gpu_frame_statistics(unsigned *present_count, unsigned *pre
 
 extern "C" void world_gpu_wait_frame(void)
 {
-    if (gpu && gpu->frame_wait) WaitForSingleObjectEx(gpu->frame_wait, 100, TRUE);
+    if (gpu && gpu->frame_wait) {
+        DWORD r = WaitForSingleObjectEx(gpu->frame_wait, 100, TRUE);
+        if (r != WAIT_OBJECT_0 && getenv("WORLD_PACING_LOG")) fprintf(stderr, "frame wait %lu%c", (unsigned long)r, 10);
+    }
 }
 
 extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
@@ -526,7 +540,9 @@ extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
     UINT f = p->frame_index;
     if (p->fence->GetCompletedValue() < p->frame_fence[f]) {
         p->fence->SetEventOnCompletion(p->frame_fence[f], p->event);
-        WaitForSingleObject(p->event, 1000);
+        WaitForSingleObject(p->event, 2000);
+        /* Never reset an allocator the GPU may still be using: skip this refresh. */
+        if (p->fence->GetCompletedValue() < p->frame_fence[f]) return;
     }
     p->alloc[f]->Reset();
     ID3D12GraphicsCommandList *cmd = p->cmd.get();
@@ -539,6 +555,9 @@ extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
 
     // Background: the border art at client size, or black.
     if (p->bg_dirty) {
+        /* Frames still on the GPU copy from the old background: let them
+           finish before releasing it. */
+        p->wait_all();
         p->bg.reset();
         p->bg_upload.reset();
         if (p->has_bg && p->bg_w == p->width && p->bg_h == p->height &&
@@ -599,7 +618,8 @@ extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
     p->queue->ExecuteCommandLists(1, lists);
     // The beam simulator needs every display refresh, so it always syncs.
     bool sync = p->vsync || p->beam;
-    p->swap->Present(sync ? 1 : 0, !sync && p->tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    HRESULT presented = p->swap->Present(sync ? 1 : 0, !sync && p->tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    if (FAILED(presented) && getenv("WORLD_PACING_LOG")) fprintf(stderr, "Present failed %08lx reason %08lx%c", (unsigned long)presented, (unsigned long)p->device->GetDeviceRemovedReason(), 10);
     ++p->fence_value;
     p->queue->Signal(p->fence.get(), p->fence_value);
     p->frame_fence[f] = p->fence_value;

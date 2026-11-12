@@ -25,6 +25,9 @@ int world_gpu_find_shaders(const char *data_dir, char *out, size_t size);
 int world_gpu_open(void *parent, char *error, size_t error_size);
 void world_gpu_close(void);
 int world_gpu_active(void);
+/* Hide or show the view; while hidden the window draws itself with GDI. */
+void world_gpu_show(int show);
+int world_gpu_visible(void);
 /* Full path of a .slangp, or "" for pass-through. Keeps the old preset on failure. */
 int world_gpu_set_preset(const char *path, char *error, size_t error_size);
 /* Preset compilation status: 1 compiling (or waiting to be installed),

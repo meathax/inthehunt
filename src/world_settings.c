@@ -35,7 +35,6 @@ static const NumberSetting numbers[] = {
     {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3},
     {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
     {"crt_shader", offsetof(WorldSettings, crt_shader), 0, 12},
-    {"crt_beam", offsetof(WorldSettings, crt_beam), 0, 1},
     {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
     {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
     {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},

@@ -35,7 +35,6 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FOCUS: return &s->pause_unfocused;
     case ITEM_DEMOSOUND: return &s->dip_demo_sound;
     case ITEM_FX: return &s->fx_enable;
-    case ITEM_BEAM: return &s->crt_beam;
     case ITEM_FX_CAUSTICS: return &s->fx_caustics;
     case ITEM_FX_RAYS: return &s->fx_rays;
     case ITEM_FX_LIGHTS: return &s->fx_lights;
@@ -212,7 +211,6 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
             ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION. GPU");
-            ADD(ITEM_BEAM, "BEAM SIMULATOR", "ROLLING SCAN. 120 HZ+ DISPLAYS");
             ADD(ITEM_PACING, "FRAME PACING", "SMOOTH LOCKS FRAMES TO THE DISPLAY");
             ADD(ITEM_VSYNC, "V-SYNC", "TIMER PACING ONLY");
             ADD(ITEM_FPS, "FPS LIMIT", "TIMER PACING ONLY. REDRAW RATE");

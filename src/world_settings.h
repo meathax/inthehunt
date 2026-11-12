@@ -28,7 +28,6 @@ typedef struct {
     unsigned dip_difficulty;     /* 0..3 = very easy, easy, normal, hard */
     unsigned dip_demo_sound;
     unsigned crt_shader;         /* 0 off, else 1 + index in world_gpu_preset_path */
-    unsigned crt_beam;           /* Blur Busters beam simulator */
     unsigned fx_enable;
     unsigned fx_caustics;
     unsigned fx_rays;

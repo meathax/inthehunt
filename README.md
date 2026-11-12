@@ -38,7 +38,6 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
     - Window size: sharp ×1 to ×8
     - Scaling: Integer (sharpest), Fit 4:3 (largest picture that keeps the shape) or Stretch (fill the window)
     - CRT shader: Off or one of twelve CRT looks (see below)
-    - Beam simulator: Blur Busters CRT rolling-scan simulation for 120 Hz and faster displays
     - Frame pacing: Smooth (default), Exact 60.01 or Timer (see below)
     - V-Sync and FPS limit: Timer pacing only (FPS limit: Arcade, 90, 120, 180, 240 or Uncapped)
     - Show FPS: frame rate and game speed in the corner
@@ -78,14 +77,14 @@ Sound never blocks the game: it is queued and stretched or squeezed by at most 0
 | CRT-LOTTES | `crt/crt-lottes` | Timothy Lottes's shadow-mask CRT |
 | CRT-HYLLIAN | `crt/crt-hyllian` | Hyllian's sharp scanline CRT |
 | EASYMODE | `crt/crt-easymode` | EasyMode's balanced flat CRT |
-| NEWPIXIE | `crt/newpixie-crt` | Vivid, glowing, slightly curved |
+| APERTURE | `crt/crt-aperture` | Sharp aperture grille with glow |
 | CONSUMER TV | `crt/crt-consumer` | A domestic television |
 | CALIGARI | `crt/crt-caligari` | Soft phosphor glow |
 | ZFAST | `crt/zfast-crt` | Lightweight, for slower GPUs |
 
-**BEAM SIMULATOR** is the [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator) (Mark Rejhon and Timothy Lottes): on a display faster than the game's 60 Hz it draws each game frame as a rolling scan over several refreshes, as a tube does, which restores CRT motion clarity. It needs a 120 Hz or faster display and always uses V-Sync. It combines with any CRT shader.
+Every preset is shown **flat**: the presets' own screen curvature, rounded corners and vignettes (darkened edges) are switched off when they load, so the whole picture stays square and evenly lit.
 
-Presets compile in the background (CRT-Royale takes about 5 s), so the game and menu keep running and the previous look stays up, with LOADING CRT SHADER in the corner, until the new one is ready. The CRT view is used only while a shader or the beam simulator is selected; otherwise the window draws itself as before. Border art, scaling and the enhancements carry through. If Direct3D 12 or the shader files are missing, the game says so in the corner and falls back to the normal picture. The presets ship in `shaders/` as data files (mostly GPL; `shaders/SOURCES.md` lists every file and its licence).
+Presets compile in the background (CRT-Royale takes about 5 s), so the game and menu keep running and the previous look stays up, with LOADING CRT SHADER in the corner, until the new one is ready. The Direct3D view is used for the CRT shaders and for Smooth/Exact pacing; otherwise the window draws itself as before. Border art, scaling and the enhancements carry through. If Direct3D 12 or the shader files are missing, the game says so in the corner and falls back to the normal picture. The presets ship in `shaders/` as data files (mostly GPL; `shaders/SOURCES.md` lists every file and its licence).
 
 ### Enhancements
 
@@ -180,7 +179,7 @@ python tools/package_source.py     # → .local/release/inthehunt-source.zip (ev
 | `src/world_clock.c`, `world_cycle_costs.c`, `world_timing_options.c` | Board clock and the slowdown model |
 | `src/world_window.c`, `world_input.c`, `world_border.c`, `world_menu.c`, `world_settings.c` | Window, XInput/keyboard, border art, pause menu, settings |
 | `src/world_enhance.c` | Optional picture enhancements (post-process only) |
-| `src/world_gpu.cpp`, `src/post/` | Direct3D 12 presenter and post chain: librashader presets and the beam simulator |
+| `src/world_gpu.cpp`, `src/post/` | Direct3D 12 presenter and post chain: frame pacing and librashader CRT presets |
 | `src/world_boot.c` | ROM import checks and cold-boot state |
 | `src/world_io.c`, `world_motion.c`, `world_sound.c`, `world_tile_v33.c` | Early V33 reference routines used by the MAME hybrid tools |
 | `src/third_party/ymfm` | Aaron Giles's YM2151 emulator (BSD-3-Clause) |
@@ -205,7 +204,7 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_CRT_SHOT=frame` | Render that frame through every CRT preset off screen at 1920×1080 (Direct3D 12) |
 | `WORLD_SCROLL_LOG=path` | Log the layer scroll registers at every board frame |
 | `WORLD_OFFSCREEN=1`, `WORLD_PACING_LOG=path`, `WORLD_RUN_SECONDS=n` | Windowed pacing test on the real display: window off the desktop, never focused; logs every refresh with DXGI present statistics, quits after *n* s |
-| `WORLD_TEST_CRT_CYCLE=n`, `WORLD_TEST_MENU=1` | With the pacing test: switch to the next CRT preset (beam simulator on) every *n* refreshes; hold the pause menu open |
+| `WORLD_TEST_CRT_CYCLE=n`, `WORLD_TEST_PACING_CYCLE=n`, `WORLD_TEST_MENU=1` | With the pacing test: switch to the next CRT preset / frame-pacing mode every *n* refreshes; hold the pause menu open |
 
 ### Slowdown model
 

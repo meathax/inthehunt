@@ -252,11 +252,20 @@ const std::pair<const char*, float> kProgressiveFix[] = {
     {"HSM_INTERLACE_MODE", 0.0f},       // Mega Bezel: NO LACE
 };
 // The presets' own curvature switches, used when Settings::preset_curvature is false.
+// In the Hunt port: this also flattens rounded corners and switches off every
+// vignette and darkened tube edge, so all presets show a flat, evenly lit picture.
 const std::pair<const char*, float> kCurvatureOff[] = {
     {"warpX", 0.0f}, {"warpY", 0.0f},   // CRT-Guest-Advanced, Lottes
+    {"warpx", 0.0f}, {"warpy", 0.0f},   // crt-consumer and relatives
     {"geom_mode_runtime", 0.0f},        // CRT-Royale
     {"HSM_CURVATURE_MODE", 0.0f},       // Mega Bezel
-    {"CURVATURE", 0.0f},                // zfast curvature variants and others
+    {"CURVATURE", 0.0f},                // CRT-Geom, zfast curvature variants and others
+    {"curvature", 0.0001f},             // NewPixie-style curvature (its minimum)
+    {"CURVATURE_X", 0.0f}, {"CURVATURE_Y", 0.0f},   // CRT-Pi
+    {"corner", 0.0f}, {"csize", 0.0f},  // rounded picture corners
+    {"cornersize", 0.001f},             // CRT-Geom corner (its minimum)
+    {"vignette", 0.0f}, {"vpower", 0.0f}, {"vstr", 0.0f}, {"vigstr", 0.0f},   // vignettes
+    {"border_size", 0.0000001f},        // CRT-Royale darkened screen edge (its minimum)
 };
 
 }  // namespace
