@@ -264,7 +264,10 @@ static void beam_step(int new_frame)
 
 static void present_game(const uint32_t *source)
 {
-    int k = shown_k = enhance(source, shown, effect_clock(), scene_scale(), scene_alpha);
+    /* The title menu sits over the running attract sequence, at 1x. */
+    int title = menu.open && menu.title && !menu.peek;
+    int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
+    if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
     overlay_notices(shown, k);
     if (settings.show_fps && shown_fps) {
         char label[32];
@@ -281,13 +284,14 @@ static void apply_border(void)
     world_window_set_border(strcmp(settings.border, "black") ? settings.border_image : "", settings.border_brightness);
 }
 
-/* Runs the open pause menu for one frame on the paused picture. Returns 0
- * when the player chose to quit. */
-static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, unsigned rising, int gamepad)
+/* Runs the open menu for one frame: the pause menu on the paused picture,
+ * the title menu (drawn by present_game over the live game). Returns the
+ * world_menu_update result bits. */
+static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, unsigned rising, int gamepad)
 {
     if (toggle & 2) held |= WORLD_MENU_BACK;           /* Esc steps back inside the menu */
     unsigned result = 0;
-    if (rising & 1) {
+    if ((rising & 1) && !menu.title) {
         menu.open = 0;
         result = WORLD_MENU_RESUME | (menu.dirty ? WORLD_MENU_SAVE : 0);
     } else
@@ -298,7 +302,7 @@ static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, un
     if (result & WORLD_MENU_TIMING) world_clock_request_mode(&board_clock, settings.timing_mode);
     if ((result & WORLD_MENU_SAVE) && world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
         fprintf(stderr, "Could not save native settings.\n");
-    if (result & WORLD_MENU_QUIT) return 0;
+    if ((result & WORLD_MENU_QUIT) || menu.title) return result;
     if (menu.open && menu.peek) {
         scene_alpha = 1.0;
         /* Preview held on the enhancements page: the paused picture alone. */
@@ -310,7 +314,7 @@ static int menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, un
         beam_step(0);
         world_window_present(pixels, 1);
     }
-    return 1;
+    return result;
 }
 
 static unsigned word(const uint8_t *p) { return p[0] | ((unsigned)p[1] << 8); }
@@ -740,7 +744,30 @@ static void headless_run(const char *dir, const char *script_path)
         }
         fclose(f);
     }
+    /* WORLD_SCRIPT_RELATIVE=1: script frames count from the loaded snapshot. */
+    unsigned long script_base = getenv("WORLD_SCRIPT_RELATIVE") ? ticks : 0;
+    at += script_base;
+    /* WORLD_SNAPSHOT_STAGES=dir: a snapshot each time the stage changes. */
+    const char *stage_dir = getenv("WORLD_SNAPSHOT_STAGES");
+    unsigned last_stage = 0xffff, stage_count = 0;
     for (;;) {
+        if (stage_dir && word(ram + 0x80) == 0xb2e && word(ram + 0x84) != last_stage) {
+            last_stage = word(ram + 0x84);
+            char path[4096];
+            snprintf(path, sizeof path, "%s/stage%02u-%u.snap", stage_dir, stage_count++, last_stage);
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                fwrite(ram, sizeof ram, 1, f);
+                fwrite(tiles, sizeof tiles, 1, f);
+                fwrite(oam, sizeof oam, 1, f);
+                fwrite(palette, sizeof palette, 1, f);
+                fwrite(layer_master, sizeof layer_master, 1, f);
+                fwrite(&ticks, sizeof ticks, 1, f);
+                fwrite(&board_clock, sizeof board_clock, 1, f);
+                fwrite(sound_state, sizeof sound_state, 1, f);
+                fclose(f);
+            }
+        }
         /* WORLD_MENU_SHOT=frame renders every menu page over that frame. */
         static int menu_shot_done;
         const char *menu_shot = getenv("WORLD_MENU_SHOT");
@@ -760,6 +787,17 @@ static void headless_run(const char *dir, const char *script_path)
                 world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i);
                 char name[32];
                 snprintf(name, sizeof name, "menu%u", i);
+                headless_shot(dir, name);
+            }
+            static const unsigned title_pages[][2] = {{0, 0}, {0, 2}, {3, 1}};
+            for (unsigned i = 0; i < sizeof title_pages / sizeof title_pages[0]; ++i) {
+                world_menu_open_title(&menu, 0, i & 1, 0);
+                menu.page = title_pages[i][0];
+                menu.row = title_pages[i][1];
+                memcpy(pixels, still, sizeof still);
+                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i);
+                char name[32];
+                snprintf(name, sizeof name, "title%u", i);
                 headless_shot(dir, name);
             }
             memcpy(pixels, still, sizeof still);
@@ -914,6 +952,7 @@ static void headless_run(const char *dir, const char *script_path)
             if (fscanf(script, "%31s", third) == 1 && !strcmp(third, "shot")) shot = 1;
             else fseek(script, mark, SEEK_SET);
             fields = fscanf(script, "%lu %31s", &at, first);
+            at += script_base;
         }
         if (fields != 2) break;
         unsigned input = autopilot ? headless_autopilot(held) : held;
@@ -1048,6 +1087,64 @@ done:
     }
 }
 
+/* Cabinet switch bank 1 as the board reads it (active low): lives on bits
+   0-1, difficulty on bits 2-3, demo sound on bit 6. */
+static uint16_t cabinet_switches(void)
+{
+    static const uint16_t lives[4] = {2, 3, 1, 0}, difficulty[4] = {0x0, 0x8, 0xc, 0x4};
+    return (uint16_t)((0xffbf & ~0x4f) | lives[settings.dip_lives & 3] |
+                      difficulty[settings.dip_difficulty & 3] | (settings.dip_demo_sound ? 0 : 0x40));
+}
+
+static void set_cabinet_switches(void) { world_dispatch_port4 = cabinet_switches(); }
+
+/* Sound board power-on: the command gate and the title's reset command. */
+static void sound_power_on(void)
+{
+    world_ym_reset();
+    world_audio_reset_ym(sound_rom, sound_fm_write, NULL);
+    world_audio_reset(sound_state, sound_rom, 0);
+    world_audio_receive(sound_state, 0); /* Power-on command gate. */
+    world_audio_receive(sound_state, 0x20); /* Title initialization's reset command. */
+    world_audio_tick(sound_state, sound_rom, &sound_bus);
+}
+
+/* Exit to menu: the whole board back to power-on, with the cabinet switches
+   as they are set now. */
+static void machine_reset(void)
+{
+    set_cabinet_switches();
+    world_dispatch_reset();
+    world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
+    static const uint16_t power_on_master[3] = {0, 0x41, 2};
+    memcpy(layer_master, power_on_master, sizeof layer_master);
+    ticks = 0;
+    world_clock_reset(&board_clock, settings.timing_mode);
+    world_ga20_reset(&pcm, samples, sizeof samples);
+    sound_frame_phase = sound_timer_phase = 0;
+    sound_power_on();
+    memset(slowdown_shadow, 0, sizeof slowdown_shadow);
+    world_scene_reset();
+}
+
+/* START GAME on the title menu drops a coin and presses 1P start, as a
+   player at the cabinet would; the title menu itself keeps the game's
+   controls idle. start_from is the board frame the sequence began on. */
+static unsigned long start_from;
+static int starting;
+
+static int play_tick(uint16_t pads, uint16_t system)
+{
+    if (menu.open && menu.title) pads = system = 0xffff;
+    if (starting) {
+        unsigned long d = ticks - start_from;
+        if (d < 6) system &= (uint16_t)~4;                                /* coin 1 */
+        else if (d % 60 >= 50 && d % 60 < 56) system &= (uint16_t)~1;     /* 1P start */
+        if ((d > 60 && word(ram + 0x80) == 0xb2e) || d > 400) starting = 0;
+    }
+    return tick(pads, system);
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".local/world";
@@ -1077,15 +1174,7 @@ int main(int argc, char **argv)
         if (!headless) MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
         return 1;
     }
-    if (!headless) {
-        /* Cabinet switch bank 1 as the board reads it (active low): lives on
-           bits 0-1, difficulty on bits 2-3, demo sound on bit 6. Scripted
-           runs keep the factory setting. */
-        static const uint16_t lives[4] = {2, 3, 1, 0}, difficulty[4] = {0x0, 0x8, 0xc, 0x4};
-        world_dispatch_port4 = (uint16_t)((0xffbf & ~0x4f) | lives[settings.dip_lives & 3] |
-                                          difficulty[settings.dip_difficulty & 3] |
-                                          (settings.dip_demo_sound ? 0 : 0x40));
-    }
+    if (!headless) set_cabinet_switches();      /* scripted runs keep the factory setting */
     if (!world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4)) {
         if (!headless) MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
                                    "In The Hunt", MB_ICONERROR);
@@ -1111,12 +1200,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Could not save native settings.\n");
     fprintf(stderr, "Timing policy: %s (pass costs fitted to MAME measurements).\n",
             world_timing_mode_label(settings.timing_mode));
-    world_ym_reset();
-    world_audio_reset_ym(sound_rom, sound_fm_write, NULL);
-    world_audio_reset(sound_state, sound_rom, 0);
-    world_audio_receive(sound_state, 0); /* Power-on command gate. */
-    world_audio_receive(sound_state, 0x20); /* Title initialization's reset command. */
-    world_audio_tick(sound_state, sound_rom, &sound_bus);
+    sound_power_on();
     if (headless) {
         headless_run(dir, headless);
         goto finished;
@@ -1161,13 +1245,15 @@ int main(int argc, char **argv)
     static uint32_t live[320 * 240];          /* the game frame on show while locked */
     LONGLONG lock_checked = 0;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    world_menu_open_title(&menu, 0, 0, GetTickCount());
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
     FILE *pacing_log = getenv("WORLD_PACING_LOG") ? fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
     double run_seconds = getenv("WORLD_RUN_SECONDS") ? atof(getenv("WORLD_RUN_SECONDS")) : 0.0;
     LONGLONG run_start = now.QuadPart;
     while (world_window_poll(&pads, &system)) {
-        /* F1, Esc or L3+R3 opens the pause menu; the game stands still. */
+        /* F1, Esc, a pad's Start or L3+R3 opens the pause menu; the game
+           stands still. The title menu runs over the live attract sequence. */
         unsigned toggle;
         int gamepad;
         unsigned menu_held = world_window_menu_buttons(&toggle, &gamepad);
@@ -1175,7 +1261,7 @@ int main(int argc, char **argv)
         previous_toggle = toggle;
         /* Losing the window focus pauses, when that option is on. */
         int focused = world_window_focused();
-        if (settings.pause_unfocused && was_focused && !focused && !menu.open) rising |= 1;
+        if (settings.pause_unfocused && was_focused && !focused && !menu.open && !starting) rising |= 1;
         was_focused = focused;
         QueryPerformanceCounter(&now);
         if (run_seconds > 0.0 && (double)(now.QuadPart - run_start) > run_seconds * (double)rate.QuadPart) break;
@@ -1226,12 +1312,50 @@ int main(int argc, char **argv)
             world_menu_open(&menu, 0, 0, GetTickCount());
             menu.page = 1;
         }
+        /* WORLD_TEST_TITLE=1: START GAME, play, EXIT TO MENU, START GAME again,
+           logging the game's master state; quits when done. */
+        if (getenv("WORLD_TEST_TITLE")) {
+            static unsigned phase;
+            static unsigned long logged = 1;
+            if (ticks / 60 != logged) {
+                logged = ticks / 60;
+                fprintf(stderr, "title-test phase %u tick %lu master %04X menu %u/%u starting %d%c",
+                        phase, ticks, word(ram + 0x80), menu.open, menu.title, starting, 10);
+            }
+            if ((phase == 0 || phase == 2) && ticks >= 120 && menu.open && menu.title) {
+                menu.open = 0;
+                starting = 1;
+                start_from = ticks;
+                ++phase;
+            } else if (phase == 1 && ticks >= 900) {
+                machine_reset();
+                starting = 0;
+                world_menu_open_title(&menu, 0, 0, GetTickCount());
+                ++phase;
+            } else if (phase == 3 && ticks >= 900) break;
+        }
         unsigned limit = world_menu_fps[settings.fps_limit];
         double period = arcade_period;
         double display_period = !limit || limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
-        if (menu.open) {
-            if (!menu_frame(paused_frame, menu_held, toggle, rising, gamepad)) break;
-            if (!menu.open) {
+        if (menu.open && menu.title) {
+            unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
+            if (result & WORLD_MENU_QUIT) break;
+            if (result & WORLD_MENU_START) {
+                /* The game reads its switches at power-on: changed ones need a fresh board. */
+                if (cabinet_switches() != world_dispatch_port4) machine_reset();
+                starting = 1;
+                start_from = ticks;
+                hold_input = 1;
+            }
+        } else if (menu.open) {
+            unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
+            if (result & WORLD_MENU_QUIT) break;
+            if (result & WORLD_MENU_TITLE) {
+                machine_reset();
+                starting = 0;
+                world_menu_open_title(&menu, menu_held, gamepad, GetTickCount());
+            }
+            if (!menu.open || menu.title) {
                 hold_input = 1;
                 previous_toggle = toggle;
                 QueryPerformanceCounter(&now);
@@ -1248,7 +1372,7 @@ int main(int argc, char **argv)
             }
             continue;
         }
-        if (rising) {
+        if (rising && !menu.open) {
             memcpy(paused_frame, lock_k ? live : pixels, sizeof paused_frame);
             world_menu_open(&menu, menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0), gamepad, GetTickCount());
             menu_frame(paused_frame, menu_held, toggle, 0, gamepad);
@@ -1278,7 +1402,7 @@ int main(int argc, char **argv)
                    catch-up pass only advances the game. */
                 unsigned span = 0;
                 for (unsigned r = 0; r < runs; ++r) {
-                    if (!tick(pads, system)) { runs = 99; break; }
+                    if (!play_tick(pads, system)) { runs = 99; break; }
                     ticks += elapsed_board_frames;
                     lock_ticks += elapsed_board_frames;
                     counted += elapsed_board_frames;
@@ -1319,7 +1443,7 @@ int main(int argc, char **argv)
         } else {
             if (now.QuadPart >= deadline) {
                 if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
-                if (!tick(pads, system)) break;
+                if (!play_tick(pads, system)) break;
                 double present_at = deadline + period * (elapsed_board_frames - 1);
                 int window_open = 1;
                 QueryPerformanceCounter(&now);
@@ -1382,6 +1506,8 @@ finished:
     if (slowdown_gameplay)
         fprintf(stderr, "  gameplay passes %llu: mean estimate %llu cycles, mean actors %.1f%c", slowdown_gameplay,
                 slowdown_sum_cycles / slowdown_gameplay, (double)slowdown_sum_actors / (double)slowdown_gameplay, 10);
+    if (world_dispatch_estimates)
+        fprintf(stderr, "Register estimates: %lu (last: %s)%c", world_dispatch_estimates, world_dispatch_estimate_note, 10);
     fprintf(stderr, "Slowdown model: %lu of %lu passes overran, %lu frames lost.\n", slowdown_overruns, slowdown_passes, slowdown_frames);
     if (sound_gaps) fprintf(stderr, "%u sound callbacks need recovery.\n", sound_gaps);
     fprintf(stderr, "%llu executed blocks have unrecovered original timing in this run.\n",

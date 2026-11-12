@@ -440,7 +440,9 @@ static void poll_controller(unsigned player, uint16_t *held, uint16_t *buttons)
     if (pressed & XINPUT_GAMEPAD_A) value |= 0x80;
     if (pressed & XINPUT_GAMEPAD_B) value |= 0x40;
     *held |= (uint16_t)(value << (player * 8));
-    if (pressed & XINPUT_GAMEPAD_START) *buttons |= (uint16_t)(1 << player);
+    /* A is also the cabinet's start button (start, join, continue); the
+       pad's own Start button opens the pause menu instead. */
+    if (pressed & XINPUT_GAMEPAD_A) *buttons |= (uint16_t)(1 << player);
     if (pressed & XINPUT_GAMEPAD_BACK) *buttons |= (uint16_t)(4 << player);
 }
 
@@ -554,7 +556,7 @@ void world_window_close(void)
 /* Menu navigation from either keyboard or any pad, as held levels:
  * up 1, down 2, left 4, right 8, accept 16, back 32, page back 64, page on 128,
  * preview 256 (P or pad Y).
- * The toggle level is F1, Esc, or L3 and R3 held together. */
+ * The toggle level is F1, Esc, a pad's Start, or L3 and R3 held together. */
 unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
 {
     unsigned held = 0;
@@ -575,12 +577,13 @@ unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
         held |= ((b & XINPUT_GAMEPAD_DPAD_DOWN) || pad_ly[player] < -12000) ? 2 : 0;
         held |= ((b & XINPUT_GAMEPAD_DPAD_LEFT) || pad_lx[player] < -12000) ? 4 : 0;
         held |= ((b & XINPUT_GAMEPAD_DPAD_RIGHT) || pad_lx[player] > 12000) ? 8 : 0;
-        held |= (b & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_START)) ? 16 : 0;
+        held |= (b & XINPUT_GAMEPAD_A) ? 16 : 0;
         held |= (b & XINPUT_GAMEPAD_B) ? 32 : 0;
         held |= (b & XINPUT_GAMEPAD_LEFT_SHOULDER) ? 64 : 0;
         held |= (b & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? 128 : 0;
         held |= (b & XINPUT_GAMEPAD_Y) ? 256 : 0;
-        if ((b & XINPUT_GAMEPAD_LEFT_THUMB) && (b & XINPUT_GAMEPAD_RIGHT_THUMB)) toggle_level = 1;
+        if ((b & XINPUT_GAMEPAD_START) ||
+            ((b & XINPUT_GAMEPAD_LEFT_THUMB) && (b & XINPUT_GAMEPAD_RIGHT_THUMB))) toggle_level = 1;
     }
     if (toggle) *toggle = toggle_level | escape << 1;
     if (gamepad) *gamepad = last_device_pad;

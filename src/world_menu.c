@@ -22,7 +22,8 @@ enum {
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
     ITEM_CRT, ITEM_BEAM, ITEM_PACING,
     ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
-    ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP
+    ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
+    ITEM_START
 };
 enum { MAX_ITEMS = 40, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -212,10 +213,15 @@ static unsigned page_items(const WorldMenu *m, Item *items)
 #define ADD(i, l, h) (items[n].id = (i), items[n].label = (l), items[n].help = (h), ++n)
     switch (m->page) {
     case PAGE_MAIN:
-        ADD(ITEM_RESUME, "RESUME", "BACK TO THE HUNT");
-        ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND AND GAME SETTINGS");
-        ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
-        ADD(ITEM_QUIT, "QUIT GAME", "CLOSE IN THE HUNT");
+        if (m->title) {
+            ADD(ITEM_START, "START GAME", "INSERT A COIN AND DIVE IN");
+            ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND, GAME AND CONTROLS");
+            ADD(ITEM_QUIT, "EXIT", "CLOSE IN THE HUNT");
+        } else {
+            ADD(ITEM_RESUME, "RESUME", "BACK TO THE HUNT");
+            ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND, GAME AND CONTROLS");
+            ADD(ITEM_QUIT, "EXIT TO MENU", "END THIS GAME");
+        }
         break;
     case PAGE_OPTIONS:
         ADD(ITEM_TABS, "", "LEFT/RIGHT CHANGES THE PAGE");
@@ -236,10 +242,11 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_PCM, "PCM SAMPLES", "GA20 SAMPLE LEVEL");
         } else if (m->tab == TAB_GAME) {
             ADD(ITEM_SLOWDOWN, "SLOWDOWN", "ARCADE KEEPS ORIGINAL SLOWDOWN");
-            ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT LAUNCH");
-            ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT LAUNCH");
-            ADD(ITEM_DEMOSOUND, "DEMO SOUND", "CABINET SWITCH. NEXT LAUNCH");
+            ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT NEW GAME");
+            ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT NEW GAME");
+            ADD(ITEM_DEMOSOUND, "DEMO SOUND", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_FOCUS, "AUTO PAUSE", "PAUSE WHEN THE WINDOW LOSES FOCUS");
+            ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
         } else {
             ADD(ITEM_FX, "ENHANCEMENTS", "MASTER SWITCH. OFF IS PURE ARCADE");
@@ -266,14 +273,14 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_SHAKE, "SHAKE + RUMBLE", "BLASTS SHAKE SCREEN AND PAD");
             ADD(ITEM_FX_STEREO, "STEREO 3D", "RED-CYAN GLASSES");
         }
-        ADD(ITEM_BACK, "BACK", "RETURN TO THE PAUSE MENU");
+        ADD(ITEM_BACK, "BACK", m->title ? "RETURN TO THE TITLE MENU" : "RETURN TO THE PAUSE MENU");
         break;
     case PAGE_CONTROLS:
         ADD(ITEM_BACK, "BACK", "");
         break;
     default:
-        ADD(ITEM_NO, "NO", "KEEP PLAYING");
-        ADD(ITEM_YES, "YES", "CLOSE IN THE HUNT");
+        ADD(ITEM_NO, "NO", m->title ? "STAY" : "KEEP PLAYING");
+        ADD(ITEM_YES, "YES", m->title ? "CLOSE IN THE HUNT" : "END THIS GAME");
         break;
     }
 #undef ADD
@@ -359,7 +366,17 @@ void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
     m->dirty = 0;
     m->peek = 0;
     m->opened_at = now_ms;
+    m->title = 0;
 }
+
+void world_menu_open_title(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
+{
+    world_menu_open(m, held, gamepad, now_ms);
+    m->title = 1;
+}
+
+/* The row of the CONTROLS entry on the options GAME tab. */
+enum { CONTROLS_ROW = 6 };
 
 static unsigned step_percent(unsigned value, int direction)
 {
@@ -458,8 +475,13 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
     m->peek = m->page == PAGE_OPTIONS && m->tab == TAB_ENHANCE && (held & WORLD_MENU_PEEK);
 
     if (pressed & WORLD_MENU_BACK) {
-        if (m->page == PAGE_MAIN) { m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0); }
-        go(m, PAGE_MAIN, m->page == PAGE_OPTIONS ? 1 : m->page == PAGE_CONTROLS ? 2 : 3);
+        if (m->page == PAGE_MAIN) {
+            if (m->title) return 0;
+            m->open = 0;
+            return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
+        }
+        if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
+        else go(m, PAGE_MAIN, m->page == PAGE_OPTIONS ? 1 : 2);
         return 0;
     }
     if (m->page == PAGE_OPTIONS && (pressed & (WORLD_MENU_TAB_PREV | WORLD_MENU_TAB_NEXT))) {
@@ -488,12 +510,19 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
     } else if (pressed & WORLD_MENU_ACCEPT) {
         switch (id) {
         case ITEM_RESUME: m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
+        case ITEM_START: m->open = 0; return WORLD_MENU_START | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_OPTIONS: go(m, PAGE_OPTIONS, m->rows[PAGE_OPTIONS] ? m->rows[PAGE_OPTIONS] : 1); return 0;
         case ITEM_CONTROLS: go(m, PAGE_CONTROLS, 0); return 0;
         case ITEM_QUIT: go(m, PAGE_QUIT, 0); return 0;
-        case ITEM_NO: go(m, PAGE_MAIN, 3); return 0;
-        case ITEM_YES: return WORLD_MENU_QUIT | (m->dirty ? WORLD_MENU_SAVE : 0);
-        case ITEM_BACK: go(m, PAGE_MAIN, m->page == PAGE_OPTIONS ? 1 : 2); return 0;
+        case ITEM_NO: go(m, PAGE_MAIN, 2); return 0;
+        case ITEM_YES:
+            if (m->title) return WORLD_MENU_QUIT | (m->dirty ? WORLD_MENU_SAVE : 0);
+            m->open = 0;
+            return WORLD_MENU_TITLE | (m->dirty ? WORLD_MENU_SAVE : 0);
+        case ITEM_BACK:
+            if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
+            else go(m, PAGE_MAIN, 1);
+            return 0;
         case ITEM_TABS: m->tab = (m->tab + 1) % TAB_COUNT; return 0;
         case ITEM_DEFAULTS: {
             WorldSettings fresh;
@@ -579,8 +608,10 @@ static const char *hints(const WorldMenu *m)
     if (m->page == PAGE_OPTIONS && m->tab == TAB_ENHANCE)
         return m->gamepad ? "HOLD Y PREVIEW  B BACK" : "HOLD P PREVIEW  ESC BACK";
     if (m->gamepad)
-        return m->page == PAGE_OPTIONS ? "A OK  B BACK  LB RB PAGE" : "A OK  B BACK  L3+R3 CLOSE";
-    return m->page == PAGE_OPTIONS ? "ENTER OK  ESC BACK  Q E PAGE" : "ENTER OK  ESC BACK  F1 CLOSE";
+        return m->page == PAGE_OPTIONS ? "A OK  B BACK  LB RB PAGE"
+             : m->title ? "A OK  B BACK" : "A OK  B BACK  START RESUME";
+    return m->page == PAGE_OPTIONS ? "ENTER OK  ESC BACK  Q E PAGE"
+         : m->title ? "ENTER OK  ESC BACK" : "ENTER OK  ESC BACK  F1 RESUME";
 }
 
 static void controls_page(uint32_t *c, const uint8_t *gfx1, const Ramp *head, const Ramp *body, const Ramp *value)
@@ -589,10 +620,10 @@ static void controls_page(uint32_t *c, const uint8_t *gfx1, const Ramp *head, co
         {"MOVE", "ARROWS", "D-PAD"},
         {"TORPEDO", "Z", "A"},
         {"MISSILE", "X", "B"},
-        {"START", "1", "START"},
+        {"START", "1", "A"},
         {"COIN", "5", "BACK"},
         {"PLAYER 2", "WASD G H", "PAD 2"},
-        {"PAUSE MENU", "F1/ESC", "L3+R3"},
+        {"PAUSE MENU", "F1/ESC", "START"},
     };
     text(c, gfx1, 40, 66, "ACTION", head);
     text(c, gfx1, 136, 66, "KEYS", head);
@@ -606,17 +637,43 @@ static void controls_page(uint32_t *c, const uint8_t *gfx1, const Ramp *head, co
     }
 }
 
+/* The title menu: the attract sequence (with the game's own logo) keeps
+   playing, the choices sit on a panel over its coin prompt. */
+static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms)
+{
+    Ramp normal = steel(), picked = gold();
+    for (int y = 120; y < H; ++y)                       /* darken toward the bottom */
+        shade(c, 0, y, W, 1, 0xff020a16, (unsigned)(y - 120));
+    fill(c, 96, 140, W - 192, 72, 0xff040e1e);
+    panel(c, 96, 140, W - 192, 72);
+    Item items[MAX_ITEMS];
+    unsigned count = page_items(m, items);
+    int bob = (int)((now_ms / 120) % 4);
+    bob = bob == 3 ? 1 : bob;
+    int y = 153;
+    for (unsigned i = 0; i < count; ++i, y += 18) {
+        int here = i == m->row;
+        if (here) {
+            shade(c, 103, y - 4, W - 206, 15, 0xff1c4c6c, 230);
+            fill(c, 103, y - 4, 2, 15, 0xffd8a848);
+            torpedo(c, 110 + bob, y + 1, 0);
+        }
+        text(c, gfx1, (W - text_px(items[i].label)) / 2 + 6, y, items[i].label, here ? &picked : &normal);
+    }
+}
+
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
                        const uint8_t *gfx1, uint32_t now_ms)
 {
     if (!m->open || m->peek || !c || !gfx1) return;
+    if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);
     int top = m->page == PAGE_QUIT ? 66 : 18, bottom = m->page == PAGE_QUIT ? 174 : 224;
     panel(c, 20, top, W - 40, bottom - top);
 
-    static const char *titles[] = {"PAUSED", "OPTIONS", "CONTROLS", "QUIT GAME"};
-    big_text_center(c, gfx1, top + 10, titles[m->page], &title);
+    static const char *titles[] = {"PAUSED", "OPTIONS", "CONTROLS", "EXIT TO MENU"};
+    big_text_center(c, gfx1, top + 10, m->title && m->page == PAGE_QUIT ? "EXIT GAME" : titles[m->page], &title);
     rule(c, top + 30);
 
     Item items[MAX_ITEMS];

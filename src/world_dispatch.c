@@ -438,6 +438,37 @@ void world_queue_sound(uint8_t *, uint16_t);
 /* Set by a handler that stops on a known untranslated branch. */
 const char *world_dispatch_detail = "";
 
+/* A few rare paths of the original read a register value left behind by
+   whatever code ran before (the previous actor's handler, or an earlier call
+   in the same handler) that this port does not track. They are reached in
+   corner cases: an enemy destroyed by something other than a shot, or a
+   decision taken while no player is in play. Strict mode (WORLD_STRICT=1,
+   used for translation work) stops there with a detail; otherwise the port
+   continues with a neutral value and counts the estimate. */
+int world_dispatch_strict = -1;
+unsigned long world_dispatch_estimates;
+const char *world_dispatch_estimate_note = "";
+
+static int strict_mode(void)
+{
+    if (world_dispatch_strict < 0) world_dispatch_strict = getenv("WORLD_STRICT") != NULL;
+    return world_dispatch_strict;
+}
+
+static void estimate(const char *what)
+{
+    ++world_dispatch_estimates;
+    world_dispatch_estimate_note = what;
+}
+
+/* An enemy destroyed without a hit this tick: 6237 scores through a leftover
+   BX. The estimate credits the enemy's own last owner byte (no new owner). */
+static uint16_t estimated_attacker(uint16_t actor, const char *what)
+{
+    estimate(what);
+    return actor;
+}
+
 /* The raw value the board reads from I/O port 4 (DIP switches). */
 uint16_t world_dispatch_port4 = 0xffbf;
 
@@ -1115,11 +1146,14 @@ static int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t
                 uint16_t target = world_enemy_target(ram, actor);
                 /* With neither player active 65B1 leaves SI untouched. */
                 if (!players && !probe_ran) {
-                    if (!entry_si_known) {
+                    if (entry_si_known) probe_direction = entry_si & 1;
+                    else if (strict_mode()) {
                         world_dispatch_detail = untracked_si_detail();
                         return 0;
+                    } else {
+                        estimate("trooper climb direction with no player");
+                        probe_direction = 0;
                     }
-                    probe_direction = entry_si & 1;
                 }
                 unsigned above = players ? read_word(ram, target + 0x24) < py : probe_direction;
                 write_word(ram, actor + 0x3a, read_word(rom + 0xb0000, 0x8d6c + 2 * above));
@@ -5229,10 +5263,13 @@ static int s2_score(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t h
         /* A D2B7 miss leaves BX at the last shot slot it read. */
         uint16_t count = read_word(ram, 0xa6e2);
         if (!count) {
-            world_dispatch_detail = "gunboat part scored with an empty shot list; 0:6237 reads leftover BX";
-            return 0;
-        }
-        hit = read_word(ram, (uint16_t)(0xa6e6 + ((count - 1) & 0xfffe)));
+            if (strict_mode()) {
+                world_dispatch_detail = "gunboat part scored with an empty shot list; 0:6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "gunboat part scored with an empty shot list");
+        } else
+            hit = read_word(ram, (uint16_t)(0xa6e6 + ((count - 1) & 0xfffe)));
     }
     world_award_score(ram, rom, actor, hit);
     return 1;
@@ -5895,11 +5932,14 @@ static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
             uint16_t si;
             if (players == 3) {
                 if (!enemy_target_si(ram, actor, &si)) {
-                    if (!entry_si_known) {
+                    if (entry_si_known) si = entry_si;
+                    else if (strict_mode()) {
                         world_dispatch_detail = untracked_si_detail();
                         return 0;
+                    } else {
+                        estimate("turn decision from leftover SI");
+                        si = 2;                 /* keep going */
                     }
-                    si = entry_si;
                 }
                 turn = !(si & 2);
             } else if (players) turn = read_word(ram, world_enemy_target(ram, actor) + 0x21) >= x;
@@ -6079,8 +6119,11 @@ hull:
     }
 dead:
     if (!hit) {
-        world_dispatch_detail = "patrol craft died without a hit this tick; 0:6237 reads leftover BX";
-        return 0;
+        if (strict_mode()) {
+            world_dispatch_detail = "patrol craft died without a hit this tick; 0:6237 reads leftover BX";
+            return 0;
+        }
+        hit = estimated_attacker(actor, "patrol craft died without a hit this tick; 0:6237 reads leftover BX");
     }
     s2_patrol_death(ram, rom, actor, hit);
     return 1;
@@ -6243,8 +6286,11 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
             if (hit && blast_knockback(ram, rom, actor, hit)) break;
             if (read_word(ram, actor + 0x26)) break;
             if (!hit) {
-                world_dispatch_detail = "hatch craft died without a hit this tick; 0:6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "hatch craft died without a hit this tick; 0:6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "hatch craft died without a hit this tick; 0:6237 reads leftover BX");
             }
         }
         world_award_score(ram, rom, actor, hit);
@@ -7004,8 +7050,11 @@ static int stage_two_gunner(uint8_t *ram, const uint8_t *rom, uint16_t actor, ui
         }
     }
     if (!hit) {
-        world_dispatch_detail = "hover gunner died without a hit this tick; 0:6237 reads leftover BX";
-        return 0;
+        if (strict_mode()) {
+            world_dispatch_detail = "hover gunner died without a hit this tick; 0:6237 reads leftover BX";
+            return 0;
+        }
+        hit = estimated_attacker(actor, "hover gunner died without a hit this tick; 0:6237 reads leftover BX");
     }
     world_award_score(ram, rom, actor, hit);
     s2_wreck_blast(ram, actor, 4);      /* 0:6B91 */
@@ -8973,8 +9022,11 @@ static int stage_three_building(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             uint16_t hit = world_surface_contact(ram, rom, actor);
             if (read_word(ram, actor + 0x26)) return 1;
             if (!hit) {
-                world_dispatch_detail = "building destroyed without a shot; 6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "building destroyed without a shot; 6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "building destroyed without a shot; 6237 reads leftover BX");
             }
             world_award_score(ram, rom, actor, hit);
             ram[blast_sequence(ram, actor, read_word(bank, 0xdcba + k2), read_word(bank, 0xdcb8 + k2), 4) + 0x2d] = 0x1f;
@@ -9416,8 +9468,11 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
         uint16_t hit = world_projectile_contact(ram, rom, actor);
         if (read_word(ram, actor + 0x26)) return 1;
         if (!hit) {
-            world_dispatch_detail = "boss core destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "boss core destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "boss core destroyed without a shot; 6237 reads leftover BX");
         }
         world_award_score(ram, rom, actor, hit);
         parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
@@ -9714,8 +9769,11 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         uint16_t hit = world_surface_contact(ram, rom, actor);
         if (read_word(ram, actor + 0x26)) return 1;
         if (!hit) {
-            world_dispatch_detail = "attacker destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "attacker destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "attacker destroyed without a shot; 6237 reads leftover BX");
         }
         world_award_score(ram, rom, actor, hit);
         blast_sequence(ram, actor, 0x7000, 0xca92, 4);
@@ -9983,8 +10041,11 @@ static int stage_three_bridge(uint8_t *ram, const uint8_t *rom, uint8_t *terrain
             uint16_t hit = world_surface_contact(ram, rom, actor);
             if (read_word(ram, actor + 0x26)) return 1;
             if (!hit) {
-                world_dispatch_detail = "bridge piece destroyed without a shot; 6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "bridge piece destroyed without a shot; 6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "bridge piece destroyed without a shot; 6237 reads leftover BX");
             }
             world_award_score(ram, rom, actor, hit);
         }
@@ -10093,15 +10154,21 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
             /* A3B7 tests that CX against material 1 (stage five only). */
             if (read_word(ram, 0x84) == 4) {
                 if (!cx_set) {
-                    if (!entry_cx_known) {
+                    if (entry_cx_known) cx = entry_cx;
+                    else if (strict_mode()) {
                         world_dispatch_detail = untracked_cx_detail();
                         return 0;
+                    } else {
+                        estimate("ice test from leftover CX");
+                        cx = 0;
                     }
-                    cx = entry_cx;
                 }
                 if (cx == 1) {
-                    world_dispatch_detail = "A3B7 with CX = 1 breaks ice at a leftover BX cell";
-                    return 0;
+                    if (strict_mode()) {
+                        world_dispatch_detail = "A3B7 with CX = 1 breaks ice at a leftover BX cell";
+                        return 0;
+                    }
+                    estimate("ice break at a leftover BX cell");   /* skipped */
                 }
             }
             burst = 1;
@@ -10531,11 +10598,12 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x14837: {
         if (address == 0x14811) {
             /* 4811 loads only CX; 68DF takes x from BX as the loop left it. */
-            if (!entry_bx_known) {
+            if (!entry_bx_known && strict_mode()) {
                 world_dispatch_detail = "4811 probes x = leftover BX, unknown here";
                 return 0;
             }
-            if (terrain_material(ram, terrain, entry_bx, read_word(ram, actor + 0x24) - 0x20) == 4) {
+            if (!entry_bx_known) estimate("terrain probe at leftover BX");      /* skipped */
+            else if (terrain_material(ram, terrain, entry_bx, read_word(ram, actor + 0x24) - 0x20) == 4) {
                 blast_sequence(ram, actor, 0x1000, 0x44d4, 2);
                 write_word(ram, actor, 0x4837);
             }
@@ -10600,8 +10668,11 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
                 write_word(ram, actor + 0x26, 0x100);
             else {
                 if (!hit) {
-                    world_dispatch_detail = "end boss destroyed without a shot; BX is leftover";
-                    return 0;
+                    if (strict_mode()) {
+                        world_dispatch_detail = "end boss destroyed without a shot; BX is leftover";
+                        return 0;
+                    }
+                    hit = estimated_attacker(actor, "end boss destroyed without a shot");
                 }
                 uint16_t record = 0x124 + ((ram[hit + 0x0b] & 2) << 5);
                 write_word(ram, record, read_word(ram, record) | 4);
@@ -11040,8 +11111,11 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             uint16_t hit = world_surface_contact(ram, rom, actor);
             if (!read_word(ram, actor + 0x26)) {
                 if (!hit) {
-                    world_dispatch_detail = "end boss arm destroyed without a shot; 6237 reads leftover BX";
-                    return 0;
+                    if (strict_mode()) {
+                        world_dispatch_detail = "end boss arm destroyed without a shot; 6237 reads leftover BX";
+                        return 0;
+                    }
+                    hit = estimated_attacker(actor, "end boss arm destroyed without a shot; 6237 reads leftover BX");
                 }
                 world_award_score(ram, rom, actor, hit);
                 surface_enemy_death_blast(ram, rom, actor);
@@ -11353,8 +11427,11 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         uint16_t hit = world_surface_contact(ram, rom, actor);
         if (!read_word(ram, actor + 0x26)) {
             if (!hit) {
-                world_dispatch_detail = "end boss lower piece destroyed without a shot; 6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "end boss lower piece destroyed without a shot; 6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "end boss lower piece destroyed without a shot; 6237 reads leftover BX");
             }
             world_award_score(ram, rom, actor, hit);
             ram[actor + 0x0a] |= 2;
@@ -11744,8 +11821,11 @@ static int stage_five_diver(uint8_t *ram, const uint8_t *rom, uint16_t actor, ui
             hit = world_projectile_contact(ram, rom, actor);
             if (read_word(ram, actor + 0x26)) return 1;
             if (!hit) {
-                world_dispatch_detail = "diver destroyed without a hit; 6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "diver destroyed without a hit; 6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "diver destroyed without a hit; 6237 reads leftover BX");
             }
         }
         world_award_score(ram, rom, actor, hit);
@@ -12316,8 +12396,11 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
                     hit = world_projectile_contact(ram, rom, actor);
                     if (!read_word(ram, actor + 0x26)) {
                         if (!hit) {
-                            world_dispatch_detail = "spore destroyed without a hit; 6237 reads leftover BX";
-                            return 0;
+                            if (strict_mode()) {
+                                world_dispatch_detail = "spore destroyed without a hit; 6237 reads leftover BX";
+                                return 0;
+                            }
+                            hit = estimated_attacker(actor, "spore destroyed without a hit; 6237 reads leftover BX");
                         }
                         burst = 1;
                     }
@@ -12537,8 +12620,11 @@ static int s4_diver_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
         if (read_word(ram, actor + 0x26)) return 1;
     }
     if (!hit) {
-        world_dispatch_detail = "stage-four diver destroyed without a hit; 6237 reads leftover BX";
-        return 0;
+        if (strict_mode()) {
+            world_dispatch_detail = "stage-four diver destroyed without a hit; 6237 reads leftover BX";
+            return 0;
+        }
+        hit = estimated_attacker(actor, "stage-four diver destroyed without a hit; 6237 reads leftover BX");
     }
     world_award_score(ram, rom, actor, hit);
     spawn_kill_blast(ram, actor);
@@ -12994,8 +13080,11 @@ static void s4_eel_pose(uint8_t *ram, const uint8_t *bank, uint16_t actor, uint1
 static int s4_eel_award(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t hit)
 {
     if (!hit) {
-        world_dispatch_detail = "stage-four eel destroyed without a hit; 6237 reads leftover BX";
-        return 0;
+        if (strict_mode()) {
+            world_dispatch_detail = "stage-four eel destroyed without a hit; 6237 reads leftover BX";
+            return 0;
+        }
+        hit = estimated_attacker(actor, "stage-four eel destroyed without a hit; 6237 reads leftover BX");
     }
     world_award_score(ram, rom, actor, hit);
     return 1;
@@ -13436,8 +13525,11 @@ static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *t
             if (read_word(ram, actor + 0x26)) return 1;
         }
         if (!hit) {
-            world_dispatch_detail = "stage-four drifter destroyed without a hit; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "stage-four drifter destroyed without a hit; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "stage-four drifter destroyed without a hit; 6237 reads leftover BX");
         }
         world_award_score(ram, rom, actor, hit);
         spawn_kill_blast(ram, actor);
@@ -14466,8 +14558,11 @@ static int stage_five_cutter(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, u
         if (read_word(ram, actor + 0x26)) return 1;
     }
     if (!hit) {
-        world_dispatch_detail = "stage-five cutter destroyed without a hit; 6237 reads leftover BX";
-        return 0;
+        if (strict_mode()) {
+            world_dispatch_detail = "stage-five cutter destroyed without a hit; 6237 reads leftover BX";
+            return 0;
+        }
+        hit = estimated_attacker(actor, "stage-five cutter destroyed without a hit; 6237 reads leftover BX");
     }
     world_award_score(ram, rom, actor, hit);
     spawn_kill_blast(ram, actor);
@@ -15198,8 +15293,11 @@ static int stage_six_gunship(uint8_t *ram, const uint8_t *rom, uint16_t actor, u
             if (read_word(ram, actor + 0x26)) return 1;
         }
         if (!hit) {
-            world_dispatch_detail = "stage-six gunship destroyed without a hit; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "stage-six gunship destroyed without a hit; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "stage-six gunship destroyed without a hit; 6237 reads leftover BX");
         }
         world_award_score(ram, rom, actor, hit);
         write_word(ram, 0xb8a0, read_word(ram, 0xb8a0) + 0x0a);
@@ -15383,8 +15481,11 @@ static int s6_contacts_score(uint8_t *ram, const uint8_t *rom, uint16_t actor, u
         if (read_word(ram, actor + 0x26)) return 0;
     }
     if (!*hit) {
-        world_dispatch_detail = "stage-six enemy destroyed without a hit; 6237 reads leftover BX";
-        return -1;
+        if (strict_mode()) {
+            world_dispatch_detail = "stage-six enemy destroyed without a hit; 6237 reads leftover BX";
+            return -1;
+        }
+        *hit = estimated_attacker(actor, "stage-six enemy destroyed without a hit; 6237 reads leftover BX");
     }
     world_award_score(ram, rom, actor, *hit);
     return 1;
@@ -15896,8 +15997,11 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
             hit = world_projectile_contact(ram, rom, actor);
             if (read_word(ram, actor + 0x26)) return 1;
             if (!hit) {
-                world_dispatch_detail = "final boss ram destroyed without a hit; 6237 reads leftover BX";
-                return 0;
+                if (strict_mode()) {
+                    world_dispatch_detail = "final boss ram destroyed without a hit; 6237 reads leftover BX";
+                    return 0;
+                }
+                hit = estimated_attacker(actor, "final boss ram destroyed without a hit; 6237 reads leftover BX");
             }
             world_award_score(ram, rom, actor, hit);
         }
@@ -17414,8 +17518,11 @@ static int trooper_contacts(uint8_t *ram, const uint8_t *rom, uint16_t actor)
             return 1;
         }
         if (!hit) {
-            world_dispatch_detail = "trooper destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "trooper destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "trooper destroyed without a shot; 6237 reads leftover BX");
         }
     }
     world_award_score(ram, rom, actor, hit);
@@ -17714,9 +17821,12 @@ static int stage_three_trooper(uint8_t *ram, const uint8_t *rom, const uint8_t *
             si = held;      /* 0:1067 leaves SI at the resource slot it filled */
         } else if (entry_si_known) {
             si = entry_si;
-        } else {
+        } else if (strict_mode()) {
             world_dispatch_detail = untracked_si_detail();
             return 0;
+        } else {
+            estimate("flight path from leftover SI");
+            si = 0;
         }
         begin_linear_script(ram, rom, actor, read_word(bank, 0x1b58 + (si & 2)));
         write_word(ram, actor, 0x2224);
@@ -19812,8 +19922,11 @@ stage2_jumper_terrain:
             break;
         }
         if (!hit) {
-            world_dispatch_detail = "target destroyed without a projectile; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "target destroyed without a projectile; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "target destroyed without a projectile; 6237 reads leftover BX");
         }
         world_award_score(ram, main_rom, actor, hit);
         blast_sequence(ram, actor, 0x1000, 0xe4f0, 4);
@@ -19888,8 +20001,11 @@ stage2_jumper_terrain:
         uint16_t hit = world_surface_contact(ram, main_rom, actor);
         if (read_word(ram, actor + 0x26)) break;
         if (!hit) {
-            world_dispatch_detail = "surface target destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "surface target destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "surface target destroyed without a shot; 6237 reads leftover BX");
         }
         world_award_score(ram, main_rom, actor, hit);
         write_word(ram, actor + 0x40, 2);
@@ -20174,8 +20290,11 @@ stage2_jumper_terrain:
         uint16_t hit = world_surface_contact(ram, main_rom, actor);
         if (read_word(ram, actor + 0x26)) break;
         if (!hit) {
-            world_dispatch_detail = "scenery destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "scenery destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "scenery destroyed without a shot; 6237 reads leftover BX");
         }
         world_award_score(ram, main_rom, actor, hit);
         write_word(ram, actor + 0x42, 0x10);
@@ -20232,8 +20351,11 @@ stage2_jumper_terrain:
         leave_si(read_word(ram, actor + 0x3c));         /* D371 loads SI with the shape */
         if (read_word(ram, actor + 0x26)) break;
         if (!hit) {
-            world_dispatch_detail = "block destroyed without a shot; 6237 reads leftover BX";
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = "block destroyed without a shot; 6237 reads leftover BX";
+                return 0;
+            }
+            hit = estimated_attacker(actor, "block destroyed without a shot; 6237 reads leftover BX");
         }
         world_award_score(ram, main_rom, actor, hit);
         surface_enemy_death_blast(ram, main_rom, actor);
@@ -22640,14 +22762,14 @@ stage2_jumper_terrain:
             break;
         }
         /* 2ED1 scores through BX as D371 leaves it: the hit shot, or on a
-           miss the last nonzero entry of the AEE6 list it scanned. */
+           miss the last entry of the AEE6 list it scanned (D377 loads every
+           entry, zero ones included). */
         if (!hit) {
             unsigned end = read_word(ram, 0xaee6);
-            for (unsigned i = 0; i < end; i += 2)
-                if (read_word(ram, (uint16_t)(0xaeea + i))) hit = read_word(ram, (uint16_t)(0xaeea + i));
-            /* An empty list leaves BX from the last 0DA4: (2D & 3Fh) * 2
-               when the sprite was queued, else the sprite id 2A. */
-            if (!hit)
+            if (end)
+                hit = read_word(ram, (uint16_t)(0xaeea + ((end - 1) & 0xfffe)));
+            else    /* an empty list leaves BX from the last 0DA4: (2D & 3Fh) * 2
+                       when the sprite was queued, else the sprite id 2A */
                 hit = queued_sprite_entry ? (uint16_t)(2 * (ram[actor + 0x2d] & 0x3f)) : read_word(ram, actor + 0x2a);
         }
         ram[actor + 0x0b] = ram[(uint16_t)(hit + 0x0b)];
@@ -23508,7 +23630,9 @@ stage2_jumper_terrain:
         uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
         queue_sprite(ram, main_rom, actor, 0);
         ram[actor + 0x0d] = 2;
-        world_player_contact(ram, main_rom, actor);
+        /* D237 leaves BX at the player it touched, else at [92]. */
+        uint16_t touched = world_player_contact(ram, main_rom, actor);
+        uint16_t bx = touched ? touched : read_word(ram, 0x92);
         write_word(ram, actor + 0x26, 0x7f00);
         ram[actor + 0x0d] = 0;
         uint16_t hit = world_projectile_contact(ram, main_rom, actor);
@@ -23516,9 +23640,11 @@ stage2_jumper_terrain:
         int16_t pool = (int16_t)(read_word(ram, parent + 0x48) - (0x7f00 - read_word(ram, actor + 0x26)));
         write_word(ram, parent + 0x48, (uint16_t)pool);
         if (pool <= 0) {
+            /* On a miss D2B7 leaves BX at the last entry of the A6E2 list it
+               scanned (zero entries included); an empty list leaves D237's. */
             if (!hit) {
-                world_dispatch_detail = "hull pool empty without a hit; B000:696A stores leftover BX";
-                return 0;
+                unsigned shots = read_word(ram, 0xa6e2);
+                hit = shots ? read_word(ram, (uint16_t)(0xa6e6 + ((shots - 1) & 0xfffe))) : bx;
             }
             write_word(ram, parent + 0x26, 0);
             write_word(ram, parent + 0x74, hit);
@@ -24565,6 +24691,15 @@ stage2_jumper_terrain:
         break;
     /* 0:C99F/C9B2 and C9D1/C9E4: a three-piece banner row; 0:CA03/CA3E: a
        single plate chosen by 272 and the active player. */
+    /* 0:C944: draw the same 4 x 8 block panel at two places on the near
+       layer (D800) and retire. */
+    case 0xc944:
+        if (!tiles) return 0;
+        copy_tile_blocks(ram, tiles, main_rom, 0x8000, 0x0f60, 0x4b14, 0x0408);
+        copy_tile_blocks(ram, tiles, main_rom, 0x8000, 0x0fa0, 0x4b14, 0x0408);
+        finish_animation(ram, actor);
+        leave_si(0x40);
+        break;
     /* 0:C97A: draw a 10 x 8 block panel on the near layer (D800) and retire. */
     case 0xc97a:
         if (!tiles) return 0;
@@ -26930,14 +27065,17 @@ stage2_jumper_terrain:
            actor left it, and B2C1B tests bit 1 of that. */
         int idle = !(read_word(ram, 0x264) & 3);
         if (read_word(ram, actor + 0x42) == 1 && idle && !entry_si_known) {
-            world_dispatch_detail = untracked_si_detail();
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = untracked_si_detail();
+                return 0;
+            }
+            estimate("surface enemy facing with no player");
         }
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         if (!decrement(ram, actor + 0x42)) {
             uint16_t target = world_enemy_target(ram, actor);
-            if (idle ? (entry_si & 2) != 0
+            if (idle ? entry_si_known && (entry_si & 2) != 0
                      : read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
                 ram[actor + 0x29] = 1;
             write_word(ram, actor, 0x2c46);
@@ -26953,8 +27091,11 @@ stage2_jumper_terrain:
            and B2B18 tests bit 1 of that. */
         int idle = !(read_word(ram, 0x264) & 3);
         if (velocity == 0xffe0 && idle && !entry_si_known) {
-            world_dispatch_detail = untracked_si_detail();
-            return 0;
+            if (strict_mode()) {
+                world_dispatch_detail = untracked_si_detail();
+                return 0;
+            }
+            estimate("surface enemy facing with no player");
         }
         scroll_actor(ram, actor, 0xb71a);
         unsigned fraction = ram[actor + 0x23] + (velocity & 255);
@@ -26965,7 +27106,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x3a, velocity);
         if (!velocity) {
             uint16_t target = world_enemy_target(ram, actor);
-            if (idle ? (entry_si & 2) != 0
+            if (idle ? entry_si_known && (entry_si & 2) != 0
                      : read_word(ram, target + 0x21) < read_word(ram, actor + 0x21))
                 ram[actor + 0x29] = 1;
             write_word(ram, actor, 0x2c46);
@@ -27855,8 +27996,11 @@ stage2_jumper_terrain:
             uint16_t hit = world_projectile_contact(ram, main_rom, actor);
             if (!read_word(ram, actor + 0x26)) {
                 if (!hit) {
-                    world_dispatch_detail = "launcher destroyed without a projectile; 6237 reads leftover BX";
-                    return 0;
+                    if (strict_mode()) {
+                        world_dispatch_detail = "launcher destroyed without a projectile; 6237 reads leftover BX";
+                        return 0;
+                    }
+                    hit = estimated_attacker(actor, "launcher destroyed without a projectile; 6237 reads leftover BX");
                 }
                 world_award_score(ram, main_rom, actor, hit);
                 spawn_kill_blast(ram, actor);
@@ -28780,4 +28924,17 @@ stage2_jumper_terrain:
 int world_dispatch_native(WorldDispatch *pass, uint8_t *ram, const uint8_t *main_rom)
 {
     return world_dispatch_native_video(pass, ram, main_rom, 0);
+}
+
+/* Power-on state of the register tracking, for a machine reset. */
+void world_dispatch_reset(void)
+{
+    entry_bx_known = 0; entry_bx = 0;
+    cx_known = entry_cx_known = 0; cx_value = entry_cx = 0; cx_source = entry_cx_source = 0;
+    si_known = entry_si_known = 0; si_value = entry_si = 0; si_source = entry_si_source = 0;
+    queued_sprite_entry = 0;
+    scenery_init_si = -1;
+    primary_fired = 0; primary_cx = 0;
+    world_dispatch_camera_actor = 0;
+    world_dispatch_detail = "";
 }

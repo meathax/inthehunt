@@ -16,10 +16,15 @@ typedef struct {
 void world_draw_tile_block(uint8_t *tiles, const uint8_t *rom, uint16_t base, uint16_t dest, uint16_t descriptor);
 void world_dispatch_begin(WorldDispatch *, uint8_t *ram);
 extern uint16_t world_dispatch_camera_actor;
+/* Estimates taken where the original reads an untracked leftover register
+   (see world_dispatch.c); WORLD_STRICT=1 stops there instead. */
+extern unsigned long world_dispatch_estimates;
+extern const char *world_dispatch_estimate_note;
 /* Returns zero for the terminal handler. Writes the physical address in both cases. */
 int world_dispatch_target(const WorldDispatch *, const uint8_t *ram, uint32_t *address);
 /* Executes a recovered handler and advances the pass. Returns zero at fallback or end. */
 int world_dispatch_native(WorldDispatch *, uint8_t *ram, const uint8_t *main_rom);
+void world_dispatch_reset(void);
 /* tiles points to 64 KiB of video RAM beginning at D0000. */
 int world_dispatch_native_video(WorldDispatch *, uint8_t *ram, const uint8_t *main_rom, uint8_t *tiles);
 /* Supply BP as returned by the actor handler, including after a list mutation. */

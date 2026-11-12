@@ -22,16 +22,15 @@ From a source checkout, `.\play.ps1` does the same and builds the executable fir
 | Torpedo / fire | Z | G | A |
 | Secondary weapon | X | H | B |
 | Insert coin | 5 | 6 | Back |
-| Start / join | 1 | 2 | Start |
-| **Pause menu** | **F1** | **F1** | **L3 + R3 together** |
+| Start / join / continue | 1 | 2 | A |
+| **Pause menu** | **F1** or Esc | **F1** or Esc | **Start** (or L3 + R3) |
 
 Each controller drives its own player. Key and button assignments are stored in `.local/world/native-settings.ini`.
 
-## Pause and options menu
+## Title, pause and options menus
 
-Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears in the game's own lettering and colours. Up and down select, left and right change a value, Enter/A confirms, Esc/B goes back. Each line has a short description at the bottom of the screen.
+The game opens on a **title menu** over the running attract sequence: **Start Game** (drops a coin and presses start for you), **Options** and **Exit**. During play, the controller's **Start** (or **F1**/Esc) freezes the game and opens the **pause menu**: **Resume**, **Options** and **Exit to Menu** (confirmed; resets the board to the title). On a controller, A is the cabinet's start button whenever the game asks for one (second player join, continue). The menus use the game's own lettering and colours. Up and down select, left and right change a value, Enter/A confirms, Esc/B goes back. Each line has a short description at the bottom of the screen.
 
-- **Resume**
 - **Options**: four tabs (Q/E or the shoulder buttons switch tabs; long lists scroll)
   - **Video**
     - Display: window or full screen
@@ -45,12 +44,11 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
   - **Sound**: master volume, plus separate levels for the FM synth (YM2151) and the PCM samples (GA20)
   - **Game**
     - Slowdown: Arcade keeps the original slowdown; Off runs busy scenes at full speed
-    - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2–5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on, so they apply from the next launch
+    - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2–5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on; a changed switch resets the board at the next Start Game or Exit to Menu
     - Auto pause: open the pause menu when the window loses focus
+    - Controls: the keyboard and controller layout
     - Reset options
   - **Enhance**: optional picture enhancements (see below)
-- **Controls**: the keyboard and controller layout
-- **Quit game**: asks for confirmation
 
 Settings are saved when the menu closes. Esc no longer quits the game outright.
 
@@ -159,7 +157,8 @@ The game's behaviour was tested with scripted headless runs that drive real inpu
 - An autopilot playthrough from power-on ran **620,000 frames** (several complete loops of all six stages and bosses) with no stops.
 - Five consecutive full loops (2,000,000 frames from a saved state), both endings, and a **two-player co-op** run of 120,000 frames all completed with no stops.
 - Regression modes (`steer`, `adv`, `dive`) are rerun after each translation batch.
-- The pause menu was driven live: open, change and save volume, resume and quit.
+- The pause menu was driven live: open, change and save volume, resume and quit. The title menu's Start Game and Exit to Menu are covered by an off-screen self-test (`WORLD_TEST_TITLE=1`).
+- A crash hunt (`tools/crash_hunt.py`) resumes a snapshot of every stage of two loops under nine input styles the autopilot never produces (nobody playing, never continuing, ramming without firing, random input, a second player idling or dropping out): 208 runs of 30,000 frames, no stops.
 
 Earlier in the project, encounter replays were compared with MAME's reference execution, and in the measured windows RAM, sprite, tile, palette and sound-command state matched. See the developer tools below.
 
@@ -168,6 +167,7 @@ Earlier in the project, encounter replays were compared with MAME's reference ex
 - **Arcade slowdown is a fitted model, not cycle-exact.** The native code runs instantly, so each logic pass is charged an estimate of the original V33 time and the game misses VBlanks when that exceeds a frame, as the PCB does. The estimate comes from 157,503 passes of the original program measured in MAME (see [Slowdown model](#slowdown-model)); held-out passes are predicted to within 1.4 % of a frame on average (r² 0.978), and about two thirds of real overruns are caught. Individual heavy frames can still differ. Remove Slowdown is unaffected.
 - **No whole-game frame-by-frame MAME comparison.** MAME 0.289 can run the set rebuilt from the imported chips (the six PLD files are not emulated, so placeholders of the right size are enough; MAME only warns about their checksums), and it was used to measure the slowdown model, but a full lockstep comparison of every frame has not been done.
 - **Audio** follows the original driver and chip models, but its samples were never shown to be bit-identical to the reference.
+- **A few rare branches estimate a register value.** Some original code paths read a CPU register left over from earlier, unrelated code (for example, scoring an enemy destroyed by something other than a shot, or a turn decision when no player is in play). Where the port does not track that value it continues with a neutral one and counts it (`Register estimates` in headless output); `WORLD_STRICT=1` stops there instead, for translation work.
 - Only the World set (`inthunt`) is supported. *Kaitei Daisensou* and the US set are not.
 
 ---
@@ -216,7 +216,11 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | Variable | Effect |
 |---|---|
 | `WORLD_SNAPSHOT_SAVE=frame,path` / `WORLD_SNAPSHOT_LOAD=path` | Save or resume full machine state |
-| `WORLD_MENU_SHOT=frame` | Render every pause-menu page over that frame |
+| `WORLD_SNAPSHOT_STAGES=dir` | Save a snapshot at every stage start (input for `tools/crash_hunt.py`) |
+| `WORLD_SCRIPT_RELATIVE=1` | Headless script frame numbers count from the loaded snapshot |
+| `WORLD_STRICT=1` | Stop on untracked-register branches instead of estimating |
+| `WORLD_MENU_SHOT=frame` | Render every pause-menu and title-menu page over that frame |
+| `WORLD_TEST_TITLE=1` | Windowed self-test: Start Game, play, Exit to Menu, Start Game again (logs the game state) |
 | `WORLD_BORDER_SHOT=frame` | Compose that frame with each border preset, each scaling mode and scanlines at 1920×1080 using the real window painter |
 | `WORLD_FX_SHOT=frame` | Save that frame raw, through the scene renderer with no effect, with each effect alone, and with the default set |
 | `WORLD_SCENE_RUN=K` | Render every frame through the scene renderer at K× (halfway to the frame and on it), report timing and detected explosions; shot frames are saved at full size |
