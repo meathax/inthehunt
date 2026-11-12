@@ -30,6 +30,9 @@ static RECT windowed_rect;
 
 static int smaller(int x, int y) { return x < y ? x : y; }
 
+/* WORLD_OFFSCREEN: pacing tests on the real display without showing the window. */
+static int offscreen(void) { return getenv("WORLD_OFFSCREEN") != NULL; }
+
 static int view_scaling, view_scanlines, view_vsync;
 static uint32_t *lined;                 /* frame expanded with scanlines */
 static int lined_scale;
@@ -123,9 +126,9 @@ static int gpu_bg_w, gpu_bg_h, gpu_bg_stale = 1;
 /* A CRT preset (full .slangp path, "" for none) and the beam simulator use
  * the Direct3D 12 view; with neither, the window paints itself with GDI.
  * Returns 0 with a reason when the shader view cannot be used. */
-int world_window_set_crt(const char *preset, int beam, char *error, size_t error_size)
+int world_window_set_crt(const char *preset, int beam, int flip, char *error, size_t error_size)
 {
-    int wanted = (preset && *preset) || beam;
+    int wanted = (preset && *preset) || beam || flip;
     if (!wanted) {
         world_gpu_close();
         crt_preset[0] = 0;
@@ -143,7 +146,7 @@ int world_window_set_crt(const char *preset, int beam, char *error, size_t error
         snprintf(crt_preset, sizeof crt_preset, "%s", preset ? preset : "");
     }
     crt_beam = beam;
-    world_gpu_set_options(view_scaling, beam, view_vsync);
+    world_gpu_set_options(view_scaling, beam, view_vsync != 0);
     memset(gpu_last, 0, sizeof gpu_last);
     gpu_bg_stale = 1;
     return 1;
@@ -157,11 +160,80 @@ void world_window_set_view(int scaling, int scanlines, int vsync)
     view_scaling = scaling;
     view_scanlines = scanlines;
     view_vsync = vsync;
-    if (world_gpu_active()) world_gpu_set_options(scaling, crt_beam, vsync);
+    if (world_gpu_active()) world_gpu_set_options(scaling, crt_beam, vsync != 0);
     if (window) InvalidateRect(window, NULL, FALSE);
 }
 
 int world_window_focused(void) { return window && GetForegroundWindow() == window; }
+
+/* DWM's composition timing: the display refresh the window is shown at. */
+typedef struct { UINT32 cbSize; UINT32 numerator, denominator; } DwmRatio;
+typedef struct {
+    UINT32 cbSize;
+    struct { UINT32 uiNumerator, uiDenominator; } rateRefresh;
+    UINT64 qpcRefreshPeriod;
+    struct { UINT32 uiNumerator, uiDenominator; } rateCompose;
+    UINT64 qpcVBlank, cRefresh;
+    UINT cDXRefresh;
+    UINT64 qpcCompose, cFrame;
+    UINT cDXPresent;
+    UINT64 cRefreshFrame, cFrameSubmitted;
+    UINT cDXPresentSubmitted;
+    UINT64 cFrameConfirmed;
+    UINT cDXPresentConfirmed;
+    UINT64 cRefreshConfirmed;
+    UINT cDXRefreshConfirmed;
+    UINT64 cFramesLate, cFramesOutstanding, cFrameDisplayed, qpcFrameDisplayed, cRefreshFrameDisplayed,
+           cFrameComplete, qpcFrameComplete, cFramePending, qpcFramePending, cFramesDisplayed, cFramesComplete,
+           cFramesPending, cFramesAvailable, cFramesDropped, cFramesMissed, cRefreshNextDisplayed,
+           cRefreshNextPresented, cRefreshesDisplayed, cRefreshesPresented, cRefreshStarted, cPixelsReceived,
+           cPixelsDrawn, cBuffersEmpty;
+} DwmTiming;
+static HRESULT (WINAPI *dwm_flush)(void);
+static HRESULT (WINAPI *dwm_timing)(HWND, DwmTiming *);
+
+static void load_dwm(void)
+{
+    static int looked;
+    if (looked) return;
+    looked = 1;
+    HMODULE library = LoadLibraryW(L"dwmapi.dll");
+    if (!library) return;
+    dwm_flush = (HRESULT (WINAPI *)(void))(void *)GetProcAddress(library, "DwmFlush");
+    dwm_timing = (HRESULT (WINAPI *)(HWND, DwmTiming *))(void *)GetProcAddress(library, "DwmGetCompositionTimingInfo");
+}
+
+/* The display refresh in Hz, or 0 when it is unknown or the window is hidden. */
+double world_window_refresh_hz(void)
+{
+    if (!window || IsIconic(window)) return 0.0;
+    load_dwm();
+    if (dwm_timing) {
+        DwmTiming t;
+        memset(&t, 0, sizeof t);
+        t.cbSize = sizeof t;
+        if (SUCCEEDED(dwm_timing(NULL, &t)) && t.rateRefresh.uiDenominator && t.rateRefresh.uiNumerator)
+            return (double)t.rateRefresh.uiNumerator / (double)t.rateRefresh.uiDenominator;
+    }
+    DEVMODEW mode;
+    memset(&mode, 0, sizeof mode);
+    mode.dmSize = sizeof mode;
+    if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+        return (double)mode.dmDisplayFrequency;
+    return 0.0;
+}
+
+/* Block until the next display refresh has taken the last presented frame. */
+void world_window_wait_vblank(void)
+{
+    if (world_gpu_active()) {
+        world_gpu_wait_frame();
+        return;
+    }
+    load_dwm();
+    if (dwm_flush) dwm_flush();
+    else Sleep(1);
+}
 
 /* Headless check of the window picture: the same border and centred
  * integer-scaled frame, painted into an off-screen width x height bitmap. */
@@ -323,7 +395,7 @@ int world_window_open(void)
                              w, h, NULL, NULL, wc.hInstance, NULL);
     if (!window) return 0;
     open_controllers();
-    ShowWindow(window, SW_SHOWNORMAL);
+    ShowWindow(window, offscreen() ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL);
     UpdateWindow(window);
     return 1;
 }
@@ -407,16 +479,10 @@ void world_window_present(const uint32_t *pixels)
     if (!IsIconic(window)) {
         InvalidateRect(window, NULL, FALSE);
         UpdateWindow(window);
-        if (view_vsync) {
-            /* Wait for the compositor's next refresh so frames are not torn or doubled. */
-            static HRESULT (WINAPI *flush)(void);
-            static int looked;
-            if (!looked) {
-                HMODULE library = LoadLibraryW(L"dwmapi.dll");
-                if (library) flush = (HRESULT (WINAPI *)(void))(void *)GetProcAddress(library, "DwmFlush");
-                looked = 1;
-            }
-            if (flush) flush();
+        if (view_vsync == 1) {
+            /* Timer pacing with v-sync: wait for the compositor's next refresh. */
+            load_dwm();
+            if (dwm_flush) dwm_flush();
         }
     }
 }
@@ -487,6 +553,11 @@ unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
 void world_window_set_display(int full, unsigned scale)
 {
     if (!window) return;
+    if (offscreen()) {
+        /* Test runs: a normal window far off the desktop that never takes focus. */
+        SetWindowPos(window, HWND_BOTTOM, -20000, -20000, WIDTH * 3, HEIGHT * 3, SWP_NOACTIVATE);
+        return;
+    }
     if (full && !fullscreen) GetWindowRect(window, &windowed_rect);
     fullscreen = full;
     if (full) {

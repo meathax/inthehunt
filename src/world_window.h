@@ -18,8 +18,12 @@ void world_window_set_display(int fullscreen, unsigned scale);
 void world_window_set_view(int scaling, int scanlines, int vsync);
 int world_window_focused(void);
 /* CRT shader (.slangp path or "") and beam simulator; see world_window.c. */
-int world_window_set_crt(const char *preset, int beam, char *error, size_t error_size);
+/* flip: use the Direct3D view even without a shader, for exact frame pacing. */
+int world_window_set_crt(const char *preset, int beam, int flip, char *error, size_t error_size);
 void world_window_set_source_time(double time);
+/* Display refresh (0 if unknown) and a wait for the next refresh. */
+double world_window_refresh_hz(void);
+void world_window_wait_vblank(void);
 int world_window_gpu(void);
 /* Headless: paint border plus frame into a width x height BMP file. */
 int world_window_compose_bmp(const uint32_t *pixels, int width, int height, const char *path);

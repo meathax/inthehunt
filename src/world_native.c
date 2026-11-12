@@ -1,6 +1,7 @@
 /* Native Windows entry point. The imported program image is read-only lookup data. */
 #include <windows.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "world_boot.h"
@@ -11,6 +12,7 @@
 #include "world_window.h"
 #include "world_enhance.h"
 #include "world_gpu.h"
+#include "world_slowdown_table.h"
 #include "world_border.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
@@ -120,7 +122,9 @@ static void show_notice(const char *text)
 
 static void apply_view(void)
 {
-    world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines, (int)settings.vsync);
+    /* 2 = locked to the display: the loop waits for VBlank itself. */
+    world_window_set_view((int)settings.scaling, settings.fx_enable && settings.fx_scanlines,
+                          settings.pacing == 2 ? (int)settings.vsync : 2);
     char preset[1200] = "", error[256] = "", folder[1024];
     if (settings.crt_shader) {
         if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
@@ -129,12 +133,16 @@ static void apply_view(void)
         } else
             snprintf(preset, sizeof preset, "%s/%s", folder, world_gpu_preset_path[settings.crt_shader - 1]);
     }
-    if (!world_window_set_crt(preset, (int)settings.crt_beam, error, sizeof error)) {
-        fprintf(stderr, "CRT shader unavailable: %s\n", error);
-        show_notice("CRT SHADER UNAVAILABLE");
+    /* Smooth and Exact pacing present through a DXGI flip-model swap chain:
+       it waits for each refresh precisely and shows every frame on the
+       refresh it was meant for. The CPU scanline effect needs the GDI view. */
+    int flip = settings.pacing != 2 && !(settings.fx_enable && settings.fx_scanlines);
+    if (!world_window_set_crt(preset, (int)settings.crt_beam, flip, error, sizeof error)) {
+        fprintf(stderr, "CRT view unavailable: %s\n", error);
+        if (preset[0] || settings.crt_beam) show_notice("CRT SHADER UNAVAILABLE");
         settings.crt_shader = 0;
         settings.crt_beam = 0;
-        world_window_set_crt("", 0, NULL, 0);
+        world_window_set_crt("", 0, 0, NULL, 0);
     }
 }
 
@@ -304,7 +312,31 @@ static void sound_frame(void)
             world_audio_tick(sound_state, sound_rom, &sound_bus);
         }
     }
-    if (sound_device && !world_audio_output_submit(output, frames)) {
+    if (!sound_device) return;
+    /* Dynamic rate control: the video clock paces the game, so stretch or
+       squeeze this frame's samples by at most 0.5 percent to hold the output
+       queue near 50 ms. Linear interpolation; the phase carries over. */
+    static double phase;
+    static int16_t last;
+    const double target = 2400.0;
+    double level = (double)world_audio_output_level();
+    double error = (level - target) / target;
+    if (error > 1.0) error = 1.0;
+    if (error < -1.0) error = -1.0;
+    double step = 1.0 + 0.005 * error;      /* input samples per output sample */
+    int16_t stretched[1100];
+    unsigned produced = 0;
+    while (produced < sizeof stretched / sizeof stretched[0]) {
+        unsigned index = (unsigned)phase;
+        if (index >= frames) break;
+        double t = phase - index;
+        int16_t a0 = index ? output[index - 1] : last, a1 = output[index];
+        stretched[produced++] = (int16_t)(a0 + (a1 - a0) * t);
+        phase += step;
+    }
+    phase -= frames;
+    if (frames) last = output[frames - 1];
+    if (!world_audio_output_submit(stretched, produced)) {
         fprintf(stderr, "Windows audio output stopped.\n");
         world_audio_output_close();
         sound_device = 0;
@@ -334,6 +366,65 @@ static void draw(void)
     }
 }
 
+/* ---- slowdown model ------------------------------------------------------
+ * The board's V33 often needs more than one frame for a logic pass; it then
+ * misses a VBlank and the game slows down. The native code runs in no time,
+ * so each pass is charged an estimate of the original CPU time, fitted by
+ * tools/fit_slowdown.py to MAME measurements of the original program:
+ * a base for the master routine, a cost per actor routine dispatched, and
+ * terms for sprites, video-RAM writes and palette fading. A pass whose
+ * estimate exceeds one board frame services the extra VBlanks. */
+enum { SLOWDOWN_FRAME_CYCLES = 149980 };     /* 9 MHz x 424 x 262 / 6.666666 MHz */
+static uint8_t slowdown_shadow[65536];
+static uint32_t slowdown_estimate;
+static unsigned long slowdown_frames, slowdown_passes, slowdown_overruns;
+static uint32_t slowdown_by_master[65536];
+static unsigned long long slowdown_sum_cycles, slowdown_sum_actors, slowdown_gameplay;
+static unsigned slowdown_actors;
+
+static uint32_t slowdown_routine(uint32_t address)
+{
+    unsigned lo = 0, hi = sizeof slowdown_cost / sizeof slowdown_cost[0];
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        if (slowdown_cost[mid].address < address) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < sizeof slowdown_cost / sizeof slowdown_cost[0] && slowdown_cost[lo].address == address)
+        return slowdown_cost[lo].cycles;
+    return slowdown_default_routine;
+}
+
+static uint32_t slowdown_master(unsigned master)
+{
+    for (unsigned i = 0; i < sizeof slowdown_base / sizeof slowdown_base[0]; ++i)
+        if (slowdown_base[i].master == master) return slowdown_base[i].cycles;
+    return slowdown_default_base;
+}
+
+/* The colours world_palette_step is about to process, by fade mode, plus
+ * one-shot copies; the same test the stepper itself makes. */
+static uint32_t slowdown_palette(void)
+{
+    uint32_t cycles = 0;
+    for (unsigned bank = 0; bank < 64; ++bank) {
+        const uint8_t *job = ram + 0x9e06 + 8 * bank;
+        unsigned mode = job[2] & 3;
+        if (job[2] & 0x80) {
+            if (mode == 3) continue;
+            const uint8_t *speed = rom + 0x121d + 4 * (job[4] & 15);
+            if (word(ram + 0x274) & word(speed + 2)) continue;
+            for (unsigned colour = 0; colour < 16; ++colour) {
+                unsigned target = word(rom + 0xa0000 + ((0xa212 + 32 * word(job) + 2 * colour) & 0xffff));
+                if (mode == 0 && word(palette + 32 * bank + 2 * colour) == target) continue;
+                cycles += slowdown_per_faded_colour[mode];
+            }
+        } else if (job[2] & 0x40)
+            cycles += 16 * slowdown_per_copied_colour;
+    }
+    return cycles;
+}
+
 static int tick(uint16_t pads, uint16_t system)
 {
     unsigned board_tick_before = word(ram + 0x276);
@@ -345,6 +436,8 @@ static int tick(uint16_t pads, uint16_t system)
         unsigned calls = 0;
         while (world_dispatch_target(&pass, ram, &addr)) {
             world_clock_note_unrecovered(&board_clock);
+            slowdown_estimate += slowdown_routine(addr);
+            ++slowdown_actors;
             if (++calls > 65536) {
                 snprintf(failure, sizeof failure, "Actor list did not terminate at master %04X.", word(ram + 0x80));
                 return 0;
@@ -357,6 +450,7 @@ static int tick(uint16_t pads, uint16_t system)
             }
         }
     }
+    slowdown_estimate += slowdown_palette();
     world_palette_step(ram, palette, rom);
     int sound, master_sound;
     unsigned master = word(ram + 0x80);
@@ -370,9 +464,36 @@ static int tick(uint16_t pads, uint16_t system)
     int busy_system = -1;
     if (board_clock.pass_mode == WORLD_TIMING_ARCADE && (master == 0xa0e || master == 0x24e2))
         busy_system = system;
-    if (!world_frame_boundary_irq(ram, tiles, oam, palette, rom, pads, 0xffff,
-                                  system, world_dispatch_port4, 0, busy_system,
-                                  &sound, &master_sound)) {
+    /* Rest of the estimate: video-RAM words written since the last decision
+       (the previous boundary's transfers and this pass's), sprites, master. */
+    unsigned written = 0;
+    for (unsigned i = 0; i < sizeof slowdown_shadow; i += 2)
+        if (memcmp(slowdown_shadow + i, tiles + i, 2)) ++written;
+    memcpy(slowdown_shadow, tiles, sizeof slowdown_shadow);
+    slowdown_estimate += written * slowdown_per_vram_write + slowdown_master(master) +
+                         ((0u - ram[0x8b26]) & 255) * slowdown_per_sprite;
+    unsigned vblanks = 1;
+    if (board_clock.pass_mode == WORLD_TIMING_ARCADE && busy_system < 0) {
+        vblanks = 1 + slowdown_estimate / SLOWDOWN_FRAME_CYCLES;
+        if (vblanks > 4) vblanks = 4;
+    }
+    if (master == 0xb2e) {
+        ++slowdown_gameplay;
+        slowdown_sum_cycles += slowdown_estimate;
+        slowdown_sum_actors += slowdown_actors;
+    }
+    slowdown_actors = 0;
+    slowdown_frames += vblanks - 1;
+    ++slowdown_passes;
+    slowdown_overruns += vblanks > 1;
+    if (vblanks > 1) ++slowdown_by_master[master];
+    slowdown_estimate = 0;
+    int boundary_ok = vblanks > 1
+        ? world_frame_boundary_irq_vblanks(ram, tiles, oam, palette, rom, pads, 0xffff, system,
+                                           world_dispatch_port4, vblanks, &sound, &master_sound)
+        : world_frame_boundary_irq(ram, tiles, oam, palette, rom, pads, 0xffff,
+                                   system, world_dispatch_port4, 0, busy_system, &sound, &master_sound);
+    if (!boundary_ok) {
         snprintf(failure, sizeof failure, "Unrecovered World frame transition at master %04X.", master);
         return 0;
     }
@@ -687,6 +808,19 @@ static void headless_run(const char *dir, const char *script_path)
         if (!tick((uint16_t)~input, (uint16_t)~buttons)) break;
         unsigned long before = ticks;
         ticks += elapsed_board_frames;
+        /* WORLD_SCROLL_LOG=path: the playfield and background scroll at every
+           board frame (passes that overran repeat their values). */
+        static FILE *scroll_log;
+        static int scroll_log_checked;
+        if (!scroll_log_checked) {
+            scroll_log_checked = 1;
+            const char *path = getenv("WORLD_SCROLL_LOG");
+            if (path) scroll_log = fopen(path, "w");
+        }
+        if (scroll_log)
+            for (unsigned long f = before; f < ticks; ++f)
+                fprintf(scroll_log, "%lu %u %u %u %u %u\n", f, word(ram + 0xb70a), word(ram + 0xb70c),
+                        word(ram + 0xb70e), word(ram + 0xb710), (unsigned)(ticks - before));
         if (trace && before / 1000 != ticks / 1000) {
             unsigned sub = word(ram + 0x90);
             unsigned cfg = word(ram + sub + 0x70);
@@ -802,7 +936,7 @@ int main(int argc, char **argv)
         settings_status != WORLD_SETTINGS_NEWER_VERSION &&
         world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
         fprintf(stderr, "Could not save native settings.\n");
-    fprintf(stderr, "Timing policy: %s. Original workload cost recovery is incomplete.\n",
+    fprintf(stderr, "Timing policy: %s (pass costs fitted to MAME measurements).\n",
             world_timing_mode_label(settings.timing_mode));
     world_ym_reset();
     world_audio_reset_ym(sound_rom, sound_fm_write, NULL);
@@ -836,6 +970,29 @@ int main(int argc, char **argv)
     int was_focused = 0, fresh = 0;
     LONGLONG counted_from = now.QuadPart;
     double present_deadline = (double)now.QuadPart;
+    /* Display lock (Smooth and Exact pacing): when the display refresh is a
+       whole multiple k of the board's 60.01 Hz (within 0.6 %), the loop runs
+       on the display's VBlank. It presents on every refresh and runs a game
+       frame every k refreshes, so each game frame is shown for exactly k
+       refreshes and scrolling is perfectly even. A pass that overran keeps
+       its frame up for k refreshes per board frame. Smooth runs the game at
+       the display's pace (60.000 Hz on a 60/120 Hz display, 0.02 % slower than
+       the board); Exact keeps the board's 60.0125 Hz by running one extra
+       frame whenever the display falls a whole frame behind (about every 80 s
+       at 60/120 Hz). Timer pacing, or a display that is not a whole multiple,
+       uses the board clock and the timer loop below. */
+    unsigned lock_k = 0, lock_wait = 0, lock_phase = 0, lock_span = 1;
+    double lock_hz = 0.0, lock_origin = 0.0;
+    unsigned long lock_ticks = 0, live_ticks = 0;
+    unsigned lock_ready = 0, lock_next_span = 1;
+    static uint32_t live[320 * 240];          /* the game frame on show while locked */
+    LONGLONG lock_checked = 0;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
+       WORLD_RUN_SECONDS=n quits after n seconds. */
+    FILE *pacing_log = getenv("WORLD_PACING_LOG") ? fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
+    double run_seconds = getenv("WORLD_RUN_SECONDS") ? atof(getenv("WORLD_RUN_SECONDS")) : 0.0;
+    LONGLONG run_start = now.QuadPart;
     while (world_window_poll(&pads, &system)) {
         /* F1, Esc or L3+R3 opens the pause menu; the game stands still. */
         unsigned toggle;
@@ -847,9 +1004,27 @@ int main(int argc, char **argv)
         int focused = world_window_focused();
         if (settings.pause_unfocused && was_focused && !focused && !menu.open) rising |= 1;
         was_focused = focused;
-        /* The game always runs at the board's 60.01 Hz with sound. The FPS
-           limit only sets how often the picture is redrawn: the same game
-           frame with the enhancement animation moved on. */
+        QueryPerformanceCounter(&now);
+        if (run_seconds > 0.0 && (double)(now.QuadPart - run_start) > run_seconds * (double)rate.QuadPart) break;
+        /* Re-check the display twice a second (mode changes, moving monitors). */
+        if (now.QuadPart - lock_checked > rate.QuadPart / 2) {
+            lock_checked = now.QuadPart;
+            unsigned k = 0;
+            double hz = settings.pacing != 2 ? world_window_refresh_hz() : 0.0;
+            if (hz > 20.0) {
+                k = (unsigned)(hz / 60.0125 + 0.5);
+                if (k < 1 || k > 8 || fabs(hz / k - 60.0125) / 60.0125 > 0.006) k = 0;
+            }
+            if (k != lock_k || fabs(hz - lock_hz) > 0.01) {
+                if (pacing_log) fprintf(pacing_log, "lock %.4f %u%c", hz, k, 10);
+                lock_k = k;
+                lock_hz = hz;
+                lock_wait = lock_phase = lock_ready = 0;
+                lock_origin = (double)now.QuadPart;
+                lock_ticks = 0;
+                deadline = (double)now.QuadPart;
+            }
+        }
         unsigned limit = world_menu_fps[settings.fps_limit];
         double period = arcade_period;
         double display_period = !limit || limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
@@ -860,12 +1035,16 @@ int main(int argc, char **argv)
                 previous_toggle = toggle;
                 QueryPerformanceCounter(&now);
                 deadline = (double)now.QuadPart;
+                lock_wait = lock_phase = lock_ready = 0;
+                lock_origin = (double)now.QuadPart;
+                lock_ticks = 0;
             }
-            Sleep(15);
+            if (lock_k) world_window_wait_vblank();
+            else Sleep(15);
             continue;
         }
         if (rising) {
-            memcpy(paused_frame, pixels, sizeof paused_frame);
+            memcpy(paused_frame, lock_k ? live : pixels, sizeof paused_frame);
             world_menu_open(&menu, menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0), gamepad, GetTickCount());
             menu_frame(paused_frame, menu_held, toggle, 0, gamepad);
             continue;
@@ -875,48 +1054,110 @@ int main(int argc, char **argv)
             if ((uint16_t)~pads || ((uint16_t)~system & 0xf) || menu_held) pads = system = 0xffff;
             else hold_input = 0;
         }
-        QueryPerformanceCounter(&now);
-        if (now.QuadPart >= deadline) {
-            if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
-            if (!tick(pads, system)) break;
-            double present_at = deadline + period * (elapsed_board_frames - 1);
-            int window_open = 1;
-            QueryPerformanceCounter(&now);
-            while (now.QuadPart < present_at && window_open) {
-                window_open = world_window_poll(&pads, &system);
-                if (window_open) Sleep(1);
-                QueryPerformanceCounter(&now);
+
+        if (lock_k) {
+            /* The next game frame is computed during the last refresh of the
+               current one (all of it when k is 1), so the refresh where it
+               goes live only has to present it. */
+            if (!lock_ready && (lock_wait <= 1 || lock_k == 1)) {
+                unsigned runs = 1;
+                if (settings.pacing == 1) {
+                    /* Exact: keep the game frame count on the board clock. */
+                    double owed = ((double)now.QuadPart - lock_origin) / period - (double)lock_ticks;
+                    if (owed > 1.5) runs = 2;
+                    else if (owed < -1.5) runs = 0;
+                    if (runs != 1 && pacing_log) fprintf(pacing_log, "correct %u owed %.3f%c", runs, owed, 10);
+                }
+                /* The hold is set by the first pass alone: an overrun keeps
+                   its frame up for every board frame it took, while an Exact
+                   catch-up pass only advances the game. */
+                unsigned span = 0;
+                for (unsigned r = 0; r < runs; ++r) {
+                    if (!tick(pads, system)) { runs = 99; break; }
+                    ticks += elapsed_board_frames;
+                    lock_ticks += elapsed_board_frames;
+                    counted += elapsed_board_frames;
+                    if (!r) span = elapsed_board_frames;
+                }
+                if (runs == 99) break;
+                if (runs) draw();
+                lock_next_span = span ? span : 1;
+                lock_ready = 1;
             }
-            if (!window_open) break;
-            deadline += period * elapsed_board_frames;
-            ticks += elapsed_board_frames;
-            draw();
-            counted += elapsed_board_frames;
-            fresh = 1;
-        }
-        /* Arcade redraws once per game frame; a limit redraws on its own
-           clock; uncapped redraws every pass (v-sync, if on, paces it). */
-        int show = 0;
-        QueryPerformanceCounter(&now);
-        double into = 1.0 - ((double)deadline - (double)now.QuadPart) / period;
-        world_window_set_source_time((double)ticks + (into < 0.0 ? 0.0 : into > 0.999 ? 0.999 : into));
-        if (settings.crt_beam && world_window_gpu()) show = 1;   /* one sub-frame per display refresh */
-        else if (!limit) show = fresh;
-        else if (limit == 0xffffffffu) show = 1;
-        else if (now.QuadPart >= present_deadline) {
-            show = 1;
-            present_deadline += display_period;
-            if (now.QuadPart - present_deadline > rate.QuadPart / 4) present_deadline = (double)now.QuadPart;
-        }
-        if (show) {
-            present_game(pixels);
+            if (!lock_wait) {
+                memcpy(live, pixels, sizeof live);
+                live_ticks = ticks;
+                lock_span = lock_next_span;
+                lock_wait = lock_k * lock_span;
+                lock_phase = 0;
+                lock_ready = 0;
+            }
+            /* Where the beam is, for the beam simulator: the frame on show
+               began lock_phase refreshes ago. */
+            world_window_set_source_time((double)live_ticks - (double)lock_span +
+                                         (double)lock_phase / (double)lock_k);
+            present_game(live);
             ++presented;
             fresh = 0;
+            --lock_wait;
+            ++lock_phase;
+            world_window_wait_vblank();
+            if (pacing_log) {
+                QueryPerformanceCounter(&now);
+                fprintf(pacing_log, "%.4f %lu %u %u %u\n", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart,
+                        live_ticks, lock_phase, lock_k, word(ram + 0xb70a));
+                unsigned shown_present = 0, shown_refresh = 0, made = 0;
+                if (world_gpu_frame_statistics(&shown_present, &shown_refresh, &made))
+                    fprintf(pacing_log, "dxgi %u %u %u%c", shown_present, shown_refresh, made, 10);
+            }
         } else {
-            double next = deadline;
-            if (limit && limit != 0xffffffffu && present_deadline < next) next = present_deadline;
-            if (next - (double)now.QuadPart > (double)rate.QuadPart / 1000.0) Sleep(1);
+            if (now.QuadPart >= deadline) {
+                if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
+                if (!tick(pads, system)) break;
+                double present_at = deadline + period * (elapsed_board_frames - 1);
+                int window_open = 1;
+                QueryPerformanceCounter(&now);
+                while (now.QuadPart < present_at && window_open) {
+                    window_open = world_window_poll(&pads, &system);
+                    if (window_open) Sleep(1);
+                    QueryPerformanceCounter(&now);
+                }
+                if (!window_open) break;
+                deadline += period * elapsed_board_frames;
+                ticks += elapsed_board_frames;
+                draw();
+                counted += elapsed_board_frames;
+                fresh = 1;
+            }
+            /* Arcade redraws once per game frame; a limit redraws on its own
+               clock; uncapped redraws every pass (v-sync, if on, paces it). */
+            int show = 0;
+            QueryPerformanceCounter(&now);
+            double into = 1.0 - ((double)deadline - (double)now.QuadPart) / period;
+            world_window_set_source_time((double)ticks + (into < 0.0 ? 0.0 : into > 0.999 ? 0.999 : into));
+            if (settings.crt_beam && world_window_gpu()) show = 1;   /* one sub-frame per display refresh */
+            else if (!limit) show = fresh;
+            else if (limit == 0xffffffffu) show = 1;
+            else if (now.QuadPart >= present_deadline) {
+                show = 1;
+                present_deadline += display_period;
+                if (now.QuadPart - present_deadline > rate.QuadPart / 4) present_deadline = (double)now.QuadPart;
+            }
+            if (show) {
+                present_game(pixels);
+                ++presented;
+                fresh = 0;
+                if (pacing_log)
+                    fprintf(pacing_log, "%.4f %lu 0 0 %u%c", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart,
+                            ticks, word(ram + 0xb70a), 10);
+            } else {
+                double next = deadline;
+                if (limit && limit != 0xffffffffu && present_deadline < next) next = present_deadline;
+                if (next - (double)now.QuadPart > (double)rate.QuadPart / 1000.0) Sleep(1);
+            }
         }
+        world_audio_output_pump();
+        QueryPerformanceCounter(&now);
         if (now.QuadPart - counted_from >= rate.QuadPart / 2) {
             double seconds = (double)(now.QuadPart - counted_from) / (double)rate.QuadPart;
             shown_fps = (unsigned)(presented / seconds + 0.5);
@@ -925,10 +1166,17 @@ int main(int argc, char **argv)
             counted_from = now.QuadPart;
         }
     }
+    if (pacing_log) fclose(pacing_log);
     timeEndPeriod(1);
     world_window_close();
     world_audio_output_close();
 finished:
+    for (unsigned m = 0; m < 65536; ++m)
+        if (slowdown_by_master[m]) fprintf(stderr, "  overruns at master %04X: %u%c", m, slowdown_by_master[m], 10);
+    if (slowdown_gameplay)
+        fprintf(stderr, "  gameplay passes %llu: mean estimate %llu cycles, mean actors %.1f%c", slowdown_gameplay,
+                slowdown_sum_cycles / slowdown_gameplay, (double)slowdown_sum_actors / (double)slowdown_gameplay, 10);
+    fprintf(stderr, "Slowdown model: %lu of %lu passes overran, %lu frames lost.\n", slowdown_overruns, slowdown_passes, slowdown_frames);
     if (sound_gaps) fprintf(stderr, "%u sound callbacks need recovery.\n", sound_gaps);
     fprintf(stderr, "%llu executed blocks have unrecovered original timing in this run.\n",
             (unsigned long long)board_clock.unrecovered_costs);

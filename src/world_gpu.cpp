@@ -157,6 +157,7 @@ struct Presenter {
     Com<ID3D12GraphicsCommandList> cmd;
     Com<ID3D12Fence> fence;
     HANDLE event = nullptr;
+    HANDLE frame_wait = nullptr;          // signalled when the swap chain can take a frame
     UINT64 fence_value = 0, frame_fence[FRAMES] = {};
     UINT frame_index = 0;
     Com<ID3D12Resource> picture, picture_upload[FRAMES];
@@ -205,7 +206,8 @@ struct Presenter {
         wait_all();
         release_buffers();
         swap->ResizeBuffers(BUFFERS, w, h, DXGI_FORMAT_B8G8R8A8_UNORM,
-                            tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
+                            (tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0) |
+                            DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
         width = w;
         height = h;
         buffers();
@@ -304,7 +306,7 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.BufferCount = BUFFERS;
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    sd.Flags = p->tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    sd.Flags = (p->tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0) | DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     Com<IDXGISwapChain1> swap1;
     if (FAILED(p->factory->CreateSwapChainForHwnd(p->queue.get(), p->child, &sd, nullptr, nullptr, swap1.put())) ||
         FAILED(swap1->QueryInterface(IID_PPV_ARGS(p->swap.put())))) {
@@ -313,6 +315,8 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
         return 0;
     }
     p->factory->MakeWindowAssociation(p->child, DXGI_MWA_NO_ALT_ENTER);
+    p->swap->SetMaximumFrameLatency(1);
+    p->frame_wait = p->swap->GetFrameLatencyWaitableObject();
     D3D12_DESCRIPTOR_HEAP_DESC hd = {};
     hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     hd.NumDescriptors = BUFFERS;
@@ -356,6 +360,7 @@ extern "C" void world_gpu_close(void)
     gpu->chain.reset();
     HWND child = gpu->child;
     if (gpu->event) CloseHandle(gpu->event);
+    if (gpu->frame_wait) CloseHandle(gpu->frame_wait);
     delete gpu;
     gpu = nullptr;
     if (child) DestroyWindow(child);
@@ -399,6 +404,24 @@ extern "C" void world_gpu_set_background(const uint32_t *pixels, unsigned width,
 }
 
 extern "C" double world_gpu_refresh_hz(void) { return gpu ? gpu->refresh_hz : 0.0; }
+
+extern "C" int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refresh,
+                                          unsigned *last_present)
+{
+    if (!gpu || !gpu->swap) return 0;
+    DXGI_FRAME_STATISTICS st = {};
+    UINT last = 0;
+    if (FAILED(gpu->swap->GetFrameStatistics(&st)) || FAILED(gpu->swap->GetLastPresentCount(&last))) return 0;
+    *present_count = st.PresentCount;
+    *present_refresh = st.PresentRefreshCount;
+    *last_present = last;
+    return 1;
+}
+
+extern "C" void world_gpu_wait_frame(void)
+{
+    if (gpu && gpu->frame_wait) WaitForSingleObjectEx(gpu->frame_wait, 100, TRUE);
+}
 
 extern "C" void world_gpu_present(const uint32_t *frame, double source_time)
 {

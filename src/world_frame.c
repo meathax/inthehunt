@@ -308,7 +308,7 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
                    master == 0xc7f8 || master == 0xc82b || master == 0xc861;
     int title = master == 0xa09 || master == 0x1d52 || master == 0x1de6 ||
                 master == 0x1e6c || master == 0x1ea5 || master == 0x1f52 || master == 0x1f85;
-    if (!vblanks || vblanks > 2 || (busy_system >= 0 && master != 0xa0e && master != 0x24e2) ||
+    if (!vblanks || vblanks > 4 || (busy_system >= 0 && master != 0xa0e && master != 0x24e2) ||
         (!title && !title_transition && !gameover && !stage_clear && master != 0xb2e && master != 0x2218 && master != 0x2282 && master != 0xa81 && master != 0xa31) ||
         ((title || title_transition || stage_clear || gameover || master == 0xa81 || master == 0xa31) && (!tiles || !palette)) ||
         ((title || master == 0x1f19) && word(ram + 0x84)) ||
@@ -407,6 +407,15 @@ int world_frame_boundary_irq(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t
 {
     return advance_boundary(ram, tiles, oam, palette, rom, raw_pads, raw_aux, raw_system,
                             raw_dips, 1, polls, busy_system, sound_command, master_command);
+}
+
+int world_frame_boundary_irq_vblanks(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t *palette,
+                                     const uint8_t *rom, uint16_t raw_pads, uint16_t raw_aux,
+                                     uint16_t raw_system, uint16_t raw_dips, unsigned vblanks,
+                                     int *sound_command, int *master_command)
+{
+    return advance_boundary(ram, tiles, oam, palette, rom, raw_pads, raw_aux, raw_system,
+                            raw_dips, vblanks, 0, -1, sound_command, master_command);
 }
 
 int world_frame_advance_vblanks(uint8_t *ram, uint8_t *tiles, uint8_t *oam,

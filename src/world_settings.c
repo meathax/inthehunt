@@ -26,6 +26,7 @@ static const NumberSetting numbers[] = {
     {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1},
     {"scaling", offsetof(WorldSettings, scaling), 0, 2},
     {"fps_limit", offsetof(WorldSettings, fps_limit), 0, 5},
+    {"pacing", offsetof(WorldSettings, pacing), 0, 2},
     {"show_fps", offsetof(WorldSettings, show_fps), 0, 1},
     {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1},
     {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100},

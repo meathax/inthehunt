@@ -39,8 +39,8 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
     - Scaling: Integer (sharpest), Fit 4:3 (largest picture that keeps the shape) or Stretch (fill the window)
     - CRT shader: Off or one of twelve CRT looks (see below)
     - Beam simulator: Blur Busters CRT rolling-scan simulation for 120 Hz and faster displays
-    - V-Sync: wait for the display refresh
-    - FPS limit: Arcade (60.01 Hz), 90, 120, 180, 240 or Uncapped
+    - Frame pacing: Smooth (default), Exact 60.01 or Timer (see below)
+    - V-Sync and FPS limit: Timer pacing only (FPS limit: Arcade, 90, 120, 180, 240 or Uncapped)
     - Show FPS: frame rate and game speed in the corner
     - Border art (Black or Undersea) and border brightness
   - **Sound**: master volume, plus separate levels for the FM synth (YM2151) and the PCM samples (GA20)
@@ -55,7 +55,14 @@ Press **F1** (or **L3 + R3**) at any time. The game freezes and the menu appears
 
 Settings are saved when the menu closes. Esc no longer quits the game outright.
 
-**About the FPS limit.** The game always runs at the board's 60.01 Hz with sound. The limit only sets how often the picture is redrawn: above Arcade, the same game frame is shown again with the enhancement animation (caustics, light shafts, snow) moved on, so the water moves more smoothly on high-refresh displays. Uncapped redraws as fast as possible, paced by V-Sync if that is on.
+**Frame pacing.** The board refreshes at 60.0125 Hz. With **Smooth** or **Exact**, the game locks to your display when its refresh is a whole multiple of that (60, 120, 180, 240 Hz, within 0.6 %): it presents on every refresh through a DXGI flip-model swap chain and runs one game frame every *k* refreshes, so every frame is on screen for exactly the same time and scrolling is perfectly even. Measured on a 120 Hz display over 130 s: every present landed on the next refresh (DXGI statistics) and every game frame was shown for exactly 2 refreshes, apart from the original's own slowdown frames (4 refreshes each).
+- **Smooth** runs the game at the display's pace: 60.000 Hz on a 60/120 Hz display, 0.02 % slower than the board.
+- **Exact 60.01** keeps the board's 60.0125 Hz by running one extra game frame whenever a whole frame of drift has built up (about once every 80 s at 60/120 Hz).
+- **Timer** is the free-running board clock for variable-refresh (G-Sync/FreeSync) displays or refresh rates that are not a multiple of 60; there V-Sync and the FPS limit apply. The FPS limit only sets the redraw rate; the game speed is fixed.
+
+Sound never blocks the game: it is queued and stretched or squeezed by at most 0.5 % to stay in step with whichever clock the video runs on.
+
+**What is not a pacing fault:** the original scrolls in whole pixels from a fractional camera, so a pan of 1.25 pixels a frame moves 1, 1, 1, 2 pixels (measured in MAME), and the stage-opening palette fade makes the original take two frames per pass for about a second while the submarine enters. Both are reproduced; Remove Slowdown removes the second.
 
 ### CRT shaders
 
@@ -140,8 +147,8 @@ Earlier in the project, encounter replays were compared with MAME's reference ex
 
 ## Known limitations
 
-- **Arcade slowdown is approximate.** Original per-block CPU costs are only partly recovered, so busy scenes slow down close to, but not exactly like, the PCB. Remove Slowdown is unaffected.
-- **No final frame-by-frame MAME comparison.** MAME 0.289 also needs the set's four PLD dumps (`m92_a-9j-.ic51`, `m92_e-3k-.ic20`, `m92_e-3p-.ic21`, `m92_e-4k-.ic29`). The importer does not keep them, so whole-game equivalence against MAME has not been rechecked.
+- **Arcade slowdown is a fitted model, not cycle-exact.** The native code runs instantly, so each logic pass is charged an estimate of the original V33 time and the game misses VBlanks when that exceeds a frame, as the PCB does. The estimate comes from 157,503 passes of the original program measured in MAME (see [Slowdown model](#slowdown-model)); held-out passes are predicted to within 1.4 % of a frame on average (r² 0.978), and about two thirds of real overruns are caught. Individual heavy frames can still differ. Remove Slowdown is unaffected.
+- **No whole-game frame-by-frame MAME comparison.** MAME 0.289 can run the set rebuilt from the imported chips (the six PLD files are not emulated, so placeholders of the right size are enough; MAME only warns about their checksums), and it was used to measure the slowdown model, but a full lockstep comparison of every frame has not been done.
 - **Audio** follows the original driver and chip models, but its samples were never shown to be bit-identical to the reference.
 - Only the World set (`inthunt`) is supported. *Kaitei Daisensou* and the US set are not.
 
@@ -196,6 +203,18 @@ Input modes combine: `steer`, `adv`, `sweep`, `dive` (route styles), `z`/`x` (fi
 | `WORLD_FX_SHOT=frame` | Save that frame with no enhancement, each enhancement alone, and all together |
 | `WORLD_FX_SHOTS=1` | Save every scripted shot with the water effects on, and log the waterline |
 | `WORLD_CRT_SHOT=frame` | Render that frame through every CRT preset off screen at 1920×1080 (Direct3D 12) |
+| `WORLD_SCROLL_LOG=path` | Log the layer scroll registers at every board frame |
+| `WORLD_OFFSCREEN=1`, `WORLD_PACING_LOG=path`, `WORLD_RUN_SECONDS=n` | Windowed pacing test on the real display: window off the desktop, never focused; logs every refresh with DXGI present statistics, quits after *n* s |
+
+### Slowdown model
+
+The original game slows down when its main CPU needs more than one frame (149,980 V33 cycles) for a logic pass. To reproduce that:
+
+1. `tools/mame_measure_passes.lua` runs the original program in MAME with scripted one- and two-player play and records, for every pass, its busy time (from the pass-counter increment at `0:086C` to the `0:084D` VBlank wait loop), the master routine, the actor routines in the list, sprites, video-RAM writes and palette colours stepped per fade mode.
+2. `tools/fit_slowdown.py` fits a non-negative linear model (a base per master, a cost per actor routine, and per-sprite, per-VRAM-write and per-faded-colour terms) and writes `src/world_slowdown_table.h`.
+3. In Arcade timing the native game sums the same terms for each pass and services the extra VBlanks when the estimate overruns.
+
+Measured findings: an ordinary gameplay pass takes 45–130k cycles depending on the number of actors (≈650 each); the stage-opening palette fade (≈300 cycles per faded colour) makes passes take two frames; a full tilemap redraw (≈16k video writes) takes 2–3 frames. With matched play, the native estimate per gameplay pass agrees with MAME's measured time to within about 5 %.
 
 ### Developer reference tools (MAME)
 

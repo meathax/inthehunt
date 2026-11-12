@@ -37,6 +37,11 @@ void world_gpu_set_background(const uint32_t *pixels, unsigned width, unsigned h
 void world_gpu_present(const uint32_t *frame, double source_time);
 /* Measured display refresh rate (0 until known). */
 double world_gpu_refresh_hz(void);
+/* Wait until the swap chain can take another frame (one per refresh with v-sync). */
+void world_gpu_wait_frame(void);
+/* DXGI statistics: the latest present shown and the refresh it appeared on,
+ * and the number of presents made. Returns 0 if unavailable. */
+int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refresh, unsigned *last_present);
 
 /* Headless: render frame through preset (path or "") at width x height into
  * out (ARGB). Creates and releases its own device. */

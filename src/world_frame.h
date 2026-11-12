@@ -20,6 +20,12 @@ int world_frame_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t *pa
                          uint16_t raw_system, uint16_t raw_dips, unsigned polls,
                          int *sound_command, int *master_command);
 /* busy_system is -1 or the raw system port at an IRQ inside master execution. */
+/* As world_frame_boundary_irq for a pass that overran: vblanks (1..4) VBlank
+ * interrupts are serviced before the next pass, as on the board. */
+int world_frame_boundary_irq_vblanks(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t *palette,
+                                     const uint8_t *rom, uint16_t raw_pads, uint16_t raw_aux,
+                                     uint16_t raw_system, uint16_t raw_dips, unsigned vblanks,
+                                     int *sound_command, int *master_command);
 int world_frame_boundary_irq(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t *palette,
                              const uint8_t *rom, uint16_t raw_pads, uint16_t raw_aux,
                              uint16_t raw_system, uint16_t raw_dips, unsigned polls,

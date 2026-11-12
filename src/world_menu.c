@@ -20,7 +20,7 @@ enum {
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
     ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM, ITEM_FX_SHIMMER,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
-    ITEM_CRT, ITEM_BEAM
+    ITEM_CRT, ITEM_BEAM, ITEM_PACING
 };
 enum { MAX_ITEMS = 20, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -213,8 +213,9 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
             ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION. GPU");
             ADD(ITEM_BEAM, "BEAM SIMULATOR", "ROLLING SCAN. 120 HZ+ DISPLAYS");
-            ADD(ITEM_VSYNC, "V-SYNC", "SYNC TO THE DISPLAY REFRESH");
-            ADD(ITEM_FPS, "FPS LIMIT", "REDRAW RATE. GAME SPEED IS FIXED");
+            ADD(ITEM_PACING, "FRAME PACING", "SMOOTH LOCKS FRAMES TO THE DISPLAY");
+            ADD(ITEM_VSYNC, "V-SYNC", "TIMER PACING ONLY");
+            ADD(ITEM_FPS, "FPS LIMIT", "TIMER PACING ONLY. REDRAW RATE");
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
             ADD(ITEM_BORDER, "BORDER ART", "ARTWORK AROUND THE PICTURE");
             ADD(ITEM_LIGHT, "BORDER LIGHT", "BRIGHTNESS OF THE BORDER ART");
@@ -261,6 +262,7 @@ static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id
 {
     if (id == ITEM_SCALE) return s->fullscreen != 0;
     if (id == ITEM_LIGHT) return m->border_index == 0;
+    if (id == ITEM_VSYNC || id == ITEM_FPS) return s->pacing != 2;
     if (id > ITEM_FX && id <= ITEM_FX_SCANLINES) return !s->fx_enable;
     return 0;
 }
@@ -276,6 +278,7 @@ static void item_value(const WorldMenu *m, const WorldSettings *s, unsigned id, 
         break;
     case ITEM_SLOWDOWN: strcpy(out, s->timing_mode == WORLD_TIMING_ARCADE ? "ARCADE" : "OFF"); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
+    case ITEM_PACING: strcpy(out, s->pacing == 0 ? "SMOOTH" : s->pacing == 1 ? "EXACT 60.01" : "TIMER"); break;
     case ITEM_FPS:
         if (!s->fps_limit) strcpy(out, "ARCADE");
         else if (s->fps_limit == WORLD_MENU_FPS_CHOICES - 1) strcpy(out, "UNCAPPED");
@@ -385,7 +388,9 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VOLUME;
     }
     case ITEM_SCALING: s->scaling = (s->scaling + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
+    case ITEM_PACING: s->pacing = (s->pacing + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
     case ITEM_FPS:
+        if (s->pacing != 2) return 0;
         s->fps_limit = (s->fps_limit + WORLD_MENU_FPS_CHOICES + (d > 0 ? 1 : -1)) % WORLD_MENU_FPS_CHOICES;
         return WORLD_MENU_VIEW;
     case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;

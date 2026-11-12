@@ -24392,8 +24392,9 @@ stage2_jumper_terrain:
         break;
     case 0x7dc27:
     case 0x7dc68:
-        /* 7DC68 loads SI only through a successful 1769 at 7DCD6. */
-        if (address == 0x7dc68) keep_si();
+        /* Neither routine writes SI except 7DC68 through a successful 1769 at
+           7DCD6 (7DC27 and 4311 never touch it), so SI passes through. */
+        keep_si();
         if (read_word(ram, actor + 0x48) < read_word(ram, 0xb700)) {
             finish_animation(ram, actor);
             break;
@@ -26693,6 +26694,9 @@ stage2_jumper_terrain:
     case 0xafa46: {
         const uint8_t *bank = main_rom + 0xa0000;
         unsigned variant = ram[actor + 0x1e] & 6;
+        /* 4311 and the off-screen exit at AF9C6/AFA51 never write SI; the
+           other paths reload it in 0DA4, D237 or D2B7. */
+        keep_si();
         scroll_actor(ram, actor, 0xb71a);
         if (read_word(ram, actor + 0x21) < 16) {
             finish_animation(ram, actor);
