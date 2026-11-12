@@ -13,11 +13,15 @@
  * only: nothing feeds back into the game. */
 
 typedef struct {
-    unsigned caustics, rays, lights, shimmer, depth, snow, vivid, vignette, trails;
+    unsigned caustics, rays, shimmer, depth, snow, vivid, vignette, trails;
+    unsigned lights;     /* path-traced light from fire: soft shadows and bounce light */
     unsigned shadows;    /* sprites cast soft shadows on the scenery behind them */
     unsigned dof;        /* far layer slightly out of focus */
     unsigned haze;       /* far layer fades toward water blue */
-    unsigned relief;     /* embossed lighting on scenery */
+    unsigned normals;    /* per-pixel lighting from normals derived from the pixel art */
+    unsigned sunshadow;  /* rock blocks the sunlight: shafts, caustics and shading */
+    unsigned glow;       /* light scattered by the water around lights */
+    unsigned reflect;    /* the surface mirrors what is above it */
     unsigned stereo;     /* red-cyan anaglyph from layer depth */
     unsigned shock;      /* refraction rings from explosions */
     unsigned particles;  /* embers and bubbles from explosions */
@@ -52,4 +56,7 @@ unsigned world_scene_take_rumble(void);
 /* Screen row where water effects began in the last render, for tests. */
 int world_scene_waterline(void);
 void world_scene_reset(void);
+/* Test view of the light transport (320x240): rock in its own colour,
+   open water grey by sun visibility, plus the traced light. */
+void world_scene_debug(uint32_t *out);
 #endif

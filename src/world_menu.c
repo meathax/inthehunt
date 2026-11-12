@@ -23,7 +23,7 @@ enum {
     ITEM_CRT, ITEM_BEAM, ITEM_PACING,
     ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
     ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
-    ITEM_START, ITEM_AUTOFIRE
+    ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
 };
 enum { MAX_ITEMS = 40, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -51,7 +51,10 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_SHADOWS: return &s->fx_shadows;
     case ITEM_FX_DOF: return &s->fx_dof;
     case ITEM_FX_HAZE: return &s->fx_haze;
-    case ITEM_FX_RELIEF: return &s->fx_relief;
+    case ITEM_FX_RELIEF: return &s->fx_normals;
+    case ITEM_FX_SUNSHADOW: return &s->fx_sunshadow;
+    case ITEM_FX_GLOW: return &s->fx_glow;
+    case ITEM_FX_REFLECT: return &s->fx_reflect;
     case ITEM_FX_STEREO: return &s->fx_stereo;
     case ITEM_FX_SHOCK: return &s->fx_shock;
     case ITEM_FX_PARTICLES: return &s->fx_particles;
@@ -252,8 +255,10 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX, "ENHANCEMENTS", "MASTER SWITCH. OFF IS PURE ARCADE");
             ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING LIGHT IN OPEN WATER");
             ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS FROM THE SURFACE");
-            ADD(ITEM_FX_LIGHTS, "DYNAMIC LIGHTS", "BLASTS LIGHT UP THE SCENE");
-            ADD(ITEM_FX_DEPTH, "DEPTH SHADING", "DEEPER WATER IS DARKER");
+            ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK BLOCKS THE SUNLIGHT");
+            ADD(ITEM_FX_LIGHTS, "PATH TRACING", "FIRE LIGHT: SOFT SHADOWS, BOUNCES");
+            ADD(ITEM_FX_GLOW, "WATER GLOW", "LIGHT SCATTERS AROUND BLASTS");
+            ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED FADES FIRST WITH DEPTH");
             ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
             ADD(ITEM_FX_SHIMMER, "WATER SHIMMER", "GENTLE REFRACTION WOBBLE");
             ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
@@ -264,8 +269,9 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_SHADOWS, "DROP SHADOWS", "SPRITES SHADE THE SCENERY");
             ADD(ITEM_FX_HAZE, "DEPTH HAZE", "FAR SCENERY FADES TO BLUE");
             ADD(ITEM_FX_DOF, "DEPTH OF FIELD", "SOFT FAR BACKGROUND");
-            ADD(ITEM_FX_RELIEF, "RELIEF LIGHT", "EMBOSSED ROCK AND ICE");
+            ADD(ITEM_FX_RELIEF, "NORMAL MAPS", "PER-PIXEL LIGHT ON ROCK AND ICE");
             ADD(ITEM_FX_SURFACE, "LIVE SURFACE", "RIPPLING, GLINTING WATERLINE");
+            ADD(ITEM_FX_REFLECT, "REFLECTIONS", "THE SURFACE MIRRORS THE SKY");
             ADD(ITEM_FX_SHOCK, "SHOCKWAVES", "BLASTS BEND THE WATER");
             ADD(ITEM_FX_PARTICLES, "PARTICLES", "EMBERS AND BUBBLES FROM BLASTS");
             ADD(ITEM_FX_SHAKE, "SHAKE + RUMBLE", "BLASTS SHAKE SCREEN AND PAD");
@@ -292,6 +298,7 @@ static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id
     if (id == ITEM_VSYNC || id == ITEM_FPS) return s->pacing != 2;
     if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_SHADOWS && id <= ITEM_FX_INTERP))
         return !s->fx_enable;
+    if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT) return !s->fx_enable;
     return 0;
 }
 

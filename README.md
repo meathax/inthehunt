@@ -95,8 +95,10 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 |---|---|
 | Caustics | A rippling net of light on open water, behind the sprites, fixed to each layer |
 | Light shafts | Slanted sunbeams from the surface that fade with depth |
-| Dynamic lights | Fire, flashes and tracer on sprites light the scenery around them |
-| Depth shading | Water loses red, then green, toward the sea bed |
+| Sun shadows | Rock blocks the sunlight: shafts and caustics stop behind overhangs and pillars, and rock out of the sun is darker |
+| Path tracing | Explosions and glowing scenery (lava) light the scene with soft shadows cast by the rock, plus bounced light picked up from the rock they hit (see below) |
+| Water glow | Light scattered by the water around explosions: halos that the rock cuts off |
+| Absorption | Light loses red first, then green, with depth (per-channel Beer-Lambert); things lit by an explosion show their true colour again |
 | Marine snow | Drifting particles on two parallax layers |
 | Water shimmer | A gentle refraction wobble (subpixel) |
 | Vivid color | Richer saturation and contrast |
@@ -107,17 +109,21 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Drop shadows | Sprites cast soft shadows on the scenery behind them (not on open water) |
 | Depth haze | The far layer fades toward water blue |
 | Depth of field | The far layer is slightly out of focus |
-| Relief light | Embossed lighting on rock and ice |
+| Normal maps | Surface normals worked out from the pixel art's shading give per-pixel sunlight, highlights on wet and icy rock, and shading toward each explosion |
 | Live surface | Ripples just under the waterline and glints along it |
+| Reflections | Just below the waterline, the open water mirrors what is above it, rippling and fading with depth |
 | Shockwaves | A refraction ring spreads from each explosion |
 | Particles | Embers and bubbles from explosions |
 | Shake + rumble | Big explosions shake the picture and the controller |
 | Stereo 3D | Red-cyan anaglyph from the layer depths |
 
+**Path tracing.** Once per game frame the playfield is traced as a 2D scene at half resolution (160×120). The playfield layer's opaque pixels below the surface are rock; a distance field over them lets rays step quickly through open water. Lights are the game's explosion graphics (in any palette) and fire-coloured scenery such as lava. Every probe gets direct light from each light in range through a soft-shadow ray, and six rays in rotating directions collect the light leaving the first rock they hit (its colour times the light it received last frame), so the bounces build up over a few frames. Sunlight visibility is traced the same way toward the surface along the light-shaft angle. It runs on the CPU's worker threads (about 2 ms per game frame on eight threads).
+
 The master switch is off by default. Limits worth knowing:
 - **Smooth scroll and Motion ×2** need the high-resolution compositor, so they are inactive with a CRT shader, and when the display scale has no divisor of 2, 3 or 4 (×5, ×7). Motion ×2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
 - **Sprites are matched between frames by position, shape and palette.** A sprite that changes shape or jumps is shown at its new place without an in-between step; a wrong match would show as a one-frame slide.
-- **Explosions are recognised from the picture** (a large patch of fire appearing where there was none), not from the game's actor list, so an occasional one is missed or a big muzzle flash counts.
+- **Explosions are recognised from the picture**: a large patch of the game's explosion graphics appearing where there was none, not from the game's actor list, so an occasional one is missed.
+- **Lights and rock are inferred from the picture.** Rock is whatever the playfield layer draws below the surface, and lights are the explosion graphics and fire-coloured scenery; the far background layer is lit but casts no shadows.
 - **Water is recognised by colour** below the sea surface; the surface itself comes from the game's own row-scroll programme for the background layer.
 - The camera fraction is known for horizontal scrolling only.
 - Cost with the default set: about 3.3 ms per refresh at ×3 (a 4K display) and 4.6 ms at ×4, on eight threads.

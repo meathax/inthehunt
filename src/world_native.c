@@ -180,10 +180,11 @@ static WorldSceneFx scene_effects(void)
 {
     WorldSceneFx fx;
     fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
+    fx.sunshadow = settings.fx_sunshadow; fx.glow = settings.fx_glow; fx.reflect = settings.fx_reflect;
     fx.shimmer = settings.fx_shimmer; fx.depth = settings.fx_depth;
     fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid; fx.vignette = settings.fx_vignette;
     fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
-    fx.haze = settings.fx_haze; fx.relief = settings.fx_relief; fx.stereo = settings.fx_stereo;
+    fx.haze = settings.fx_haze; fx.normals = settings.fx_normals; fx.stereo = settings.fx_stereo;
     fx.shock = settings.fx_shock; fx.particles = settings.fx_particles; fx.shake = settings.fx_shake;
     fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
     return fx;
@@ -815,9 +816,10 @@ static void headless_run(const char *dir, const char *script_path)
                 {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
                 {"vignette", offsetof(WorldSettings, fx_vignette)}, {"shadows", offsetof(WorldSettings, fx_shadows)},
                 {"dof", offsetof(WorldSettings, fx_dof)}, {"haze", offsetof(WorldSettings, fx_haze)},
-                {"relief", offsetof(WorldSettings, fx_relief)}, {"stereo", offsetof(WorldSettings, fx_stereo)},
+                {"normals", offsetof(WorldSettings, fx_normals)}, {"stereo", offsetof(WorldSettings, fx_stereo)},
                 {"shock", offsetof(WorldSettings, fx_shock)}, {"particles", offsetof(WorldSettings, fx_particles)},
-                {"surface", offsetof(WorldSettings, fx_surface)},
+                {"surface", offsetof(WorldSettings, fx_surface)}, {"sunshadow", offsetof(WorldSettings, fx_sunshadow)},
+                {"glow", offsetof(WorldSettings, fx_glow)}, {"reflect", offsetof(WorldSettings, fx_reflect)},
             };
             enum { EFFECTS = sizeof effects / sizeof effects[0] };
             WorldSettings keep = settings;
@@ -837,15 +839,22 @@ static void headless_run(const char *dir, const char *script_path)
                 one.fx_enable = 1;                 /* "off" is the scene renderer with no effect on */
                 if (i == 0) headless_shot(dir, "fx-raw");
                 settings = one;
-                /* Run a few refreshes so light and glow, which lag one, settle. */
-                for (unsigned pass = 0; pass < 3; ++pass)
+                /* Run a few game frames so bounced light settles. */
+                for (unsigned pass = 0; pass < 8; ++pass) {
+                    scene_submit();
                     enhance(pixels, shown, (uint32_t)(ticks * 133 + pass * 67), 1, 1.0);
+                }
                 char name[32];
                 snprintf(name, sizeof name, "fx-%s", i == 0 ? "off" : i == EFFECTS + 1 ? "all" : effects[i - 1].name);
                 shot_source = shown;
                 headless_shot(dir, name);
                 shot_source = pixels;
             }
+            /* The light transport's view: rock, sun visibility, light. */
+            world_scene_debug(shown);
+            shot_source = shown;
+            headless_shot(dir, "fx-transport");
+            shot_source = pixels;
             settings = keep;
             world_scene_reset();
         }
@@ -992,7 +1001,7 @@ static void headless_run(const char *dir, const char *script_path)
             world_settings_defaults(&settings);
             settings.bindings = keep.bindings;
             settings.fx_enable = 1;
-            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_relief = settings.fx_shimmer = 1;
+            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_shimmer = 1;
             scene_submit();
             for (unsigned half = 0; half < 2; ++half) {
                 LARGE_INTEGER t0, t1, hz;
@@ -1021,7 +1030,7 @@ static void headless_run(const char *dir, const char *script_path)
                 double n = world_scene_stage_ms[5];
                 extern unsigned world_scene_explosions;
                 fprintf(stderr, "  explosions detected: %u%c", world_scene_explosions, 10);
-                fprintf(stderr, "  colours %.2f, layer fx %.2f, sprites %.2f, compose %.2f, post %.2f ms%c",
+                fprintf(stderr, "  colours %.2f, sprites + light transport %.2f, layer fx %.2f, compose %.2f, post %.2f ms%c",
                         world_scene_stage_ms[0] / n, world_scene_stage_ms[1] / n, world_scene_stage_ms[2] / n,
                         world_scene_stage_ms[3] / n, world_scene_stage_ms[4] / n, 10);
             }

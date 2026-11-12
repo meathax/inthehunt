@@ -42,7 +42,10 @@ typedef struct {
     unsigned fx_shadows;
     unsigned fx_dof;
     unsigned fx_haze;
-    unsigned fx_relief;
+    unsigned fx_normals;
+    unsigned fx_sunshadow;
+    unsigned fx_glow;
+    unsigned fx_reflect;
     unsigned fx_stereo;
     unsigned fx_shock;
     unsigned fx_particles;
