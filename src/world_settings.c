@@ -59,7 +59,11 @@ static const NumberSetting numbers[] = {
     {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1},
     {"fx_surface", offsetof(WorldSettings, fx_surface), 0, 1},
     {"fx_smooth", offsetof(WorldSettings, fx_smooth), 0, 1},
-    {"fx_interp", offsetof(WorldSettings, fx_interp), 0, 1}
+    {"fx_interp", offsetof(WorldSettings, fx_interp), 0, 1},
+    {"fx_wakes", offsetof(WorldSettings, fx_wakes), 0, 1},
+    {"fx_debris", offsetof(WorldSettings, fx_debris), 0, 1},
+    {"fx_silt", offsetof(WorldSettings, fx_silt), 0, 1},
+    {"fx_splashes", offsetof(WorldSettings, fx_splashes), 0, 1}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -104,6 +108,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->fx_normals = settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
     settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
     settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
+    settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
     strcpy(settings->shader, "pixels");
     strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);

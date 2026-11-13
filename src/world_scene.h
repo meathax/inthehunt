@@ -29,6 +29,10 @@ typedef struct {
     unsigned surface;    /* rippling waterline with glints */
     unsigned smooth;     /* subpixel camera position */
     unsigned interp;     /* in-between frames */
+    unsigned wakes;
+    unsigned debris;
+    unsigned silt;
+    unsigned splashes;
 } WorldSceneFx;
 
 typedef struct {

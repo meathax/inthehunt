@@ -32,13 +32,15 @@ Downloads folder and the folder beside play.cmd for inthunt.7z. The imported
 images stay under .local/world. Later launches can run without the archive.
 
 5 inserts a coin, 1 starts Player 1, the arrow keys move and Z and X fire.
-On an Xbox-compatible controller, use Back, Start, the D-pad and A/B.
-F1 (or L3 + R3 together on a controller) opens the pause menu: resume,
+On an Xbox-compatible controller, Back inserts a coin; A starts, joins or
+continues play. Use the D-pad to move and A/B to fire during play.
+F1 (or Start on a controller) opens the pause menu: resume,
 video, sound, game timing, border, controls and quit. Esc goes back in the menu.
 OPTIONS > VIDEO > CRT SHADER picks a CRT look (CRT-Royale, Guest Advanced,
 CRT-Geom, Lottes and more), always flat with no vignette. Needs Direct3D 12.
 Options also has an ENHANCE tab: optional caustics, light shafts, dynamic
-lights, shadows and more, all off by default (pure arcade picture).
+lights, shadows and more. The master switch defaults to off (pure arcade
+picture). Wakes, debris, silt and surface splashes each have their own switch.
 On first launch the game downloads an optional undersea border image;
 turn it on under OPTIONS > VIDEO > BORDER ART.
 

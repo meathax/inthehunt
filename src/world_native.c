@@ -12,6 +12,7 @@
 #include "world_video.h"
 #include "world_window.h"
 #include "world_scene.h"
+#include "world_surface.h"
 #include "world_gpu.h"
 #include "world_slowdown_table.h"
 #include "world_border.h"
@@ -86,27 +87,10 @@ static uint32_t drawn_colors[1024];
 static unsigned shown_fps, shown_speed;
 static unsigned word(const uint8_t *p);
 
-/* The sea surface on screen. The game ripples the background layer below
- * the surface with row scroll (0:FC1B, world_frame_rowscroll): when that is
- * on, the first rippled tilemap row is the waterline, which lands on screen
- * at that row minus the layer's vertical scroll. Without the ripple there is
- * no surface in view and the whole picture is treated as water. */
+/* The sea boundary also covers static, non-rippled stage-three water. */
 static int waterline_row(void)
 {
-    if (!(ram[0x292] & 4)) return -1;
-    int row;
-    switch (ram[0x298] & 14) {
-    case 0: row = 112; break;
-    case 2: row = 168; break;
-    case 8: {
-        unsigned shift = (word(ram + 0xb8ca) << 3) & 0xffff;
-        row = (int)((104 - (((shift >> 8) | (shift << 8)) & 0xffff)) & 0x1ff);
-        break;
-    }
-    default: return -1;                         /* 6: rippled from the top */
-    }
-    int y = (row - (int)word(ram + 0xb710)) & 0x1ff;   /* the layer is 512 rows */
-    return y >= 256 ? y - 512 : y;
+    return world_surface_row(ram);
 }
 
 /* Animation clock for the enhancements, in 1/8 ms. */
@@ -187,6 +171,8 @@ static WorldSceneFx scene_effects(void)
     fx.haze = settings.fx_haze; fx.normals = settings.fx_normals; fx.stereo = settings.fx_stereo;
     fx.shock = settings.fx_shock; fx.particles = settings.fx_particles; fx.shake = settings.fx_shake;
     fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
+    fx.wakes = settings.fx_wakes; fx.debris = settings.fx_debris;
+    fx.silt = settings.fx_silt; fx.splashes = settings.fx_splashes;
     return fx;
 }
 
@@ -651,6 +637,8 @@ static void headless_shot(const char *dir, const char *name)
    held inputs and changes no game state. While the stage-three end boss body
    (1000:45BA..4C19) is in the actor list, player one moves under it, keeps
    to the surface and alternates both fire buttons; otherwise `fallback`. */
+static unsigned headless_boss_state; /* diagnostic witness, never game state */
+
 static unsigned headless_autopilot(unsigned fallback)
 {
     static const unsigned boss_states[] = {0x45ba, 0x4614, 0x4640, 0x465a, 0x46a5, 0x46e4, 0x47cb,
@@ -666,6 +654,7 @@ static unsigned headless_autopilot(unsigned fallback)
         if (next == actor || next == 0x400) break;
         actor = next;
     }
+    headless_boss_state = boss ? word(ram + boss) : 0;
     unsigned sub = word(ram + 0x90);
     unsigned phase = (unsigned)(ticks % 12);
     unsigned fire = phase < 4 ? 0x40 : (phase >= 6 && phase < 10) ? 0x80 : 0;
@@ -712,6 +701,7 @@ static void headless_run(const char *dir, const char *script_path)
         snprintf(failure, sizeof failure, "Cannot open the headless input script.");
         return;
     }
+    FILE *scene_stats = NULL;
     unsigned held = 0, buttons = 0, autopilot = 0;
     unsigned long at = 0;
     char first[32], second[32], third[32];
@@ -820,6 +810,10 @@ static void headless_run(const char *dir, const char *script_path)
                 {"shock", offsetof(WorldSettings, fx_shock)}, {"particles", offsetof(WorldSettings, fx_particles)},
                 {"surface", offsetof(WorldSettings, fx_surface)}, {"sunshadow", offsetof(WorldSettings, fx_sunshadow)},
                 {"glow", offsetof(WorldSettings, fx_glow)}, {"reflect", offsetof(WorldSettings, fx_reflect)},
+                {"wakes", offsetof(WorldSettings, fx_wakes)},
+                {"debris", offsetof(WorldSettings, fx_debris)},
+                {"silt", offsetof(WorldSettings, fx_silt)},
+                {"splashes", offsetof(WorldSettings, fx_splashes)},
             };
             enum { EFFECTS = sizeof effects / sizeof effects[0] };
             WorldSettings keep = settings;
@@ -1002,6 +996,13 @@ static void headless_run(const char *dir, const char *script_path)
             settings.bindings = keep.bindings;
             settings.fx_enable = 1;
             if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_shimmer = 1;
+            /* Diagnostic A/B override: all other enhancements stay identical. */
+            const char *reactive = getenv("WORLD_SCENE_REACTIVE");
+            if (reactive) settings.fx_wakes = settings.fx_debris = settings.fx_silt = settings.fx_splashes = atoi(reactive) != 0;
+            if (!scene_stats && getenv("WORLD_SCENE_STATS")) {
+                scene_stats = fopen(getenv("WORLD_SCENE_STATS"), "w");
+                if (scene_stats) fputs("frame,half,render_ms,waterfx_draw_ms,stage,boss,waterline,wakes,debris,silt,splashes\n", scene_stats);
+            }
             scene_submit();
             for (unsigned half = 0; half < 2; ++half) {
                 LARGE_INTEGER t0, t1, hz;
@@ -1010,6 +1011,14 @@ static void headless_run(const char *dir, const char *script_path)
                 enhance(pixels, shown, (uint32_t)(ticks * 133 + half * 67), scene_run, half ? 1.0 : 0.5);
                 QueryPerformanceCounter(&t1);
                 double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)hz.QuadPart;
+                if (scene_stats) {
+                    extern double world_scene_waterfx_draw_ms;
+                    extern unsigned world_scene_waterfx_emitted[4];
+                    fprintf(scene_stats, "%lu,%u,%.6f,%.6f,%u,%u,%d,%u,%u,%u,%u\n",
+                            ticks, half, ms, world_scene_waterfx_draw_ms, word(ram + 0x84), headless_boss_state,
+                            waterline_row(), world_scene_waterfx_emitted[0], world_scene_waterfx_emitted[1],
+                            world_scene_waterfx_emitted[2], world_scene_waterfx_emitted[3]);
+                }
                 scene_ms += ms;
                 if (ms > scene_worst) scene_worst = ms;
                 ++scene_count;
@@ -1029,7 +1038,11 @@ static void headless_run(const char *dir, const char *script_path)
                 extern double world_scene_stage_ms[6];
                 double n = world_scene_stage_ms[5];
                 extern unsigned world_scene_explosions;
+                extern unsigned world_scene_waterfx_emitted[4];
                 fprintf(stderr, "  explosions detected: %u%c", world_scene_explosions, 10);
+                fprintf(stderr, "  water effects: wakes %u, debris %u, silt %u, splashes %u%c",
+                        world_scene_waterfx_emitted[0], world_scene_waterfx_emitted[1],
+                        world_scene_waterfx_emitted[2], world_scene_waterfx_emitted[3], 10);
                 fprintf(stderr, "  colours %.2f, sprites + light transport %.2f, layer fx %.2f, compose %.2f, post %.2f ms%c",
                         world_scene_stage_ms[0] / n, world_scene_stage_ms[1] / n, world_scene_stage_ms[2] / n,
                         world_scene_stage_ms[3] / n, world_scene_stage_ms[4] / n, 10);
@@ -1067,6 +1080,7 @@ static void headless_run(const char *dir, const char *script_path)
         }
     }
 done:
+    if (scene_stats) fclose(scene_stats);
     if (trace) fclose(trace);
     fclose(script);
     draw();

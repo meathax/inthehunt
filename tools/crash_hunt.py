@@ -10,6 +10,10 @@ how to reproduce it.
   python tools/crash_hunt.py SNAPSHOT_DIR [--frames 20000] [--seeds 3] [--jobs 12]
 """
 import argparse
+import hashlib
+import json
+import re
+import struct
 import os
 import pathlib
 import random
@@ -25,7 +29,7 @@ DIRS = [0x01, 0x02, 0x04, 0x08, 0x05, 0x09, 0x06, 0x0A, 0x00]   # right left dow
 
 def script(mode, seed, frames):
     """Lines 'frame held buttons' (hex), frames relative to the snapshot."""
-    rng = random.Random(seed * 7919 + hash(mode) % 1000)
+    rng = random.Random(seed * 7919 + int.from_bytes(hashlib.sha256(mode.encode()).digest()[:4], 'little') % 1000)
     out, prev = [], None
 
     def put(f, held, buttons):
@@ -81,10 +85,18 @@ MODES = ["idle", "nocont", "ram", "fight", "rand", "rand-nocont", "duo", "duo-p1
 
 def run(exe, snap, mode, seed, frames, work):
     name = f"{snap.stem}-{mode}-{seed}"
-    path = work / f"{name}.txt"
+    data = work / name
+    data.mkdir(exist_ok=True)
+    for rom in WORLD.glob("*.bin"):
+        target = data / rom.name
+        if not target.exists():
+            try: os.link(rom, target)
+            except OSError: shutil.copy2(rom, target)
+    path = data / "inputs.txt"
     path.write_text(script(mode, seed, frames), encoding="ascii", newline="")
-    env = dict(os.environ, WORLD_SNAPSHOT_LOAD=str(snap), WORLD_SCRIPT_RELATIVE="1")
-    proc = subprocess.run([str(exe), str(WORLD), "--timing=arcade", f"--headless={path}"],
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WORLD_")}
+    env.update(WORLD_SNAPSHOT_LOAD=str(snap.resolve()), WORLD_SCRIPT_RELATIVE="1")
+    proc = subprocess.run([str(exe.resolve()), str(data.resolve()), "--timing=arcade", f"--headless={path.resolve()}"],
                           env=env, capture_output=True, text=True, timeout=frames // 40 + 600)
     stop, note = "", ""
     for line in proc.stderr.splitlines():
@@ -94,7 +106,15 @@ def run(exe, snap, mode, seed, frames, work):
             stop = line.strip()
     if proc.returncode not in (0, 2) and not stop:
         stop = f"exit code {proc.returncode}"
-    path.unlink()
+    (data / "run.log").write_text(proc.stdout + proc.stderr, encoding="utf-8")
+    actors = data / "headless-actors.txt"
+    match = re.search(r"^frame (\d+)", actors.read_text() if actors.exists() else "")
+    expected = struct.unpack_from("<I", snap.read_bytes(), 135174)[0] + frames
+    if not match or int(match[1]) < expected:
+        stop = stop or "replay did not reach its requested final frame"
+    (data / "result.json").write_text(json.dumps(dict(name=name, code=proc.returncode,
+        stop=stop, note=note, expected_frame=expected, actual_frame=int(match[1]) if match else None,
+        snapshot_sha256=hashlib.sha256(snap.read_bytes()).hexdigest()), indent=2))
     return name, proc.returncode, stop, note
 
 
@@ -106,9 +126,10 @@ def main():
     ap.add_argument("--jobs", type=int, default=12)
     ap.add_argument("--modes", default=",".join(MODES))
     ap.add_argument("--exe", default=str(ROOT / ".local" / "native" / "InTheHunt.exe"))
+    ap.add_argument("--out", type=pathlib.Path, default=ROOT / "build/hunt/work")
     args = ap.parse_args()
     snaps = sorted(pathlib.Path(args.snapshots).glob("*.snap"))
-    work = ROOT / "build" / "hunt" / "work"
+    work = args.out.resolve()
     work.mkdir(parents=True, exist_ok=True)
     exe = work / "InTheHunt.exe"                  # a private copy: builds may replace the original
     shutil.copy2(args.exe, exe)

@@ -14,7 +14,7 @@ enum {
     MAXK = WORLD_SCENE_MAX_K,
     GW = W / 8, GH = H / 8,            /* light grid */
     NONE = 0x7fff,                     /* empty sprite pixel */
-    MAX_SPRITES = 256, MAX_RINGS = 6, MAX_PARTICLES = 320
+    MAX_SPRITES = 256, MAX_RINGS = 6, MAX_PARTICLES = 224
 };
 
 typedef struct {
@@ -66,6 +66,8 @@ static float shake;
 static unsigned rumble;
 static uint32_t last_clock, seed = 0x1234567u;
 static int waterline_used;
+static void waterfx_reset(void);
+static void waterfx_scroll(int dx, int dy);
 static int transport_valid;                      /* the light transport below has run this scene */
 
 /* One render's parameters, shared with the worker threads. */
@@ -103,7 +105,7 @@ static void prepare(void)
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             double dx = (x - 159.5) / 160.0, dy = (y - 119.5) / 120.0, d = dx * dx + dy * dy;
-            corner[y * W + x] = (uint8_t)lrint(255.0 * (1.0 - 0.34 * (d > 0.55 ? (d - 0.55) / 1.45 : 0.0)));
+            corner[y * W + x] = (uint8_t)lrint(255.0 * (1.0 - 0.22 * (d > 0.55 ? (d - 0.55) / 1.45 : 0.0)));
         }
     ready = 1;
 }
@@ -199,12 +201,14 @@ void world_scene_reset(void)
     memset(rings, 0, sizeof rings);
     memset(particles, 0, sizeof particles);
     shake = 0;
+    waterfx_reset();
 }
 
 void world_scene_submit(const WorldSceneFrame *frame)
 {
     if (!ready) prepare();
     if (!gfx1 || !gfx2) return;
+    if (!cur.valid || cur.scene_id != frame->scene_id) waterfx_reset();
     if (cur.valid) memcpy(&prev, &cur, sizeof prev);
     memcpy(cur.tiles, frame->tiles, sizeof cur.tiles);
     memcpy(cur.sprites, frame->sprites, sizeof cur.sprites);
@@ -220,7 +224,8 @@ void world_scene_submit(const WorldSceneFrame *frame)
     /* Rings and particles live in the playfield: follow its scroll. */
     int dx = (int16_t)(cur.layers[1].scroll_x - prev.layers[1].scroll_x);
     int dy = (int16_t)(cur.layers[1].scroll_y - prev.layers[1].scroll_y);
-    if (abs(dx) > 32 || abs(dy) > 32) dx = dy = 0;
+    if (abs(dx) > 32 || abs(dy) > 32) { waterfx_reset(); dx = dy = 0; }
+    waterfx_scroll(dx, dy);
     for (int i = 0; i < MAX_RINGS; ++i) { rings[i].x -= (float)dx; rings[i].y -= (float)dy; }
     for (int i = 0; i < MAX_PARTICLES; ++i) { particles[i].x -= (float)dx; particles[i].y -= (float)dy; }
     new_frame = 1;
@@ -407,7 +412,7 @@ static void soften(uint32_t *c)
  *     received last frame), so repeated frames add further bounces;
  *   - sunlight visibility along the light-shaft angle, up to the surface.
  * Everything is presentation only. */
-enum { PW = W / 2, PH = H / 2, PN = PW * PH, PHUD = HUD / 2, MAX_LIGHTS = 140, BOUNCE_RAYS = 6 };
+enum { PW = W / 2, PH = H / 2, PN = PW * PH, PHUD = HUD / 2, MAX_LIGHTS = 140, BOUNCE_RAYS = 3 };
 
 typedef struct { float x, y, r, g, b, range; } Light;
 
@@ -587,6 +592,10 @@ static void transport_rows(int from, int to)
                     if (d2 >= l->range * l->range) continue;
                     float d = sqrtf(d2), cut = 1.0f - d / l->range;
                     float fall = cut * cut / (1.0f + d2 * 0.012f);
+                    /* Bound the unoccluded contribution before tracing: distant
+                       explosion cells otherwise spend most of a busy frame on
+                       shadow rays for less than 1% light per colour channel. */
+                    if (fall * fmaxf(l->r, fmaxf(l->g, l->b)) < 0.01f) continue;
                     float vis = d < 1.5f ? 1.0f : trace_soft(fx0, fy0, dx / d, dy / d, d, 9.0f);
                     if (vis <= 0.0f) continue;
                     float e = fall * vis;
@@ -646,12 +655,16 @@ static void transport_rows(int from, int to)
 
 static void transport(const WorldSceneFx *fx)
 {
-    if (!fx->lights && !fx->sunshadow) { transport_valid = 0; return; }
+    if (!fx->lights && !fx->sunshadow) {
+        if (fx->debris || fx->silt) build_solid();
+        transport_valid = 0; return;
+    }
     if (transport_scene != cur.scene_id) { transport_valid = 0; transport_scene = cur.scene_id; }
     transport_fx = fx;
     transport_waterline = g.waterline;
     build_solid();
-    gather_lights();
+    if (fx->lights) gather_lights();
+    else light_count = 0;
     parallel(transport_rows, PH);
     for (int c = 0; c < 3; ++c)
         for (int p = 0; p < PN; ++p) total[c][p] = direct[c][p] + bounce[c][p];
@@ -739,7 +752,7 @@ static void layer_rows_fx(int from, int to)
                 }
                 if (fx->haze && layer == 2 && under) {
                     /* Distance in water: the far layer drifts toward blue. */
-                    int t = 62 * under >> 8;
+                    int t = 42 * under >> 8;
                     r += (14 - r) * t >> 8; gr += (58 - gr) * t >> 8; b += (98 - b) * t >> 8;
                 }
                 /* Surface normal from the pixel art's shading (bright = raised). */
@@ -835,7 +848,7 @@ static void compose_rows(int from, int to)
     const WorldSceneFx *fx = g.fx;
     const int k = g.k, ow = g.ow, oh = g.oh;
     const int shadow_x[3] = {0, 2 * k, 5 * k}, shadow_y[3] = {0, 3 * k, 6 * k};
-    const int shadow_keep[3] = {256, 150, 190};
+    const int shadow_keep[3] = {256, 180, 208};
     const uint32_t backdrop = cur.colors[0];
     for (int Y = from; Y < to; ++Y) {
         int y1 = Y / k;
@@ -868,7 +881,8 @@ static void compose_rows(int from, int to)
                 break;
             }
             int qx = U, qy = V;
-            if (fx->shadows && id > 0 && wet < 90) {
+            /* Drop shadows belong underwater, never on above-surface scenery or sky. */
+            if (fx->shadows && (g.waterline < 0 || y1 >= g.waterline) && id > 0 && wet < 90) {
                 int sx = qx - shadow_x[id], sy = qy - shadow_y[id];
                 if (sx >= 0 && sy >= 0 && sx < ow && sy < oh && sprite_px[(size_t)sy * ow + sx] != NONE) {
                     int keep = shadow_keep[id];
@@ -926,8 +940,8 @@ static void compose_rows(int from, int to)
                 }
                 if (fx->vivid) {
                     int lum = (r * 3 + gr * 5 + b * 2) / 10;
-                    r = lum + (r - lum) * 21 / 16; gr = lum + (gr - lum) * 21 / 16; b = lum + (b - lum) * 21 / 16;
-                    r = (r - 128) * 18 / 16 + 128; gr = (gr - 128) * 18 / 16 + 128; b = (b - 128) * 18 / 16 + 128;
+                    r = lum + (r - lum) * 18 / 16; gr = lum + (gr - lum) * 18 / 16; b = lum + (b - lum) * 18 / 16;
+                    r = (r - 128) * 17 / 16 + 128; gr = (gr - 128) * 17 / 16 + 128; b = (b - 128) * 17 / 16 + 128;
                 }
                 if (fx->vignette) {
                     int m = corner[y1 * W + x1] + 1;
@@ -951,7 +965,7 @@ static void reflect_surface(uint32_t *out)
     int reach = wl < 30 ? wl : 30;
     if (wl + reach > HUD) reach = HUD - wl;
     for (int d = 0; d < reach; ++d) {
-        int a = (int)(110.0f * (1.0f - (float)d / reach));
+        int a = (int)(80.0f * (1.0f - (float)d / reach));
         int ripple = (S(d * 53 + g.T * 6) + S(d * 19 - g.T * 4)) * (d + 3) * k / 2400;
         for (int sub = 0; sub < k; ++sub) {
             int Y = (wl + d) * k + sub, SY = (wl - 1 - d) * k + (k - 1 - sub);
@@ -974,6 +988,8 @@ static void reflect_surface(uint32_t *out)
         }
     }
 }
+
+#include "world_scene_waterfx.h"
 
 /* ---- explosions: rings, shake, particles -------------------------------- */
 extern unsigned world_scene_explosions;
@@ -999,6 +1015,20 @@ static void detect_explosions(const WorldSceneFx *fx)
     for (int cy = 0; cy < HUD / 8; ++cy)
         for (int cx = 0; cx < GW; ++cx) {
             int cell = cy * GW + cx;
+            if (fx->silt && hot_count[cell] >= 8 && hot_before[cell] < 3)
+                waterfx_impact(cx * 8 + 4.0f, cy * 8 + 4.0f);
+            if (fx->debris && hot_count[cell] >= 10 && hot_before[cell] < 3) {
+                int area = 0, peak = 1;
+                for (int j = -1; j <= 1; ++j)
+                    for (int i = -1; i <= 1; ++i) {
+                        int x = cx + i, y = cy + j;
+                        if (x < 0 || x >= GW || y < 0 || y >= HUD / 8) continue;
+                        int q = y * GW + x;
+                        area += hot_count[q];
+                        if (hot_count[q] > hot_count[cell] || (hot_count[q] == hot_count[cell] && q < cell)) peak = 0;
+                    }
+                if (peak && area >= 24) waterfx_blast(cx * 8 + 4.0f, cy * 8 + 4.0f, area, fx);
+            }
             if (hot_count[cell] < 26) continue;
             /* A real fireball is big, is the brightest cell of its patch, and
                sits where nothing burned a frame ago (moving flames, shots and
@@ -1026,14 +1056,15 @@ static void detect_explosions(const WorldSceneFx *fx)
             }
             rings[slot] = (Ring){x, y, 0, 0.5f, 1.0f};
             ++world_scene_explosions;
+            waterfx_blast(x, y, size, fx);
             if (fx->shake && size >= 110) {       /* only the big ones shake the screen */
-                shake += 1.6f;
-                if (shake > 4.0f) shake = 4.0f;
+                shake += 1.0f;
+                if (shake > 2.5f) shake = 2.5f;
                 if (rumble < 40000) rumble += 22000;
             }
             if (fx->particles) {
-                for (int i = 0; i < 10; ++i) spawn_particle(x + (frand() - 0.5f) * 14, y + (frand() - 0.5f) * 14, 0);
-                for (int i = 0; i < 8; ++i) spawn_particle(x + (frand() - 0.5f) * 20, y + (frand() - 0.5f) * 12, 1);
+                for (int i = 0; i < 7; ++i) spawn_particle(x + (frand() - 0.5f) * 14, y + (frand() - 0.5f) * 14, 0);
+                for (int i = 0; i < 5; ++i) spawn_particle(x + (frand() - 0.5f) * 20, y + (frand() - 0.5f) * 12, 1);
             }
         }
     /* Burning things keep shedding the odd ember. */
@@ -1063,12 +1094,16 @@ static void build_field(const WorldSceneFx *fx, float dt)
         const Ring *ring = &rings[i];
         if (ring->life <= 0) continue;
         float t = ring->age / ring->life, radius = 6.0f + 110.0f * t, band = 9.0f;
-        float strength = 14.0f * (1.0f - t) * ring->strength;        /* quarter pixels */
+        float strength = 10.0f * (1.0f - t) * ring->strength;        /* quarter pixels */
+        float inner = radius > band ? radius - band : 0.0f, outer = radius + band;
         int x0 = clampi((int)(ring->x - radius - band), 0, W - 1), x1 = clampi((int)(ring->x + radius + band), 0, W - 1);
         int y0 = clampi((int)(ring->y - radius - band), 0, HUD - 1), y1 = clampi((int)(ring->y + radius + band), 0, HUD - 1);
         for (int y = y0; y <= y1; ++y)
             for (int x = x0; x <= x1; ++x) {
-                float dx = x - ring->x, dy = y - ring->y, d = sqrtf(dx * dx + dy * dy);
+                float dx = x - ring->x, dy = y - ring->y, d2 = dx * dx + dy * dy;
+                /* Only the thin ring needs a square root, not its entire box. */
+                if (d2 >= outer * outer || d2 < inner * inner) continue;
+                float d = sqrtf(d2);
                 float off = fabsf(d - radius);
                 if (off >= band || d < 1.0f) continue;
                 float push = strength * (1.0f - off / band);
@@ -1118,7 +1153,7 @@ static void draw_particles(uint32_t *out, const WorldSceneFx *fx, float dt, uint
     }
     /* Marine snow on two parallax layers, over open water only. */
     if (fx->snow)
-        for (unsigned n = 0; n < 110; ++n) {
+        for (unsigned n = 0; n < 80; ++n) {
             unsigned h = n * 2654435761u;
             int layer = (int)(n & 1);
             unsigned speed = layer ? 9 : 5;
@@ -1128,7 +1163,7 @@ static void draw_particles(uint32_t *out, const WorldSceneFx *fx, float dt, uint
             x = ((x % W) + W) % W;
             y = ((y % HUD) + HUD) % HUD;
             if (water_map[y * W + x] < 70) continue;
-            int add = layer ? 70 : 38;
+            int add = layer ? 56 : 30;
             add_block(out, x * k, y * k, k, add, add, add);
         }
 }
@@ -1137,6 +1172,7 @@ static void draw_particles(uint32_t *out, const WorldSceneFx *fx, float dt, uint
 
 /* Stage timing for tuning (WORLD_SCENE_RUN prints it). */
 double world_scene_stage_ms[6];
+double world_scene_waterfx_draw_ms;
 unsigned world_scene_explosions;      /* explosions detected so far */
 static double stamp(void)
 {
@@ -1204,7 +1240,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         int shift = 0;
         int below = g.waterline < 0 ? 400 : y - g.waterline;
         if (y < HUD && below >= 0) {
-            if (fx->shimmer) shift += (S(y * 37 + g.T * 5) + S(y * 11 - g.T * 3)) * k / 300;
+            if (fx->shimmer) shift += (S(y * 37 + g.T * 5) + S(y * 11 - g.T * 3)) * k / 450;
             if (fx->surface && below < 28) shift += S(below * 46 - g.T * 7) * (28 - below) * 2 * k / (28 * 256);
         }
         g.row_dx[y] = shift;
@@ -1220,11 +1256,13 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
 
     double t0 = stamp();
     parallel(colour_rows, LH);
-    if (fx->dof && layer_on[2]) { soften(layer_col[2]); soften(layer_col[2]); }
+    if (fx->dof && layer_on[2]) soften(layer_col[2]);
     double t1 = stamp();
     draw_sprites(alpha);
     if (new_frame) {
         transport(fx);
+        waterfx_begin_frame();
+        waterfx_motion(fx);
         detect_explosions(fx);
         new_frame = 0;
     }
@@ -1243,6 +1281,9 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     double t4 = stamp();
 
     if (fx->reflect) reflect_surface(out);
+    double waterfx_start = stamp();
+    waterfx_draw(out, fx, dt);
+    world_scene_waterfx_draw_ms = stamp() - waterfx_start;
     draw_particles(out, fx, dt, time_ms);
 
     if (fx->trails) {
@@ -1250,7 +1291,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         if (have_history)
             for (size_t i = 0; i < n; ++i) {
                 uint32_t p = out[i], q = history[i];
-                unsigned r = ((q >> 16) & 255) * 150 >> 8, gr = ((q >> 8) & 255) * 150 >> 8, b = (q & 255) * 150 >> 8;
+                unsigned r = ((q >> 16) & 255) * 112 >> 8, gr = ((q >> 8) & 255) * 112 >> 8, b = (q & 255) * 112 >> 8;
                 unsigned pr = (p >> 16) & 255, pg = (p >> 8) & 255, pb = p & 255;
                 out[i] = 0xff000000u | (pr > r ? pr : r) << 16 | (pg > gr ? pg : gr) << 8 | (pb > b ? pb : b);
             }

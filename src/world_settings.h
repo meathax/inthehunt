@@ -53,6 +53,10 @@ typedef struct {
     unsigned fx_surface;
     unsigned fx_smooth;
     unsigned fx_interp;
+    unsigned fx_wakes;
+    unsigned fx_debris;
+    unsigned fx_silt;
+    unsigned fx_splashes;
     char shader[WORLD_SETTINGS_ID_SIZE];
     char border[WORLD_SETTINGS_ID_SIZE];
     char border_image[WORLD_SETTINGS_PATH_SIZE];
