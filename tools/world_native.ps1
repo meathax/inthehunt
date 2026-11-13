@@ -114,8 +114,14 @@ function Import-WorldNativeRom {
         if ($cached -and $cached.archiveSha256 -eq $archiveHash) { return }
         $scratch = New-Item -ItemType Directory (Join-Path $world ('import-' + [guid]::NewGuid().ToString('N'))) -ErrorAction Stop
         $members = @($regions | ForEach-Object { $_.chips | ForEach-Object file })
-        & (Get-WorldTar) -xf $archive.FullName -C $scratch.FullName @members
-        if ($LASTEXITCODE) { throw "Cannot extract the required World chips from $($archive.FullName)." }
+        # Windows tar can narrow non-ASCII archive paths. Stage the archive with
+        # an ASCII name and use a relative path from the inherited directory.
+        Copy-Item -LiteralPath $archive.FullName -Destination (Join-Path $scratch.FullName 'source.archive')
+        Push-Location -LiteralPath $scratch.FullName
+        try {
+            & (Get-WorldTar) -xf 'source.archive' @members
+            if ($LASTEXITCODE) { throw "Cannot extract the required World chips from $($archive.FullName)." }
+        } finally { Pop-Location }
         $records = @()
         foreach ($region in $regions) {
             $image = New-Object byte[] $region.size
@@ -203,7 +209,10 @@ function Build-WorldNative {
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')
     $cppSources = @('src/world_ym.cpp', 'src/third_party/ymfm/ymfm_opm.cpp', 'src/world_gpu.cpp', 'src/post/post_chain.cpp')
     $objects = @()
+    $resource = $temp + ".res"
     try {
+        & $Compiler rc /fo $resource (Join-Path $Root "src/inthehunt.rc")
+        if ($LASTEXITCODE) { throw "Icon resource compilation failed." }
         foreach ($source in $cppSources) {
             $object = $temp + '.' + $objects.Count + '.o'
             $objects += $object
@@ -211,7 +220,7 @@ function Build-WorldNative {
             & $Compiler c++ -target x86_64-windows-gnu $standard -O2 -c (Join-Path $Root $source) -o $object
             if ($LASTEXITCODE) { throw "Native C++ build failed for $source." }
         }
-        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -ld3d12 -ldxgi -ld3dcompiler_47 -lc++
+        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects $resource -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -ld3d12 -ldxgi -ld3dcompiler_47 -lc++
         if ($LASTEXITCODE) { throw 'Native Windows build failed.' }
         try {
             Move-Item -Force -LiteralPath $temp -Destination $target -ErrorAction Stop
@@ -219,7 +228,7 @@ function Build-WorldNative {
             throw "Could not replace $target. Close the running game and build again. $($_.Exception.Message)"
         }
     } finally {
-        foreach ($file in @($temp) + $objects) {
+        foreach ($file in @($temp, $resource) + $objects) {
             if (Test-Path -LiteralPath $file) { Remove-Item -Force -LiteralPath $file }
         }
     }
@@ -228,5 +237,8 @@ function Build-WorldNative {
         $from = Join-Path $Root "third_party/librashader/$dll"
         if (Test-Path -LiteralPath $from) { Copy-Item -Force -LiteralPath $from -Destination (Join-Path $dest $dll) }
     }
+    $setupTarget = Join-Path $dest "InTheHunt-Setup.exe"
+    & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra -municode (Join-Path $Root "src/world_prepare.c") -o $setupTarget -lkernel32
+    if ($LASTEXITCODE) { throw "RecompLauncher setup helper build failed." }
     Write-Host "Built $target"
 }

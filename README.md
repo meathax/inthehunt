@@ -1,3 +1,4 @@
+<p align="center"><img src="artwork/icon/inthehunt.png" width="112" alt="Golden submarine application icon"></p>
 <h1 align="center">IN THE HUNT</h1>
 <p align="center"><strong>The arcade submarine shooter. A native Windows port.</strong></p>
 <p align="center">
@@ -58,6 +59,8 @@ The packaged Windows build needs **no Python, Visual Studio or compiler**. Sourc
 
 ## Install and play
 
+**RecompLauncher:** the Windows ZIP includes a developer-maintained setup profile. It imports your World ROM archive, exposes settings in the launcher and starts the game directly. Catalogue listing and interactive launcher testing are still pending; see [integration details](docs/RECOMPLAUNCHER.md).
+
 1. Open [Releases](https://github.com/meathax/inthehunt/releases) and select **`InTheHunt-Windows-x64.zip`**, when available. GitHub's automatic source-code ZIP is not the playable build.
 2. Extract **everything** to a writable folder, such as `D:\Games\InTheHunt`.
 3. Double-click **`play.cmd`**.
@@ -104,7 +107,7 @@ The native port has completed multi-loop headless playthroughs, two-player input
 - CRT shaders and some enhancements cannot be combined. Motion interpolation has display and scaling requirements.
 - Monitor pacing, focus/fullscreen transitions, audible mixing, controller hot-plug and rumble still need interactive release qualification.
 
-This is release preparation; a final release version has not been assigned. [Release checklist](docs/RELEASING.md).
+The RecompLauncher integration is a release candidate, not a fully qualified stable release. [Release checklist](docs/RELEASING.md).
 
 ## Updating
 

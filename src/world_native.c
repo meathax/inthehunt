@@ -1189,6 +1189,8 @@ int main(int argc, char **argv)
         }
         timing_override = 1;
     }
+    const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
+    if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) settings.fullscreen = 1;
     world_clock_reset(&board_clock, settings.timing_mode);
     if (!load(dir, "maincpu.bin", rom, sizeof rom) || !load(dir, "gfx1.bin", gfx1, sizeof gfx1)
         || !load(dir, "gfx2.bin", gfx2, sizeof gfx2)

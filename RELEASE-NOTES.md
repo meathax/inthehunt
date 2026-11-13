@@ -1,6 +1,6 @@
-# In the Hunt — Windows x64 release draft
+# In the Hunt — RecompLauncher integration preview
 
-**Unpublished draft.** Version, source commit, checksums and final candidate testing remain to be filled in after the release checklist is complete.
+**Pre-release candidate.** Adds a developer-maintained RecompLauncher profile, noninteractive validated ROM import, launcher settings, Big Picture fullscreen startup and a new submarine application icon. Catalogue listing and interactive launcher testing remain pending. The top-level project licence decision also remains open; dependency notices are included.
 
 An unofficial native Windows port of Irem's 1993 submarine shooter. The translated V33/V35 programs run natively, with a native M92 renderer and sound-chip models.
 
@@ -25,6 +25,8 @@ Original game data is not included. Only the World set is supported; Japanese an
 
 Slowdown is an estimate of arcade CPU cost, not cycle-exact timing. Whole-game frame-by-frame equivalence and bit-identical audio have not been established. Rare translated branches estimate leftover register values. Some enhancement combinations are unavailable with CRT shaders; see the player guide.
 
-## Candidate verification — complete before publishing
+## Candidate verification
 
-Record the selected tag, full source commit, binary hash, clean-extraction test, tested Windows/GPU/controller configuration and actual regression results. Historical development runs are not proof for a new binary. Attach SHA256SUMS.txt and release-manifest.json with the final archives.
+The integration candidate passed upstream schema validation, 59 native settings roundtrips, embedded-icon inspection, fresh/repeated ROM import, invalid-ROM rejection with existing data preserved, update preservation, and a 3,600-frame replay from the extracted Windows ZIP. Unicode ROM archive filenames and installation paths containing spaces and an ampersand were exercised. Source and asset hashes are recorded in release-manifest.json and SHA256SUMS.txt.
+
+No interactive RecompLauncher, Big Picture display, physical controller or audible playback check was performed for this candidate. Existing long gameplay reports are historical evidence, not fresh full-game qualification of this executable.

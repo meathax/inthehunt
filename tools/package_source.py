@@ -21,9 +21,12 @@ if __name__ == "__main__":
             if path.resolve() != path or not path.is_file():
                 raise ValueError(name)
             data = path.read_bytes()
-            if name.startswith("docs/screenshots/") and name.endswith(".png"):
+            if (name.startswith("docs/screenshots/") or name == "artwork/icon/inthehunt.png") and name.endswith(".png"):
                 if not data.startswith(b"\x89PNG\r\n\x1a\n"):
                     raise ValueError(f"Invalid documentation PNG in {name}")
+            elif name == "artwork/icon/inthehunt.ico":
+                if not data.startswith(b"\x00\x00\x01\x00"):
+                    raise ValueError(f"Invalid application icon in {name}")
             else:
                 data.decode("utf-8-sig")
                 if b"\0" in data:

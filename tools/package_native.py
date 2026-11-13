@@ -4,6 +4,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {
+    "recomplauncher.json": "recomplauncher.json",
+    "InTheHunt-Setup.exe": ".local/native/InTheHunt-Setup.exe",
+    "tools/recomplauncher_setup.ps1": "tools/recomplauncher_setup.ps1",
     "LICENSES/MAME-Timing-BSD-3-Clause.txt": "LICENSES/MAME-Timing-BSD-3-Clause.txt",
     "LICENSES/ymfm-BSD-3-Clause.txt": "LICENSES/ymfm-BSD-3-Clause.txt",
     "LICENSES/GA20-BSD-3-Clause.txt": "LICENSES/GA20-BSD-3-Clause.txt",
@@ -13,6 +16,9 @@ FILES = {
     "tools/world_regions.json": "tools/world_regions.json",
     "tools/world_native.ps1": "tools/world_native.ps1",
     "CREDITS.md": "CREDITS.md",
+    "README.md": "README.md",
+    "RELEASE-NOTES.md": "RELEASE-NOTES.md",
+    "artwork/icon/inthehunt.png": "artwork/icon/inthehunt.png",
     "tools/get_border_art.ps1": "tools/get_border_art.ps1",
     # CRT shader runtime: librashader (MPL-2.0, unmodified v0.12.0 build) and the DirectX Shader Compiler.
     "librashader.dll": ".local/native/librashader.dll",
@@ -58,6 +64,9 @@ if __name__ == "__main__":
     with ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
         for target, source in FILES.items():
             archive.write(ROOT / source, target)
+        for f in sorted((ROOT / "docs").rglob("*")):
+            if f.is_file() and f.suffix in {".md", ".png", ".json"}:
+                archive.write(f, f.relative_to(ROOT).as_posix())
         # The CRT presets (libretro slang-shaders data, mostly GPL; see shaders/SOURCES.md).
         shaders = ROOT / ".local/shaders"
         if not (shaders / "SOURCES.md").is_file():

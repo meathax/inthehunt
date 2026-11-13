@@ -344,6 +344,7 @@ int world_window_open(void)
     wc.lpfnWndProc = window_proc;
     wc.hInstance = GetModuleHandleW(NULL);
     wc.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(32512));
+    wc.hIcon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1));
     wc.lpszClassName = window_class;
     if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return 0;
 

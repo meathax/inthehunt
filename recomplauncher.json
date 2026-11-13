@@ -1,0 +1,623 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "In the Hunt",
+  "repo": "meathax/inthehunt",
+  "inputs": [
+    {
+      "id": "rom",
+      "label": "Your In the Hunt World ROM archive (inthunt.zip or inthunt.7z)",
+      "role": "game",
+      "formats": [
+        {
+          "type": "file",
+          "extensions": [
+            "zip",
+            "7z"
+          ]
+        }
+      ]
+    }
+  ],
+  "prepare": {
+    "program": [
+      "InTheHunt-Setup.exe"
+    ],
+    "args": [
+      "{input:rom}"
+    ],
+    "label": "Checking World ROM chips and importing game data",
+    "timeout": 300
+  },
+  "start": {
+    "program": [
+      "InTheHunt.exe"
+    ],
+    "args": [
+      "{install}/.local/world"
+    ]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{install}/.local/world/native-settings.ini"
+        }
+      ],
+      "ensure": {
+        "version": "1"
+      },
+      "new": {
+        "version": "1"
+      }
+    }
+  ],
+  "saves": [
+    "{install}/.local/world/native-settings.ini"
+  ],
+  "looks": {
+    "allowed": false,
+    "reason": "Use the built-in CRT presets and enhancements in the game settings.",
+    "lines": 240
+  },
+  "settings": [
+    {
+      "id": "fullscreen",
+      "label": "Display",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Window",
+          "set": {
+            "fullscreen": "0"
+          }
+        },
+        {
+          "label": "Fullscreen",
+          "set": {
+            "fullscreen": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fullscreen": "0"
+      }
+    },
+    {
+      "id": "scaling",
+      "label": "Scaling",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Integer",
+          "set": {
+            "scaling": "0"
+          }
+        },
+        {
+          "label": "Fit 4:3",
+          "set": {
+            "scaling": "1"
+          }
+        },
+        {
+          "label": "Stretch",
+          "set": {
+            "scaling": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "scaling": "0"
+      }
+    },
+    {
+      "id": "window_scale",
+      "label": "Window size",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "1x",
+          "set": {
+            "window_scale": "1"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "window_scale": "2"
+          }
+        },
+        {
+          "label": "3x",
+          "set": {
+            "window_scale": "3"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "window_scale": "4"
+          }
+        },
+        {
+          "label": "5x",
+          "set": {
+            "window_scale": "5"
+          }
+        },
+        {
+          "label": "6x",
+          "set": {
+            "window_scale": "6"
+          }
+        },
+        {
+          "label": "7x",
+          "set": {
+            "window_scale": "7"
+          }
+        },
+        {
+          "label": "8x",
+          "set": {
+            "window_scale": "8"
+          }
+        }
+      ],
+      "defaults": {
+        "window_scale": "3"
+      }
+    },
+    {
+      "id": "pacing",
+      "label": "Frame pacing",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Smooth",
+          "set": {
+            "pacing": "0"
+          }
+        },
+        {
+          "label": "Exact 60.01",
+          "set": {
+            "pacing": "1"
+          }
+        },
+        {
+          "label": "Timer",
+          "set": {
+            "pacing": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "pacing": "0"
+      },
+      "help": "Smooth follows the display; Exact preserves arcade speed; Timer is free-running."
+    },
+    {
+      "id": "crt_shader",
+      "label": "CRT shader",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "crt_shader": "0"
+          }
+        },
+        {
+          "label": "CRT-Royale",
+          "set": {
+            "crt_shader": "1"
+          }
+        },
+        {
+          "label": "Royale PVM",
+          "set": {
+            "crt_shader": "2"
+          }
+        },
+        {
+          "label": "Guest Advanced",
+          "set": {
+            "crt_shader": "3"
+          }
+        },
+        {
+          "label": "Guest NTSC",
+          "set": {
+            "crt_shader": "4"
+          }
+        },
+        {
+          "label": "CRT-Geom",
+          "set": {
+            "crt_shader": "5"
+          }
+        },
+        {
+          "label": "CRT-Lottes",
+          "set": {
+            "crt_shader": "6"
+          }
+        },
+        {
+          "label": "CRT-Hyllian",
+          "set": {
+            "crt_shader": "7"
+          }
+        },
+        {
+          "label": "Easymode",
+          "set": {
+            "crt_shader": "8"
+          }
+        },
+        {
+          "label": "Aperture",
+          "set": {
+            "crt_shader": "9"
+          }
+        },
+        {
+          "label": "Consumer TV",
+          "set": {
+            "crt_shader": "10"
+          }
+        },
+        {
+          "label": "Caligari",
+          "set": {
+            "crt_shader": "11"
+          }
+        },
+        {
+          "label": "Zfast",
+          "set": {
+            "crt_shader": "12"
+          }
+        }
+      ],
+      "defaults": {
+        "crt_shader": "0"
+      }
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "show_fps": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "show_fps": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "show_fps": "0"
+      }
+    },
+    {
+      "id": "volume",
+      "label": "Master volume",
+      "group": "Sound",
+      "slider": {
+        "key": "volume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "volume": "100"
+      }
+    },
+    {
+      "id": "fm_volume",
+      "label": "FM volume",
+      "group": "Sound",
+      "slider": {
+        "key": "fm_volume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "fm_volume": "100"
+      }
+    },
+    {
+      "id": "pcm_volume",
+      "label": "PCM volume",
+      "group": "Sound",
+      "slider": {
+        "key": "pcm_volume",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "pcm_volume": "100"
+      }
+    },
+    {
+      "id": "timing_mode",
+      "label": "Slowdown",
+      "group": "Game",
+      "choices": [
+        {
+          "label": "Arcade",
+          "set": {
+            "timing_mode": "arcade"
+          }
+        },
+        {
+          "label": "Remove slowdown",
+          "set": {
+            "timing_mode": "remove-slowdown"
+          }
+        }
+      ],
+      "defaults": {
+        "timing_mode": "arcade"
+      }
+    },
+    {
+      "id": "autofire",
+      "label": "Autofire",
+      "group": "Game",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "autofire": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "autofire": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "autofire": "0"
+      }
+    },
+    {
+      "id": "pause_unfocused",
+      "label": "Pause when unfocused",
+      "group": "Game",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "pause_unfocused": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "pause_unfocused": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "pause_unfocused": "1"
+      }
+    },
+    {
+      "id": "fx_enable",
+      "label": "Enhancements",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_enable": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_enable": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_enable": "0"
+      },
+      "help": "Optional visual effects; off preserves the original picture."
+    },
+    {
+      "id": "fx_caustics",
+      "label": "Caustics",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_caustics": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_caustics": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_caustics": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_rays",
+      "label": "Light shafts",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_rays": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_rays": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_rays": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_lights",
+      "label": "Dynamic lighting",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_lights": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_lights": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_lights": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_wakes",
+      "label": "Submarine wakes",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_wakes": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_wakes": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_wakes": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_debris",
+      "label": "Debris",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_debris": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_debris": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_debris": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_silt",
+      "label": "Impact silt",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_silt": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_silt": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_silt": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_splashes",
+      "label": "Surface splashes",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_splashes": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_splashes": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_splashes": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    }
+  ]
+}
