@@ -70,6 +70,58 @@ Press **F1**, **Esc**, or **Start** on a controller to open the pause menu. Choo
 
 Settings save when the menu closes.
 
+## Enhancement guide
+
+Open **Options → Enhance** to adjust these effects. **Enhancements** is the
+master switch: it starts **off**, preserving the original arcade picture.
+Turning it on activates the selected effects; individual switches let you keep
+only the ones you like. The names below match the in-game menu.
+
+| Option | What it does |
+|---|---|
+| **Enhancements** | Enables or bypasses the entire enhancement pass without clearing your individual effect selections. |
+| **Caustics** | Adds moving patterns of refracted light to open water, like sunlight rippling through a pool. |
+| **Light Shafts** | Adds beams of sunlight descending from the surface. |
+| **Sun Shadows** | Lets rocks and scenery block sunlight, creating darker areas beneath them. |
+| **Path Tracing** | Adds coloured lighting from fire and explosions, with soft shadows and bounced light in the enhanced scene. This is the game's lighting effect, not a requirement for an RTX graphics card. |
+| **Water Glow** | Spreads light around explosions to suggest scattering through the surrounding water. |
+| **Absorption** | Reduces red light with depth, giving deeper water a cooler appearance. |
+| **Marine Snow** | Adds small drifting particles suspended in the water. |
+| **Vivid Color** | Boosts colour and contrast for a stronger, less subdued picture. |
+| **Vignette** | Darkens the corners to draw attention toward the centre. |
+| **Motion Trails** | Leaves a short-lived afterimage behind motion, resembling phosphor persistence. |
+| **Smooth Scroll** | Allows the camera to move between the original pixel positions, reducing visible stepping during scrolling. Requires compatible display scaling and no CRT shader. |
+| **Motion X2** | Draws intermediate motion frames on supported displays running at 120 Hz or above. Requires compatible scaling and no CRT shader; it does not double the game's simulation speed. |
+| **Drop Shadows** | Adds shadows from sprites onto the scenery to help objects stand out from their surroundings. |
+| **Depth Haze** | Fades distant scenery toward blue to suggest water between it and the viewer. |
+| **Depth of Field** | Softens the far background while keeping nearer action more distinct. |
+| **Normal Maps** | Adds surface-relief lighting to rock and ice, making light react to apparent bumps and edges. |
+| **Live Surface** | Adds ripples and glints to the waterline. |
+| **Reflections** | Reflects the sky at the water surface. |
+| **Shockwaves** | Distorts the water around blasts with a spreading shockwave effect. |
+| **Particles** | Adds embers and bubbles to explosions. |
+| **Shake + Rumble** | Adds screen shake and vibration on supported controllers when explosions occur. |
+| **Wakes + Turbulence** | Adds curling water trails behind submarines and torpedoes. |
+| **Destruction Debris** | Adds tumbling fragments of wreckage that settle after destruction. |
+| **Impact Silt** | Lifts clouds of sediment where impacts disturb nearby rock. |
+| **Surface Splashes** | Adds spray and ripples when objects cross the waterline. |
+| **Underwater Sparks** | Adds small hot flecks that quickly fade in the water. |
+| **Impact Particles** | Adds fine impact debris that sinks and bubbles that rise. |
+| **Pressure Waves** | Adds background refraction and expanding bubble rings to convey pressure moving through water. |
+| **Lit Sediment** | Lets curling sediment clouds catch the light from explosions. |
+| **Volumetric Water** | Adds light within the water itself, including beams interrupted by scenery. |
+| **Ocean Depth** | Blends distant scenery into the surrounding ocean for a stronger sense of depth. |
+| **Battle Aftermath** | Leaves cooling flecks and lingering bubbles after combat effects subside. |
+| **Sprite Materials** | Adds lighting and surface relief that distinguish painted surfaces, metal, rust and glass on sprites. |
+| **Stereo 3D** | Produces a red-cyan stereo picture for anaglyph glasses; leave it off for normal viewing. |
+
+**Compatibility and performance:** Smooth Scroll and Motion X2 use a higher-resolution
+composition path when the display scale permits it. CRT presets use the original
+240-line picture, so those motion features cannot be combined with a CRT shader.
+Other effects can add rendering cost; switch them on gradually to find a combination
+that stays smooth on your PC. CRT presets live under **Video**, separately from
+these Enhance options.
+
 ## Controls
 
 | Action | Player 1 keyboard | Player 2 keyboard | Xbox-style controller |
