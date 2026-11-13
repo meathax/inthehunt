@@ -20,8 +20,7 @@ RecompLauncher catalogue listing remain open. Dependency notices are included.
 
 The short boss comparison measured 11% less CPU render time for the combined
 preset, 27% less for materials and 34% less for vivid colour. Not every switch
-became faster. See [the complete audit](docs/ENHANCEMENT-AUDIT.md) for timings,
-tradeoffs and scope. Enhancements remain **off by default**.
+became faster. These are workload-specific CPU measurements, not guaranteed FPS gains. Enhancements remain **off by default**.
 
 ## Download and play
 
@@ -56,5 +55,4 @@ Arcade slowdown remains a CPU-cost estimate, not cycle-exact timing. Whole-game
 frame-by-frame equivalence and bit-identical audio have not been established.
 Material masks are authored for inspected player/boss families; other large
 sprites use conservative fallback materials, not bespoke high-resolution maps.
-Some enhancement combinations are unavailable with CRT presets. See the player
-guide and enhancement audit for details.
+Some enhancement combinations are unavailable with CRT presets. Enable effects individually to balance appearance and performance.

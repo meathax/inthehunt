@@ -1,18 +1,4 @@
-<p align="center"><img src="artwork/icon/inthehunt.png" width="112" alt="Golden submarine application icon"></p>
 <h1 align="center">IN THE HUNT</h1>
-<p align="center"><strong>The arcade submarine shooter. A native Windows port.</strong></p>
-<p align="center">
-  <a href="https://github.com/meathax/inthehunt/releases">Releases</a> ·
-  <a href="#install-and-play">Get started</a> ·
-  <a href="docs/PLAYER-GUIDE.md">Player guide</a> ·
-  <a href="https://github.com/meathax/inthehunt/issues">Report a problem</a>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/undersea.png" width="640" alt="The yellow submarine fights through mines and enemy submarines in a blue underwater cavern">
-</p>
-<p align="center"><sub>Actual gameplay from the native port, with visual enhancements disabled.</sub></p>
-
 An unofficial native Windows port of Irem's **In the Hunt** (1993). Take the submarine through six stages of underwater combat, battle enormous bosses, and play solo or with a friend in local two-player co-op.
 
 The original V33 game program and V35 sound program have been translated into C and compiled for Windows. The arcade CPUs are not emulated; the port supplies native video, input and sound-chip models.
@@ -31,7 +17,7 @@ Water Shimmer and Diorama Parallax have been removed.
 All **34 Enhance options** were audited. The short boss comparison measured
 **11% less CPU rendering time** for the combined preset, **27% less** for sprite
 materials and **34% less** for vivid colour. These are workload-specific CPU
-measurements, not guaranteed FPS gains. [Full audit and tradeoffs](docs/ENHANCEMENT-AUDIT.md).
+measurements, not guaranteed FPS gains.
 
 ## Features
 
@@ -39,26 +25,11 @@ measurements, not guaranteed FPS gains. [Full audit and tradeoffs](docs/ENHANCEM
 - **Native controls and menus:** keyboard or Xbox-style controllers, a title menu, pause menu and saved options.
 - **Your choice of picture:** sharp integer scaling, fit-to-screen 4:3, fullscreen and twelve CRT shader presets.
 - **Optional underwater effects:** caustics, light shafts, dynamic lighting, shadows, reflections, wakes, debris, surface splashes and tiny underwater sparks and impact particles, with separate Enhance switches.
-- **Enhanced presentation:** sprite materials, background pressure waves, illuminated sediment and lingering battle aftermath. [Enhancement details](docs/ENHANCEMENTS.md).
+- **Enhanced presentation:** sprite materials, background pressure waves, illuminated sediment and lingering battle aftermath.
 - **Flexible presentation:** display-synchronised frame pacing, optional smooth scrolling and motion interpolation on supported high-refresh displays.
 - **Arcade slowdown or full speed:** retain the port's approximation of the original slowdown, or switch it off.
 
-Visual enhancements are **off by default**. See the [player guide](docs/PLAYER-GUIDE.md) for individual effects, performance tradeoffs and combinations that cannot run together.
-
-## Screenshots
-
-<table>
-  <tr>
-    <td><img src="docs/screenshots/harbour.png" width="420" alt="Submarine combat at the waterline beneath a harbour installation"><br><sub>Surface combat · enhancements off</sub></td>
-    <td><img src="docs/screenshots/ruins.png" width="420" alt="A giant stone boss towers over the submarine in submerged ruins"><br><sub>Submerged ruins · enhancements off</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/enhanced.png" width="420" alt="The underwater cavern with optional caustics and lighting enabled"><br><sub>Optional enhancements · same scene as the opening image</sub></td>
-    <td><img src="docs/screenshots/options.png" width="420" alt="The native options menu showing video settings"><br><sub>Native options · video, sound, game and enhancements</sub></td>
-  </tr>
-</table>
-
-These are captures from the port's native renderer, not reference-emulator screenshots or mockups. [Capture provenance](docs/screenshots/README.md).
+Visual enhancements are **off by default**. Enable effects individually to balance appearance and performance. CRT presets cannot be combined with some enhancements.
 
 ## What you need
 
@@ -74,7 +45,7 @@ The packaged Windows build needs **no Python, Visual Studio or compiler**. Sourc
 
 ## Install and play
 
-**RecompLauncher:** the Windows ZIP includes a developer-maintained setup profile. It imports your World ROM archive, exposes settings in the launcher and starts the game directly. Catalogue listing and interactive launcher testing are still pending; see [integration details](docs/RECOMPLAUNCHER.md).
+**RecompLauncher:** the Windows ZIP includes a developer-maintained setup profile. It imports your World ROM archive, exposes settings in the launcher and starts the game directly. Catalogue listing and interactive launcher testing are still pending.
 
 1. Open [Releases](https://github.com/meathax/inthehunt/releases) and select **`InTheHunt-Windows-x64.zip`**, when available. GitHub's automatic source-code ZIP is not the playable build.
 2. Extract **everything** to a writable folder, such as `D:\Games\InTheHunt`.
@@ -84,7 +55,7 @@ The packaged Windows build needs **no Python, Visual Studio or compiler**. Sourc
 
 Imported data stays in `.local/world`; subsequent launches do not need the archive. Settings are stored in `.local/world/native-settings.ini`. The launcher may download optional border art; if the download fails, play continues with a black border.
 
-**Building instead?** Follow the [source build instructions](docs/DEVELOPMENT.md). From a prepared source checkout, `.\play.ps1` imports the data and builds the executable when needed.
+**Building instead?** Follow the [source build instructions](#building-from-source). From a prepared source checkout, `.\play.ps1` imports the data and builds the executable when needed.
 
 ## Settings
 
@@ -97,7 +68,7 @@ Press **F1**, **Esc**, or **Start** on a controller to open the pause menu. Choo
 | Game | Slowdown, difficulty, submarines, demo sound, autofire and auto-pause |
 | Enhance | Optional lighting, water effects, smooth scrolling and other presentation effects |
 
-Settings save when the menu closes. [Read the full player guide →](docs/PLAYER-GUIDE.md)
+Settings save when the menu closes.
 
 ## Controls
 
@@ -114,7 +85,7 @@ Each controller drives its own player. Key and button assignments are stored in 
 
 ## Status and known limitations
 
-The native port has completed multi-loop headless playthroughs, two-player input tests, both ending-branch tests and a 156-run crash matrix. A freshly extracted Windows package has also passed import and replay checks. See the [verification record](docs/VERIFICATION.md) for the exact scope and remaining interactive checks.
+The native port has completed multi-loop headless playthroughs, two-player input tests, both ending-branch tests and a 156-run crash matrix. A freshly extracted Windows package has also passed import and replay checks.
 
 - **Slowdown is approximate**, not cycle-exact arcade timing.
 - Whole-game frame-by-frame equivalence and bit-identical audio have not been established.
@@ -122,7 +93,7 @@ The native port has completed multi-loop headless playthroughs, two-player input
 - CRT shaders and some enhancements cannot be combined. Motion interpolation has display and scaling requirements.
 - Monitor pacing, focus/fullscreen transitions, audible mixing, controller hot-plug and rumble still need interactive release qualification.
 
-The RecompLauncher integration is a release candidate, not a fully qualified stable release. [Release checklist](docs/RELEASING.md).
+The RecompLauncher integration is a release candidate, not a fully qualified stable release.
 
 ## Updating
 
@@ -134,16 +105,39 @@ Back up `.local/world` first. Extract the new release into a new writable folder
 
 If the port stops at an untranslated routine, include the address from `.local/world/native-stops.tsv`. Do not upload ROM archives, imported game data or machine-state snapshots.
 
-## Development
+## Building from source
 
-The game and Windows host live in `src/`; build, import and verification tools live in `tools/`. Generated files and imported data stay in ignored `.local/` and `build/` directories.
+Requires Windows 10/11 x64, PowerShell 5+ and Windows `tar.exe`. The build downloads and verifies Zig 0.16.0; Visual Studio is not required.
 
-[Build instructions and source map](docs/DEVELOPMENT.md) · [Verification](docs/VERIFICATION.md) · [Release notes](RELEASE-NOTES.md) · [Release procedure](docs/RELEASING.md)
+```powershell
+. .\tools\world_native.ps1
+Build-WorldNative -Root (Get-Location).Path
+```
+
+The executable is written to `.local/native/InTheHunt.exe`. Run `play.cmd` to import your World ROM archive and play, or use `setup.ps1 -Rom C:\path\to\inthunt.7z` to import and build together.
+
+For optional CRT presets, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. The published Windows ZIP includes these runtimes. Generate the shader data with Python 3 from the pinned libretro checkout:
+
+```powershell
+python -I tools/make_shaders.py --slang C:/path/to/slang-shaders
+```
+
+Use slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`. The script copies preset dependencies and their licence notices to `.local/shaders`. The release uses unmodified librashader revision `87e8a97b50516d997defeaa168173dcd185d4022`, built with the Direct3D 12 runtime and static C runtime. Runtime SHA-256 values:
+
+| Runtime | SHA-256 |
+|---|---|
+| librashader.dll | `8e5912fc7432ff39e935c61674823f37b96a824bb6c727f1319cc31fc561a74a` |
+| dxcompiler.dll | `0689e2fee0a1c9df8662a59680469f24e2a3ad7ce6bbbcc9284f7a83172bfc59` |
+
+Game and host source live in `src/`; `tools/` contains build, import and runtime support. The application icon is a build input. Generated files, imported ROMs and local settings are ignored. RecompLauncher configuration and its setup script are retained for launcher support.
 
 ## Credits and licences
 
-**In the Hunt © 1993 Irem.** This is an unofficial project, not affiliated with or endorsed by Irem. The translated game program is derived from the original game; you supply the original ROM data.
+**In the Hunt © 1993 Irem.** This unofficial project is not affiliated with Irem. The translated program derives from the original game; original ROM data is not distributed. A top-level project licence has not yet been settled. Required dependency notices remain in [LICENSES](LICENSES) and the source headers.
 
-Thanks to the MAME contributors, Aaron Giles and the ymfm contributors, librashader, the Libretro shader authors, and the other projects listed in [CREDITS.md](CREDITS.md). Dependency terms are retained in [LICENSES/](LICENSES) and the shader bundle.
-
-A top-level licence for project-authored code remains to be selected; dependency licences do not establish one for the whole repository.
+- [MAME](https://github.com/mamedev/mame/tree/73346bee98cd79d605514d14691f40ee5e368915): Bryan McPhail's M92/NEC work supplies ROM layout, video and timing references. GA20 synthesis adapts work by Acho A. Tang, R. Belmont and Valley Bell (BSD-3-Clause).
+- [ymfm](https://github.com/aaronsgiles/ymfm): Aaron Giles's YM2151 synthesis (BSD-3-Clause), vendored through [CPS-2 Recomp](https://github.com/tmcleroy/cps2recomp/tree/d3bf22f277d7c610a8acbc8bc164620401f79a38). CPS-2 Recomp, FinalBurn Neo and the MiSTer Irem M92 core also served as engineering references.
+- [librashader](https://github.com/SnowflakePowered/librashader): SnowflakePowered and contributors, MPL-2.0 runtime and MIT C headers. [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) provides shader compilation (LLVM/MIT).
+- [Libretro shaders](https://github.com/libretro/slang-shaders): CRT-Royale by TroggleMonkey, Kurozumi tuning, Guest Advanced by guest(r)/Dr. Venom, CRT-Geom by cgwg and contributors, CRT-Lottes by Timothy Lottes, CRT-Hyllian by Hyllian, Easymode/Aperture by EasyMode, and zfast by Greg Hogan, alongside Consumer and Caligari. Presets retain their individual notices.
+- [Blur Busters CRT Beam Simulator](https://github.com/blurbusters/crt-beam-simulator): Mark Rejhon and Timothy Lottes (MIT). The post chain comes from the author's Gauntlet Dark Legacy port; sharpening follows AMD FidelityFX CAS (MIT).
+- Optional cabinet art: Irem originals catalogued by [LaunchBox](https://gamesdb.launchbox-app.com/games/images/29540-in-the-hunt); portrait composition by ArsInvictus, bezel scan by ShaunDBurch, control-panel reference by Briball and rendering by PapaShine. The optional downloader stores these locally; redistribution permission has not been established.

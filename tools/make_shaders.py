@@ -2,7 +2,7 @@
 """Collect the CRT shader presets the game offers, and everything they need.
 
 Copies, unmodified, exactly the files the presets below pull in out of a
-libretro slang-shaders checkout (pinned commit in tools/shader_pins.md) into
+libretro slang-shaders checkout (pinned commit in README.md) into
 .local/shaders, with the licence files that sit beside them and a SOURCES.md
 listing every file, its SHA-256 and the licence notices found in it.
 
