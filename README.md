@@ -1,22 +1,85 @@
-# In the Hunt — native Windows port
+<h1 align="center">IN THE HUNT</h1>
+<p align="center"><strong>The arcade submarine shooter. A native Windows port.</strong></p>
+<p align="center">
+  <a href="https://github.com/meathax/inthehunt/releases">Releases</a> ·
+  <a href="#install-and-play">Get started</a> ·
+  <a href="docs/PLAYER-GUIDE.md">Player guide</a> ·
+  <a href="https://github.com/meathax/inthehunt/issues">Report a problem</a>
+</p>
 
-Irem's 1993 submarine shooter *In the Hunt* (World set `inthunt`), rebuilt as a native Windows x64 game. The original V33 main program and V35 sound program were translated routine by routine into portable C. The arcade CPUs are not emulated. All six stages, every boss, both endings and two-player co-op run from power-on on translated code. Original music and effects are kept, along with an approximation of the arcade slowdown.
+<p align="center">
+  <img src="docs/screenshots/undersea.png" width="640" alt="The yellow submarine fights through mines and enemy submarines in a blue underwater cavern">
+</p>
+<p align="center"><sub>Actual gameplay from the native port, with visual enhancements disabled.</sub></p>
 
-You supply the game data from your own copy of the World ROM set. Original ROM images, graphics and audio are not supplied; the translated program is derived from the original game.
+An unofficial native Windows port of Irem's **In the Hunt** (1993). Take the submarine through six stages of underwater combat, battle enormous bosses, and play solo or with a friend in local two-player co-op.
 
-**Release preparation:** no public download URL is configured in this checkout. See the [release checklist](docs/RELEASING.md) for outstanding publication requirements.
+The original V33 game program and V35 sound program have been translated into C and compiled for Windows. The arcade CPUs are not emulated; the port supplies native video, input and sound-chip models.
 
-## Requirements
+> **Bring your own game.** You need the World arcade ROM set, `inthunt`. Original ROM images and standalone game assets are not included. The Japanese and US sets are not supported.
 
-Windows 10/11 x64, PowerShell 5 or later, and your own World `inthunt.7z` ROM set. The importer uses Windows `tar.exe` and verifies the chip SHA-1 hashes. Direct3D 12 is required for CRT shaders. A packaged release does not need Python or a compiler.
+## Features
 
-## Quick start
+- **The full arcade route:** all six stages, bosses, both endings, continues and local two-player play.
+- **Native controls and menus:** keyboard or Xbox-style controllers, a title menu, pause menu and saved options.
+- **Your choice of picture:** sharp integer scaling, fit-to-screen 4:3, fullscreen and twelve CRT shader presets.
+- **Optional underwater effects:** caustics, light shafts, dynamic lighting, shadows, reflections, wakes, debris and surface splashes.
+- **Flexible presentation:** display-synchronised frame pacing, optional smooth scrolling and motion interpolation on supported high-refresh displays.
+- **Arcade slowdown or full speed:** retain the port's approximation of the original slowdown, or switch it off.
 
-1. From the GitHub release assets, download **`InTheHunt-Windows-x64.zip`** (not GitHub's automatic source-code ZIP) and extract **all** of it to a writable folder.
-2. Double-click **`play.cmd`**.
-3. On first launch, pick your `inthunt.7z` (MAME World parent set). The launcher also looks in `Downloads` and next to `play.cmd`. The chips are SHA-1 checked and imported into `.local/world`; later launches no longer need the archive.
+Visual enhancements are **off by default**. See the [player guide](docs/PLAYER-GUIDE.md) for individual effects, performance tradeoffs and combinations that cannot run together.
 
-From a source checkout, `.\play.ps1` does the same and builds the executable first if the sources are newer (the pinned Zig C compiler is fetched on first build). To import a different archive: `.\setup.ps1 -Rom 'D:\Games\inthunt.7z'`.
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/harbour.png" width="420" alt="Submarine combat at the waterline beneath a harbour installation"><br><sub>Surface combat · enhancements off</sub></td>
+    <td><img src="docs/screenshots/ruins.png" width="420" alt="A giant stone boss towers over the submarine in submerged ruins"><br><sub>Submerged ruins · enhancements off</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/enhanced.png" width="420" alt="The underwater cavern with optional caustics and lighting enabled"><br><sub>Optional enhancements · same scene as the opening image</sub></td>
+    <td><img src="docs/screenshots/options.png" width="420" alt="The native options menu showing video settings"><br><sub>Native options · video, sound, game and enhancements</sub></td>
+  </tr>
+</table>
+
+These are captures from the port's native renderer, not reference-emulator screenshots or mockups. [Capture provenance](docs/screenshots/README.md).
+
+## What you need
+
+| Requirement | Details |
+|---|---|
+| System | Windows 10 or 11, 64-bit |
+| Launcher | PowerShell 5 or later; Windows `tar.exe` for ROM import |
+| Game data | Your own World `inthunt.7z` archive; chip contents are SHA-1 checked |
+| CRT shaders | A Direct3D 12-capable GPU |
+| Input | Keyboard or Xbox-style controller; a second controller for player two |
+
+The packaged Windows build needs **no Python, Visual Studio or compiler**. Source builds download the pinned Zig compiler on first use.
+
+## Install and play
+
+1. Open [Releases](https://github.com/meathax/inthehunt/releases) and select **`InTheHunt-Windows-x64.zip`**, when available. GitHub's automatic source-code ZIP is not the playable build.
+2. Extract **everything** to a writable folder, such as `D:\Games\InTheHunt`.
+3. Double-click **`play.cmd`**.
+4. On first launch, choose your `inthunt.7z`. The launcher also checks Downloads and the folder beside `play.cmd`.
+5. Choose **Start Game** on the title menu.
+
+Imported data stays in `.local/world`; subsequent launches do not need the archive. Settings are stored in `.local/world/native-settings.ini`. The launcher may download optional border art; if the download fails, play continues with a black border.
+
+**Building instead?** Follow the [source build instructions](docs/DEVELOPMENT.md). From a prepared source checkout, `.\play.ps1` imports the data and builds the executable when needed.
+
+## Settings
+
+Press **F1**, **Esc**, or **Start** on a controller to open the pause menu. Choose **Options**, then use Q/E or the shoulder buttons to change tabs.
+
+| Tab | Options |
+|---|---|
+| Video | Window/fullscreen, scaling, CRT shaders, frame pacing, FPS display and border art |
+| Sound | Master volume and separate FM/PCM levels |
+| Game | Slowdown, difficulty, submarines, demo sound, autofire and auto-pause |
+| Enhance | Optional lighting, water effects, smooth scrolling and other presentation effects |
+
+Settings save when the menu closes. [Read the full player guide →](docs/PLAYER-GUIDE.md)
 
 ## Controls
 
@@ -31,81 +94,38 @@ From a source checkout, `.\play.ps1` does the same and builds the executable fir
 
 Each controller drives its own player. Key and button assignments are stored in `.local/world/native-settings.ini`.
 
-## Features
+## Status and known limitations
 
-- Six stages, bosses, both endings and local two-player co-op.
-- Native music and sample playback, keyboard and Xbox-style controllers.
-- Pause/options menus, integer scaling, CRT presets and optional visual enhancements.
-- Arcade slowdown model or Remove Slowdown; enhancements are off by default.
+The native port has completed multi-loop headless playthroughs, two-player input tests, both ending-branch tests and a 156-run crash matrix. A freshly extracted Windows package has also passed import and replay checks. See the [verification record](docs/VERIFICATION.md) for the exact scope and remaining interactive checks.
 
-See the [player guide](docs/PLAYER-GUIDE.md) for options, shaders, frame pacing and enhancement limits.
+- **Slowdown is approximate**, not cycle-exact arcade timing.
+- Whole-game frame-by-frame equivalence and bit-identical audio have not been established.
+- A few rare translated branches estimate leftover CPU register values.
+- CRT shaders and some enhancements cannot be combined. Motion interpolation has display and scaling requirements.
+- Monitor pacing, focus/fullscreen transitions, audible mixing, controller hot-plug and rumble still need interactive release qualification.
 
-## Known limitations
+This is release preparation; a final release version has not been assigned. [Release checklist](docs/RELEASING.md).
 
-- **Arcade slowdown is a fitted model, not cycle-exact.** The native code runs instantly, so each logic pass is charged an estimate of the original V33 time and the game misses VBlanks when that exceeds a frame, as the PCB does. The estimate comes from 157,503 passes of the original program measured in MAME (see [Slowdown model](docs/DEVELOPMENT.md#slowdown-model)); held-out passes are predicted to within 1.4 % of a frame on average (r² 0.978), and about two thirds of real overruns are caught. Individual heavy frames can still differ. Remove Slowdown is unaffected.
-- **No whole-game frame-by-frame MAME comparison.** MAME 0.289 can run the set rebuilt from the imported chips (the six PLD files are not emulated, so placeholders of the right size are enough; MAME only warns about their checksums), and it was used to measure the slowdown model, but a full lockstep comparison of every frame has not been done.
-- **Audio** follows the original driver and chip models, but its samples were never shown to be bit-identical to the reference.
-- **A few rare branches estimate a register value.** Some original code paths read a CPU register left over from earlier, unrelated code (for example, scoring an enemy destroyed by something other than a shot, or a turn decision when no player is in play). Where the port does not track that value it continues with a neutral one and counts it (`Register estimates` in headless output); `WORLD_STRICT=1` stops there instead, for translation work.
-- Only the World set (`inthunt`) is supported. *Kaitei Daisensou* and the US set are not.
+## Updating
 
-## Documentation and source layout
+Back up `.local/world` first. Extract the new release into a new writable folder, copy your existing `.local/world` into it, then start the new `play.cmd`. Keep the previous installation until you have confirmed the update works. Do not overwrite an installation while the game is running.
 
-| Path | Purpose |
-|---|---|
-| `src/` | Translated game, board models and native Windows presentation |
-| `src/third_party/` | Vendored source with upstream notices |
-| `tools/` | Build, import, packaging and verification tools |
-| `docs/` | Player guide, development, verification and release procedure |
-| `LICENSES/`, `CREDITS.md` | Dependency terms and attribution |
-| `artwork/` | Tracked layout and vector artwork |
-| `.local/` | Ignored imported data, tools, captures and release output |
+## Reporting a problem
 
-[Build and source map](docs/DEVELOPMENT.md) · [Verification record](docs/VERIFICATION.md) · [Release audit](docs/RELEASE-AUDIT.md)
+[Open an issue](https://github.com/meathax/inthehunt/issues) with what happened, the stage and steps to reproduce it. Include your build or commit, Windows version, GPU and controller, and whether CRT shaders or enhancements were enabled. A screenshot helps.
 
-## Reporting problems
+If the port stops at an untranslated routine, include the address from `.local/world/native-stops.tsv`. Do not upload ROM archives, imported game data or machine-state snapshots.
 
-Include the release version, Windows version, GPU, controller, stage and reproduction steps. Say whether CRT shaders and enhancements were enabled. For an untranslated-routine stop, include the address from `.local/world/native-stops.tsv`. Do not attach ROMs, imported data or machine-state snapshots.
+## Development
+
+The game and Windows host live in `src/`; build, import and verification tools live in `tools/`. Generated files and imported data stay in ignored `.local/` and `build/` directories.
+
+[Build instructions and source map](docs/DEVELOPMENT.md) · [Verification](docs/VERIFICATION.md) · [Release notes](RELEASE-NOTES.md) · [Release procedure](docs/RELEASING.md)
 
 ## Credits and licences
 
-*In the Hunt* © 1993 Irem. This project is an unofficial, non-commercial preservation and porting effort and ships no original game data. Third-party code and references are listed in [CREDITS.md](CREDITS.md). Their licences are in [LICENSES/](LICENSES): ymfm and the GA20 model (BSD-3-Clause), MAME timing constants (BSD-3-Clause), librashader (MPL-2.0), the DirectX Shader Compiler (LLVM/MIT) and the Blur Busters beam simulator (MIT). The CRT presets keep their own licences (mostly GPL) inside `shaders/`.
+**In the Hunt © 1993 Irem.** This is an unofficial project, not affiliated with or endorsed by Irem. The translated game program is derived from the original game; you supply the original ROM data.
 
-A top-level licence for project-authored code has not yet been selected. The dependency notices do not establish one; this must be resolved before the public release.
+Thanks to the MAME contributors, Aaron Giles and the ymfm contributors, librashader, the Libretro shader authors, and the other projects listed in [CREDITS.md](CREDITS.md). Dependency terms are retained in [LICENSES/](LICENSES) and the shader bundle.
 
-### Headless release qualification (13 November 2026)
-
-The current source was checked without opening a gameplay window. A cold-boot
-620,000-frame run traversed all six stages twice and entered a third loop;
-a separate 120,000-frame run exercised two-player inputs. Both reached their
-requested final frame without a stop. The normal ending and credits were
-captured from a final-boss snapshot. Explicit stage-clear fixtures separately
-exercised both ending branches; the true-ending epilogue reached bonus level 3
-with both players present. This branch test is not a two-player playthrough
-from power-on to that ending.
-
-Off-screen Direct3D 12 tests rendered OFF plus all twelve CRT presets. Menu,
-title, scaling and border-layout captures were inspected. Every enhancement
-was rendered individually in six stage scenes; disabling enhancements matched
-the raw arcade image pixel-for-pixel. The first stage was also inspected during
-active gameplay. Native sound synthesis and driver dispatch ran throughout the
-headless tests, but no physical audio device was opened.
-
-A freshly extracted Windows ZIP passed ROM-chip hash verification, fresh import,
-cache validation, a 3,600-frame gameplay replay and all CRT preset renders using
-its packaged runtime. Original game data is excluded from both release ZIPs.
-Detailed local receipts and captures are under `build/release-qa-20261113/`.
-
-This is headless release-candidate qualification. Actual monitor pacing,
-fullscreen/focus transitions, audible mixing, rumble and controller hot-plug
-still need an interactive hardware session. The fidelity limits above remain:
-these checks do not establish cycle-exact timing, bit-identical audio or full
-gameplay equivalence to MAME. Additional effects are not required for release.
-
-The final crash matrix completed **156 runs of 30,000 frames** across every
-stage in two loops, with zero stops and every run reaching its requested end.
-One run ended one VBlank beyond the target because a slowdown pass advances
-multiple ticks before the script checks its end command. Seventeen runs used
-known register estimates (last reported reason: sixteen no-player surface-enemy
-facing decisions and one ice test using leftover CX). These remain fidelity
-limits, not new translation coverage claims. Replays now use stable random
-seeds and retain inputs, logs, snapshot hashes and final-frame receipts.
+A top-level licence for project-authored code remains to be selected; dependency licences do not establish one for the whole repository.

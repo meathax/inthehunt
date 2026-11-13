@@ -1,4 +1,4 @@
-"""Package only reviewed project text. Generated assets and donor trees stay local."""
+"""Package tracked project text and documentation PNGs; game assets stay local."""
 import subprocess
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -21,9 +21,13 @@ if __name__ == "__main__":
             if path.resolve() != path or not path.is_file():
                 raise ValueError(name)
             data = path.read_bytes()
-            data.decode("utf-8-sig")
-            if b"\0" in data:
-                raise ValueError(f"Binary content in {name}")
+            if name.startswith("docs/screenshots/") and name.endswith(".png"):
+                if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError(f"Invalid documentation PNG in {name}")
+            else:
+                data.decode("utf-8-sig")
+                if b"\0" in data:
+                    raise ValueError(f"Binary content in {name}")
             archive.writestr(name, data)
     temporary.replace(dest)
     print(dest)

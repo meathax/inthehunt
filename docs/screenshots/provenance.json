@@ -1,0 +1,47 @@
+[
+  {
+    "file": "undersea.png",
+    "source": "build/release-qa-20261113/enhance-stage00-gameplay/headless-fx-raw.bmp",
+    "source_sha256": "3bd0870f5f1070e180a24fd00c93b92d806955ed20ff851b84b51a81683a0b7e",
+    "size": [
+      320,
+      240
+    ]
+  },
+  {
+    "file": "harbour.png",
+    "source": "build/release-qa-20261113/enhance-stage02-2/headless-fx-raw.bmp",
+    "source_sha256": "e16a6860664d6b8139484784e857a69807eed7acc7052d957c7d9dfd43184f37",
+    "size": [
+      320,
+      240
+    ]
+  },
+  {
+    "file": "ruins.png",
+    "source": "build/release-qa-20261113/enhance-stage04-4/headless-fx-raw.bmp",
+    "source_sha256": "07db79a2796b60506df7cb3e358bc7628e20511b3de41c8bb7d328384bf24c89",
+    "size": [
+      320,
+      240
+    ]
+  },
+  {
+    "file": "enhanced.png",
+    "source": "build/release-qa-20261113/enhance-stage00-gameplay/headless-fx-all.bmp",
+    "source_sha256": "a42f1b712ff16a17c7c787b4609b76fb84794d153ef58cbed2317a2ec61c8011",
+    "size": [
+      320,
+      240
+    ]
+  },
+  {
+    "file": "options.png",
+    "source": "build/release-qa-20261113/gpu-menu-border/headless-menu1.bmp",
+    "source_sha256": "d01247f6afa666e6d54c4586c3eeffee4e0a5894a5be29a1bd146c52613791fa",
+    "size": [
+      320,
+      240
+    ]
+  }
+]
