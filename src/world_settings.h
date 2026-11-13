@@ -33,7 +33,6 @@ typedef struct {
     unsigned fx_caustics;
     unsigned fx_rays;
     unsigned fx_lights;
-    unsigned fx_shimmer;
     unsigned fx_depth;
     unsigned fx_snow;
     unsigned fx_vivid;
@@ -57,6 +56,8 @@ typedef struct {
     unsigned fx_debris;
     unsigned fx_silt;
     unsigned fx_splashes;
+    unsigned fx_sparks, fx_impact_motes;
+    unsigned fx_pressure, fx_sediment_light, fx_water_volume, fx_ocean_depth, fx_aftermath, fx_materials;
     char shader[WORLD_SETTINGS_ID_SIZE];
     char border[WORLD_SETTINGS_ID_SIZE];
     char border_image[WORLD_SETTINGS_PATH_SIZE];

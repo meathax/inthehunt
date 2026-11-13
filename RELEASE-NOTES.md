@@ -1,32 +1,60 @@
-# In the Hunt — RecompLauncher integration preview
+# In the Hunt — v0.1.0-rc.2: underwater enhancements
 
-**Pre-release candidate.** Adds a developer-maintained RecompLauncher profile, noninteractive validated ROM import, launcher settings, Big Picture fullscreen startup and a new submarine application icon. Catalogue listing and interactive launcher testing remain pending. The top-level project licence decision also remains open; dependency notices are included.
+Updated 14 November 2026. **Pre-release candidate.** Native Windows x64 build;
+original game data is not included. The top-level project licence decision and
+RecompLauncher catalogue listing remain open. Dependency notices are included.
 
-An unofficial native Windows port of Irem's 1993 submarine shooter. The translated V33/V35 programs run natively, with a native M92 renderer and sound-chip models.
+## What changed
+
+- Added independently selectable underwater sparks, impact particles, sprite
+  materials, pressure waves, illuminated sediment, volumetric water, ocean depth
+  and battle aftermath.
+- Rebalanced dynamic lighting: colour-preserving highlights, underwater light
+  attenuation and material highlights that inherit the light colour.
+- Audited all 34 Enhance switches. Shared caches reduce repeated work; Water Glow
+  works independently; overlapping haze, shafts, glow and pressure effects are
+  balanced. Scene changes clear old effects, and fast fragments respect thin terrain.
+- Removed Water Shimmer and Diorama Parallax completely. Legacy saved keys are
+  ignored and omitted when settings are saved.
+- Retained the submarine application icon and RecompLauncher profile/import support.
+
+The short boss comparison measured 11% less CPU render time for the combined
+preset, 27% less for materials and 34% less for vivid colour. Not every switch
+became faster. See [the complete audit](docs/ENHANCEMENT-AUDIT.md) for timings,
+tradeoffs and scope. Enhancements remain **off by default**.
 
 ## Download and play
 
-Choose **InTheHunt-Windows-x64.zip**, not the automatic GitHub source archive. Requires Windows 10/11 x64 and PowerShell 5 or later. No compiler or Python is needed for the player package. CRT shaders require Direct3D 12.
+Download **InTheHunt-Windows-x64.zip**, extract the entire ZIP to a writable folder,
+and open **play.cmd**. Supply your own World `inthunt.7z` archive when prompted.
+Requires Windows 10/11 x64 and PowerShell 5 or later; no compiler or Python is
+needed. CRT presets require Direct3D 12.
 
-1. Extract the entire ZIP to a writable folder.
-2. Open `play.cmd` and select your own World `inthunt.7z` archive.
-3. Use the title menu to start. Arrow keys move; Z/X fire. F1 or Esc opens the pause menu. On an Xbox-style controller use the D-pad/stick, A/B and Start.
+Arrow keys move, Z/X fire, and F1 or Esc opens the pause menu. Xbox-style
+controllers use the D-pad/stick, A/B and Start. Only the World ROM set is supported.
 
-Original game data is not included. Only the World set is supported; Japanese and US sets are not interchangeable. Imported data and settings are kept under `.local/world`. Back up that directory before upgrading and extract updates to a new folder rather than overwriting a running installation.
+Extract updates to a new folder rather than overwriting a running installation.
+Back up your existing `.local/world` directory before carrying imported data and
+settings forward. No ROMs, save data or local settings are included in the release.
 
-## Included features
+## Verification
 
-- Six stages, bosses, both endings and local two-player co-op.
-- Native music and sound, keyboard/controller input and pause/options menus.
-- Integer scaling, CRT presets and optional visual enhancements, disabled by default.
-- Arcade slowdown model and a Remove Slowdown option.
+The enhancement build passed native compositor, lighting, particle and settings
+regressions; all-effects-off matches the reference renderer at 1x–4x in the
+synthetic fixture. All 34 options were profiled on a retained boss replay, and
+before/after captures were inspected. The 1,201-frame combined replay at native
+and 3x scale retained the same gameplay-state hash. Packaging checks bind the
+Windows executable and source archive to this release's commit and checksums.
+
+Earlier rc.1 launcher/import verification is historical evidence; it is not a
+fresh interactive launcher qualification of rc.2. No new desktop, physical
+controller, audible playback or full-six-stage visual qualification is claimed.
 
 ## Known limitations
 
-Slowdown is an estimate of arcade CPU cost, not cycle-exact timing. Whole-game frame-by-frame equivalence and bit-identical audio have not been established. Rare translated branches estimate leftover register values. Some enhancement combinations are unavailable with CRT shaders; see the player guide.
-
-## Candidate verification
-
-The integration candidate passed upstream schema validation, 59 native settings roundtrips, embedded-icon inspection, fresh/repeated ROM import, invalid-ROM rejection with existing data preserved, update preservation, and a 3,600-frame replay from the extracted Windows ZIP. Unicode ROM archive filenames and installation paths containing spaces and an ampersand were exercised. Source and asset hashes are recorded in release-manifest.json and SHA256SUMS.txt.
-
-No interactive RecompLauncher, Big Picture display, physical controller or audible playback check was performed for this candidate. Existing long gameplay reports are historical evidence, not fresh full-game qualification of this executable.
+Arcade slowdown remains a CPU-cost estimate, not cycle-exact timing. Whole-game
+frame-by-frame equivalence and bit-identical audio have not been established.
+Material masks are authored for inspected player/boss families; other large
+sprites use conservative fallback materials, not bespoke high-resolution maps.
+Some enhancement combinations are unavailable with CRT presets. See the player
+guide and enhancement audit for details.

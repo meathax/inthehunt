@@ -7,7 +7,7 @@ The game opens on a **title menu** over the running attract sequence: **Start Ga
 - **Options**: four tabs (Q/E or the shoulder buttons switch tabs; long lists scroll)
   - **Video**
     - Display: window or full screen
-    - Window size: sharp ×1 to ×8
+    - Window size: sharp Ã—1 to Ã—8
     - Scaling: Integer (sharpest), Fit 4:3 (largest picture that keeps the shape) or Stretch (fill the window)
     - CRT shader: Off or one of twelve CRT looks (see below)
     - Frame pacing: Smooth (default), Exact 60.01 or Timer (see below)
@@ -17,7 +17,7 @@ The game opens on a **title menu** over the running attract sequence: **Start Ga
   - **Sound**: master volume, plus separate levels for the FM synth (YM2151) and the PCM samples (GA20)
   - **Game**
     - Slowdown: Arcade keeps the original slowdown; Off runs busy scenes at full speed
-    - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2–5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on; a changed switch resets the board at the next Start Game or Exit to Menu
+    - Difficulty (Very Easy, Easy, Normal, Hard), Submarines (2â€“5) and Demo Sound: the cabinet's own DIP switches, read by the game at power-on; a changed switch resets the board at the next Start Game or Exit to Menu
     - Autofire: holding either fire button repeats it
     - Auto pause: open the pause menu when the window loses focus
     - Controls: the keyboard and controller layout
@@ -62,7 +62,7 @@ Presets compile in the background (CRT-Royale takes about 5 s), so the game and 
 
 The **Enhance** tab adds effects the arcade board never had. Nothing feeds back into the game, and with the master switch off the picture is the untouched arcade output. Every effect has its own switch. Hold **P** (or **Y** on a controller) on this tab to hide the menu and see the result on the paused picture.
 
-They come from a layered renderer (`src/world_scene.c`): the three background layers and the sprites are drawn separately, so effects know what is in front of what, and the picture is composited at up to 4× the resolution so layers and sprites can sit between pixels. With every effect off it is pixel-identical to the plain picture.
+They come from a layered renderer (`src/world_scene.c`): the three background layers and the sprites are drawn separately, so effects know what is in front of what, and the picture is composited at up to 4Ã— the resolution so layers and sprites can sit between pixels. With every effect off it is pixel-identical to the plain picture.
 
 | Effect | What it does |
 |---|---|
@@ -73,12 +73,11 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Water glow | Light scattered by the water around explosions: halos that the rock cuts off |
 | Absorption | Light loses red first, then green, with depth (per-channel Beer-Lambert); things lit by an explosion show their true colour again |
 | Marine snow | Drifting particles on two parallax layers |
-| Water shimmer | A gentle refraction wobble (subpixel) |
 | Vivid color | Richer saturation and contrast |
 | Vignette | Darker corners |
 | Motion trails | Phosphor-style persistence behind bright objects |
 | Smooth scroll | The camera keeps a fraction of a pixel that the scroll registers drop; layers (and sprites moving with them) are drawn at the true position |
-| Motion ×2 | In-between frames on 120 Hz and faster displays: layers and matched sprites are drawn part-way between two game frames |
+| Motion Ã—2 | In-between frames on 120 Hz and faster displays: layers and matched sprites are drawn part-way between two game frames |
 | Drop shadows | Sprites cast soft shadows on underwater scenery behind them (not on open water or above the waterline) |
 | Depth haze | The far layer fades toward water blue |
 | Depth of field | The far layer is slightly out of focus |
@@ -87,6 +86,8 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Reflections | Just below the waterline, the open water mirrors what is above it, rippling and fading with depth |
 | Shockwaves | A refraction ring spreads from each explosion |
 | Particles | Embers and bubbles from explosions |
+| Underwater sparks | Tiny hot flecks that lose speed and quench within a fraction of a second |
+| Impact particles | Fine debris settles while small bubbles rise, slow down and disappear at the waterline |
 | Shake + rumble | Big explosions shake the picture and the controller |
 | Wakes + turbulence | Curling bubble wakes behind moving submarines and thin trails behind fast torpedo-like sprites |
 | Destruction debris | Small tumbling fragments from explosions; heavy pieces sink and settle against rock while lighter pieces rise |
@@ -94,14 +95,14 @@ They come from a layered renderer (`src/world_scene.c`): the three background la
 | Surface splashes | Waterline crossings produce spray, expanding ripples and bubbles beneath the surface |
 | Stereo 3D | Red-cyan anaglyph from the layer depths |
 
-**Path tracing.** Once per game frame the playfield is traced as a 2D scene at half resolution (160×120). The playfield layer's opaque pixels below the surface are rock; a distance field over them lets rays step quickly through open water. Lights are the game's explosion graphics (in any palette) and fire-coloured scenery such as lava. Every probe gets direct light from each light in range through a soft-shadow ray, and three rays in rotating directions collect the light leaving the first rock they hit (its colour times the light it received last frame), so the bounces build up over a few frames. Sunlight visibility is traced the same way toward the surface along the light-shaft angle. It runs on the CPU's worker threads. Shadow rays are skipped when a light contributes less than 1% in every colour channel before occlusion, reducing work during large explosions.
+**Path tracing.** Once per game frame the playfield is traced as a 2D scene at half resolution (160Ã—120). The playfield layer's opaque pixels below the surface are rock; a distance field over them lets rays step quickly through open water. Lights are the game's explosion graphics (in any palette) and fire-coloured scenery such as lava. A four-pixel lighting grid, with denser samples at rock boundaries, gathers direct light from spatially binned nearby sources through soft-shadow rays, and three rays in rotating directions collect the light leaving the first rock they hit (its colour times the light it received last frame), so the bounces build up over a few frames. Sunlight visibility is traced the same way toward the surface along the light-shaft angle. It runs on the CPU's worker threads. The reconstructed lighting is cached once per game frame and shared by both tile layers and interpolated display frames. Lighting is slightly softer away from geometry edges; it is not a full-resolution path tracer. Shadow rays are skipped when a light contributes less than 1% in every colour channel before occlusion, reducing work during large explosions.
 
-The four reactive water effects have independent saved switches in **Options → Enhancements** and default to on within the master enhancement switch. They use separate fixed pools (128 wake bubbles, 48 debris fragments, 16 silt clouds, 16 splash events), per-frame spawn limits, and bounded drawing work. They require no extra lighting rays or full-screen passes. Terrain interaction also works with path tracing and sun shadows disabled. Scene cuts clear the pools, camera motion carries existing effects, and disabling a switch clears that effect.
+The four reactive water effects have independent saved switches in **Options â†’ Enhancements** and default to on within the master enhancement switch. They use separate fixed pools (128 wake bubbles, 48 debris fragments, 16 silt clouds, 16 splash events), per-frame spawn limits, and bounded drawing work. They require no extra lighting rays or full-screen passes. Terrain interaction also works with path tracing and sun shadows disabled. Scene cuts clear the pools, camera motion carries existing effects, and disabling a switch clears that effect.
 
 These effects are inferred from sprite movement and explosion graphics, not game physics: debris is cosmetic, "torpedoes" are inferred from thin fast sprites, and a surface crossing needs a matching sprite on both sides of the waterline. Large shape changes can miss a crossing. Silt appears only near detected scenery; sparse two-dimensional terrain cannot reproduce true fluid or debris collisions. The checks and saturation benchmark are in `tools/test_waterfx.c`.
 
 The master switch is off by default. Limits worth knowing:
-- **Smooth scroll and Motion ×2** need the high-resolution compositor, so they are inactive with a CRT shader, and when the display scale has no divisor of 2, 3 or 4 (×5, ×7). Motion ×2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
+- **Smooth scroll and Motion Ã—2** need the high-resolution compositor, so they are inactive with a CRT shader, and when the display scale has no divisor of 2, 3 or 4 (Ã—5, Ã—7). Motion Ã—2 needs Smooth or Exact frame pacing on a 120 Hz or faster display, and adds half a frame of display lag.
 - **Sprites are matched between frames by position, shape and palette.** A sprite that changes shape or jumps is shown at its new place without an in-between step; a wrong match would show as a one-frame slide.
 - **Explosions are recognised from the picture**: a large patch of the game's explosion graphics appearing where there was none, not from the game's actor list, so an occasional one is missed.
 - **Lights and rock are inferred from the picture.** Rock is whatever the playfield layer draws below the surface, and lights are the explosion graphics and fire-coloured scenery; the far background layer is lit but casts no shadows.
@@ -109,7 +110,7 @@ The master switch is off by default. Limits worth knowing:
 - The camera fraction is known for horizontal scrolling only.
 - Cost depends on the scene, compositor scale and enabled effects. Lighting runs once per game frame; composition runs each displayed refresh. Stereo renders two views; trails add a full-frame history pass.
 
-**Enhancement tuning (November 2026).** Every switch was reviewed. The balanced defaults retain lighting and underwater atmosphere; optional blur, trails, shimmer, vivid color and stereo remain off by default. Existing settings are respected.
+**Enhancement tuning (November 2026).** Every switch was reviewed. The balanced defaults retain lighting and underwater atmosphere; optional blur, trails, vivid color and stereo remain off by default. Existing settings are respected.
 
 | Settings | Tuning and recommendation |
 |---|---|
@@ -124,13 +125,12 @@ The master switch is off by default. Limits worth knowing:
 | Vivid color | Gentler saturation and contrast; optional, especially with a CRT shader. |
 | Depth of field | One blur pass instead of two; optional and off by default to retain pixel-art detail. |
 | Motion trails | Shorter persistence; optional and off by default to avoid projectile ghosting and a full-frame history pass. |
-| Water shimmer | Smaller displacement; optional and off by default for a steadier picture. |
-| Smooth scroll, Motion ×2 | Retain subpixel/interpolated motion; use without a CRT shader, with Motion ×2 only on suitable high-refresh displays. |
+| Smooth scroll, Motion Ã—2 | Retain subpixel/interpolated motion; use without a CRT shader, with Motion Ã—2 only on suitable high-refresh displays. |
 | Stereo 3D | Keep off unless using red-cyan glasses; intentionally needs two composites. |
 
 ### Border art
 
-`play.cmd` downloads one optional undersea background (`tools/get_border_art.ps1`, SHA-256 checked) into `.local/art-sources`. It fills the space beside the 4:3 picture in full screen or a resized window; at the default ×3 window the picture fills the window exactly. If the download fails, the game starts anyway with a black border.
+`play.cmd` downloads one optional undersea background (`tools/get_border_art.ps1`, SHA-256 checked) into `.local/art-sources`. It fills the space beside the 4:3 picture in full screen or a resized window; at the default Ã—3 window the picture fills the window exactly. If the download fails, the game starts anyway with a black border.
 
 ### Command line
 
@@ -140,3 +140,10 @@ InTheHunt.exe <data-dir> [--timing=arcade|remove-slowdown]
 ```
 
 ---
+
+Water Shimmer has been removed. Old `fx_shimmer` settings are ignored. Underwater Sparks and Impact Particles are independent switches, with fixed pools of 96 and 128 and per-game-frame emission caps of 16 and 20. They add no lights or shadow rays. They react to the existing explosion/impact sprite detections; they are cosmetic, not a physical simulation of the arcade collision system.
+
+Enhance also includes **Pressure Waves**, **Lit Sediment**, **Volumetric Water**,
+**Ocean Depth**, **Battle Aftermath**, **Sprite Materials**.
+Each has its own switch. See [Water and material enhancements](ENHANCEMENTS.md)
+for their appearance, supported material families and performance limits.

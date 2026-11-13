@@ -162,10 +162,10 @@ static void scene_submit(void)
 
 static WorldSceneFx scene_effects(void)
 {
-    WorldSceneFx fx;
+    WorldSceneFx fx = {0};
     fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
     fx.sunshadow = settings.fx_sunshadow; fx.glow = settings.fx_glow; fx.reflect = settings.fx_reflect;
-    fx.shimmer = settings.fx_shimmer; fx.depth = settings.fx_depth;
+    fx.depth = settings.fx_depth;
     fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid; fx.vignette = settings.fx_vignette;
     fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
     fx.haze = settings.fx_haze; fx.normals = settings.fx_normals; fx.stereo = settings.fx_stereo;
@@ -173,6 +173,13 @@ static WorldSceneFx scene_effects(void)
     fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
     fx.wakes = settings.fx_wakes; fx.debris = settings.fx_debris;
     fx.silt = settings.fx_silt; fx.splashes = settings.fx_splashes;
+    fx.sparks = settings.fx_sparks; fx.impact_motes = settings.fx_impact_motes;
+    fx.pressure = settings.fx_pressure;
+    fx.sediment_light = settings.fx_sediment_light;
+    fx.water_volume = settings.fx_water_volume;
+    fx.ocean_depth = settings.fx_ocean_depth;
+    fx.aftermath = settings.fx_aftermath;
+    fx.materials = settings.fx_materials;
     return fx;
 }
 
@@ -802,7 +809,7 @@ static void headless_run(const char *dir, const char *script_path)
             static const struct { const char *name; size_t offset; } effects[] = {
                 {"caustics", offsetof(WorldSettings, fx_caustics)}, {"rays", offsetof(WorldSettings, fx_rays)},
                 {"lights", offsetof(WorldSettings, fx_lights)},
-                {"shimmer", offsetof(WorldSettings, fx_shimmer)}, {"depth", offsetof(WorldSettings, fx_depth)},
+                {"depth", offsetof(WorldSettings, fx_depth)},
                 {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
                 {"vignette", offsetof(WorldSettings, fx_vignette)}, {"shadows", offsetof(WorldSettings, fx_shadows)},
                 {"dof", offsetof(WorldSettings, fx_dof)}, {"haze", offsetof(WorldSettings, fx_haze)},
@@ -814,6 +821,15 @@ static void headless_run(const char *dir, const char *script_path)
                 {"debris", offsetof(WorldSettings, fx_debris)},
                 {"silt", offsetof(WorldSettings, fx_silt)},
                 {"splashes", offsetof(WorldSettings, fx_splashes)},
+                {"sparks", offsetof(WorldSettings, fx_sparks)},
+                {"impact-motes", offsetof(WorldSettings, fx_impact_motes)},
+                {"pressure", offsetof(WorldSettings, fx_pressure)},
+                {"sediment_light", offsetof(WorldSettings, fx_sediment_light)},
+                {"water_volume", offsetof(WorldSettings, fx_water_volume)},
+                {"ocean_depth", offsetof(WorldSettings, fx_ocean_depth)},
+                {"aftermath", offsetof(WorldSettings, fx_aftermath)},
+                {"materials", offsetof(WorldSettings, fx_materials)},
+
             };
             enum { EFFECTS = sizeof effects / sizeof effects[0] };
             WorldSettings keep = settings;
@@ -995,13 +1011,24 @@ static void headless_run(const char *dir, const char *script_path)
             world_settings_defaults(&settings);
             settings.bindings = keep.bindings;
             settings.fx_enable = 1;
-            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = settings.fx_shimmer = 1;
+            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = 1;
             /* Diagnostic A/B override: all other enhancements stay identical. */
             const char *reactive = getenv("WORLD_SCENE_REACTIVE");
             if (reactive) settings.fx_wakes = settings.fx_debris = settings.fx_silt = settings.fx_splashes = atoi(reactive) != 0;
+            const char *cinema = getenv("WORLD_SCENE_CINEMA");
+            if (cinema) { unsigned mask=(unsigned)strtoul(cinema,NULL,0);
+                settings.fx_pressure = (mask >> 0) & 1;
+                settings.fx_sediment_light = (mask >> 1) & 1;
+                settings.fx_water_volume = (mask >> 2) & 1;
+                settings.fx_ocean_depth = (mask >> 3) & 1;
+                settings.fx_aftermath = (mask >> 4) & 1;
+                settings.fx_materials = (mask >> 5) & 1;
+            }
+            const char *micro = getenv("WORLD_SCENE_MICRO");
+            if (micro) settings.fx_sparks = settings.fx_impact_motes = atoi(micro) != 0;
             if (!scene_stats && getenv("WORLD_SCENE_STATS")) {
                 scene_stats = fopen(getenv("WORLD_SCENE_STATS"), "w");
-                if (scene_stats) fputs("frame,half,render_ms,waterfx_draw_ms,stage,boss,waterline,wakes,debris,silt,splashes\n", scene_stats);
+                if (scene_stats) fputs("frame,half,render_ms,waterfx_draw_ms,stage,boss,waterline,wakes,debris,silt,splashes,sparks,impact_motes\n", scene_stats);
             }
             scene_submit();
             for (unsigned half = 0; half < 2; ++half) {
@@ -1013,11 +1040,12 @@ static void headless_run(const char *dir, const char *script_path)
                 double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)hz.QuadPart;
                 if (scene_stats) {
                     extern double world_scene_waterfx_draw_ms;
-                    extern unsigned world_scene_waterfx_emitted[4];
-                    fprintf(scene_stats, "%lu,%u,%.6f,%.6f,%u,%u,%d,%u,%u,%u,%u\n",
+                    extern unsigned world_scene_waterfx_emitted[6];
+                    fprintf(scene_stats, "%lu,%u,%.6f,%.6f,%u,%u,%d,%u,%u,%u,%u,%u,%u\n",
                             ticks, half, ms, world_scene_waterfx_draw_ms, word(ram + 0x84), headless_boss_state,
                             waterline_row(), world_scene_waterfx_emitted[0], world_scene_waterfx_emitted[1],
-                            world_scene_waterfx_emitted[2], world_scene_waterfx_emitted[3]);
+                            world_scene_waterfx_emitted[2], world_scene_waterfx_emitted[3],
+                            world_scene_waterfx_emitted[4], world_scene_waterfx_emitted[5]);
                 }
                 scene_ms += ms;
                 if (ms > scene_worst) scene_worst = ms;
@@ -1038,7 +1066,7 @@ static void headless_run(const char *dir, const char *script_path)
                 extern double world_scene_stage_ms[6];
                 double n = world_scene_stage_ms[5];
                 extern unsigned world_scene_explosions;
-                extern unsigned world_scene_waterfx_emitted[4];
+                extern unsigned world_scene_waterfx_emitted[6];
                 fprintf(stderr, "  explosions detected: %u%c", world_scene_explosions, 10);
                 fprintf(stderr, "  water effects: wakes %u, debris %u, silt %u, splashes %u%c",
                         world_scene_waterfx_emitted[0], world_scene_waterfx_emitted[1],

@@ -46,7 +46,11 @@ OPTIONS > VIDEO > CRT SHADER picks a CRT look (CRT-Royale, Guest Advanced,
 CRT-Geom, Lottes and more), always flat with no vignette. Needs Direct3D 12.
 Options also has an ENHANCE tab: optional caustics, light shafts, dynamic
 lights, shadows and more. The master switch defaults to off (pure arcade
-picture). Wakes, debris, silt and surface splashes each have their own switch.
+picture). Wakes, debris, silt, surface splashes, underwater sparks and impact
+particles each have their own switch.
+The enhancement suite adds sprite materials, pressure waves,
+illuminated sediment, volumetric water, ocean depth and battle aftermath.
+Each is independently selectable. See docs/ENHANCEMENTS.md.
 On first launch the game downloads an optional undersea border image;
 turn it on under OPTIONS > VIDEO > BORDER ART.
 

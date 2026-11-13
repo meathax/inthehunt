@@ -18,15 +18,16 @@ enum {
     ITEM_NO, ITEM_YES, ITEM_TABS,
     ITEM_SCALING, ITEM_VSYNC, ITEM_FPS, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
-    ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM, ITEM_FX_SHIMMER,
+    ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
     ITEM_CRT, ITEM_BEAM, ITEM_PACING,
     ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
     ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
-    ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES,
+    ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
+    ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
     ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
 };
-enum { MAX_ITEMS = 40, VISIBLE_ROWS = 6, ROW_STEP = 15 };
+enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
 const unsigned world_menu_fps[WORLD_MENU_FPS_CHOICES] = {0, 90, 120, 180, 240, 0xffffffffu};
 
@@ -43,7 +44,6 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_CAUSTICS: return &s->fx_caustics;
     case ITEM_FX_RAYS: return &s->fx_rays;
     case ITEM_FX_LIGHTS: return &s->fx_lights;
-    case ITEM_FX_SHIMMER: return &s->fx_shimmer;
     case ITEM_FX_DEPTH: return &s->fx_depth;
     case ITEM_FX_SNOW: return &s->fx_snow;
     case ITEM_FX_VIVID: return &s->fx_vivid;
@@ -65,6 +65,15 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_DEBRIS: return &s->fx_debris;
     case ITEM_FX_SILT: return &s->fx_silt;
     case ITEM_FX_SPLASHES: return &s->fx_splashes;
+    case ITEM_FX_SPARKS: return &s->fx_sparks;
+    case ITEM_FX_MOTES: return &s->fx_impact_motes;
+    case ITEM_FX_PRESSURE: return &s->fx_pressure;
+    case ITEM_FX_SEDIMENT_LIGHT: return &s->fx_sediment_light;
+    case ITEM_FX_WATER_VOLUME: return &s->fx_water_volume;
+    case ITEM_FX_OCEAN_DEPTH: return &s->fx_ocean_depth;
+    case ITEM_FX_AFTERMATH: return &s->fx_aftermath;
+    case ITEM_FX_MATERIALS: return &s->fx_materials;
+
     case ITEM_FX_SMOOTH: return &s->fx_smooth;
     case ITEM_FX_INTERP: return &s->fx_interp;
     default: return NULL;
@@ -265,7 +274,6 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_GLOW, "WATER GLOW", "LIGHT SCATTERS AROUND BLASTS");
             ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED FADES FIRST WITH DEPTH");
             ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
-            ADD(ITEM_FX_SHIMMER, "WATER SHIMMER", "GENTLE REFRACTION WOBBLE");
             ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
             ADD(ITEM_FX_VIGNETTE, "VIGNETTE", "DARKER CORNERS");
             ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
@@ -284,6 +292,14 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_DEBRIS, "DESTRUCTION DEBRIS", "TUMBLING WRECKAGE THAT SETTLES");
             ADD(ITEM_FX_SILT, "IMPACT SILT", "SEDIMENT LIFTS FROM NEARBY ROCK");
             ADD(ITEM_FX_SPLASHES, "SURFACE SPLASHES", "CROSSINGS MAKE SPRAY AND RIPPLES");
+            ADD(ITEM_FX_SPARKS, "UNDERWATER SPARKS", "TINY HOT FLECKS QUICKLY QUENCH");
+            ADD(ITEM_FX_MOTES, "IMPACT PARTICLES", "FINE DEBRIS SINKS, BUBBLES RISE");
+            ADD(ITEM_FX_PRESSURE, "PRESSURE WAVES", "BACKGROUND REFRACTION AND BUBBLE RINGS");
+            ADD(ITEM_FX_SEDIMENT_LIGHT, "LIT SEDIMENT", "CURLING CLOUDS CATCH EXPLOSION LIGHT");
+            ADD(ITEM_FX_WATER_VOLUME, "VOLUMETRIC WATER", "OCCLUDED BEAMS AND LIGHT IN THE WATER");
+            ADD(ITEM_FX_OCEAN_DEPTH, "OCEAN DEPTH", "DISTANT SCENERY FADES INTO THE OCEAN");
+            ADD(ITEM_FX_AFTERMATH, "BATTLE AFTERMATH", "COOLING FLECKS AND LINGERING BUBBLES");
+            ADD(ITEM_FX_MATERIALS, "SPRITE MATERIALS", "PAINT, METALS, RUST AND GLASS RELIEF");
             ADD(ITEM_FX_STEREO, "STEREO 3D", "RED-CYAN GLASSES");
         }
         ADD(ITEM_BACK, "BACK", m->title ? "RETURN TO THE TITLE MENU" : "RETURN TO THE PAUSE MENU");
@@ -307,6 +323,7 @@ static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id
     if (id == ITEM_VSYNC || id == ITEM_FPS) return s->pacing != 2;
     if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_SHADOWS && id <= ITEM_FX_INTERP))
         return !s->fx_enable;
+    if (id >= ITEM_FX_WAKES && id <= ITEM_FX_MATERIALS) return !s->fx_enable;
     if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT) return !s->fx_enable;
     return 0;
 }

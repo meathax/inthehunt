@@ -19,12 +19,27 @@ The original V33 game program and V35 sound program have been translated into C 
 
 > **Bring your own game.** You need the World arcade ROM set, `inthunt`. Original ROM images and standalone game assets are not included. The Japanese and US sets are not supported.
 
+## Latest release — v0.1.0-rc.2
+
+[**Download for Windows x64**](https://github.com/meathax/inthehunt/releases/download/v0.1.0-rc.2/InTheHunt-Windows-x64.zip) · [Release notes](RELEASE-NOTES.md)
+
+This preview adds underwater sparks and impact particles, sprite materials,
+pressure waves, illuminated sediment and battle aftermath. Dynamic light keeps
+its colour, attenuates through water and produces coloured metal highlights.
+Water Shimmer and Diorama Parallax have been removed.
+
+All **34 Enhance options** were audited. The short boss comparison measured
+**11% less CPU rendering time** for the combined preset, **27% less** for sprite
+materials and **34% less** for vivid colour. These are workload-specific CPU
+measurements, not guaranteed FPS gains. [Full audit and tradeoffs](docs/ENHANCEMENT-AUDIT.md).
+
 ## Features
 
 - **The full arcade route:** all six stages, bosses, both endings, continues and local two-player play.
 - **Native controls and menus:** keyboard or Xbox-style controllers, a title menu, pause menu and saved options.
 - **Your choice of picture:** sharp integer scaling, fit-to-screen 4:3, fullscreen and twelve CRT shader presets.
-- **Optional underwater effects:** caustics, light shafts, dynamic lighting, shadows, reflections, wakes, debris and surface splashes.
+- **Optional underwater effects:** caustics, light shafts, dynamic lighting, shadows, reflections, wakes, debris, surface splashes and tiny underwater sparks and impact particles, with separate Enhance switches.
+- **Enhanced presentation:** sprite materials, background pressure waves, illuminated sediment and lingering battle aftermath. [Enhancement details](docs/ENHANCEMENTS.md).
 - **Flexible presentation:** display-synchronised frame pacing, optional smooth scrolling and motion interpolation on supported high-refresh displays.
 - **Arcade slowdown or full speed:** retain the port's approximation of the original slowdown, or switch it off.
 

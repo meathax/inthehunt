@@ -618,6 +618,206 @@
       "when": {
         "fx_enable": "1"
       }
+    },
+    {
+      "id": "fx_sparks",
+      "label": "Underwater sparks",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_sparks": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_sparks": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_sparks": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_impact_motes",
+      "label": "Impact particles",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_impact_motes": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_impact_motes": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_impact_motes": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_pressure",
+      "label": "Pressure Waves",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_pressure": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_pressure": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_pressure": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_sediment_light",
+      "label": "Lit Sediment",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_sediment_light": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_sediment_light": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_sediment_light": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_water_volume",
+      "label": "Volumetric Water",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_water_volume": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_water_volume": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_water_volume": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_ocean_depth",
+      "label": "Ocean Depth",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_ocean_depth": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_ocean_depth": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_ocean_depth": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_aftermath",
+      "label": "Battle Aftermath",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_aftermath": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_aftermath": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_aftermath": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
+    },
+    {
+      "id": "fx_materials",
+      "label": "Sprite Materials",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_materials": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_materials": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_materials": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      }
     }
   ]
 }

@@ -13,7 +13,7 @@
  * only: nothing feeds back into the game. */
 
 typedef struct {
-    unsigned caustics, rays, shimmer, depth, snow, vivid, vignette, trails;
+    unsigned caustics, rays, depth, snow, vivid, vignette, trails;
     unsigned lights;     /* path-traced light from fire: soft shadows and bounce light */
     unsigned shadows;    /* sprites cast soft shadows on the scenery behind them */
     unsigned dof;        /* far layer slightly out of focus */
@@ -33,6 +33,8 @@ typedef struct {
     unsigned debris;
     unsigned silt;
     unsigned splashes;
+    unsigned sparks, impact_motes;
+    unsigned pressure, sediment_light, water_volume, ocean_depth, aftermath, materials;
 } WorldSceneFx;
 
 typedef struct {

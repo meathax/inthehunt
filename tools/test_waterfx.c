@@ -94,7 +94,7 @@ int main(void) {
         }
         for(int i=0;i<30;i++)waterfx_draw(picture,&fx,0);
         double t=stamp();for(int i=0;i<200;i++)waterfx_draw(picture,&fx,0);
-        printf("Saturated pools K%d: %.3f ms, %u native samples, %d live objects\n",k,(stamp()-t)/200,wf_samples,WF_COUNT);
+        printf("Saturated original pools K%d: %.3f ms, %u native samples, %d live objects\n",k,(stamp()-t)/200,wf_samples,wf_start[WF_SPARK]);
         assert(wf_samples<=25000);
     }
     setup(3);fx=(WorldSceneFx){0};fx.wakes=fx.debris=fx.silt=fx.splashes=1;
@@ -112,6 +112,60 @@ int main(void) {
     BITMAPFILEHEADER bh={0};BITMAPINFOHEADER bi={0};bh.bfType=0x4d42;bh.bfOffBits=sizeof bh+sizeof bi;
     bh.bfSize=bh.bfOffBits+N*9*4;bi.biSize=sizeof bi;bi.biWidth=W*3;bi.biHeight=-H*3;bi.biPlanes=1;bi.biBitCount=32;
     fwrite(&bh,sizeof bh,1,preview);fwrite(&bi,sizeof bi,1,preview);fwrite(picture,4,N*9,preview);fclose(preview);
+    setup(1);fx=(WorldSceneFx){0};fx.sparks=fx.impact_motes=1;
+    waterfx_begin_frame();waterfx_blast(120,120,100,&fx);
+    assert(active(WF_SPARK)>0 && active(WF_MOTE)>0);
+    int sparks=active(WF_SPARK),motes=active(WF_MOTE);
+    waterfx_blast(120,120,100,&fx);assert(active(WF_SPARK)==sparks && active(WF_MOTE)==motes);
+    assert(active(WF_SPARK)<=16 && active(WF_MOTE)<=20);
+    waterfx_draw(picture,&fx,0.016f);assert(memcmp(picture,clean,sizeof(uint32_t)*N));
+    for(int i=0;i<50;i++)waterfx_draw(picture,&fx,0.016f);
+    assert(!active(WF_SPARK));
+    fx.impact_motes=0;waterfx_draw(picture,&fx,0);assert(!active(WF_MOTE));
+    setup(1);fx=(WorldSceneFx){0};fx.sparks=fx.impact_motes=1;
+    waterfx_begin_frame();waterfx_blast(120,40,100,&fx);assert(!active(WF_SPARK)&&!active(WF_MOTE));
+    waterfx_begin_frame();WaterFx *spark=wf_spawn(WF_SPARK,100,100,0.3f);spark->vx=80;
+    float speed=spark->vx;waterfx_draw(picture,&fx,0.03f);assert(spark->vx<speed);
+    WaterFx *bubble=wf_spawn(WF_MOTE,140,100,1);bubble->light=1;
+    WaterFx *heavy=wf_spawn(WF_MOTE,160,100,1);
+    waterfx_draw(picture,&fx,0.03f);assert(bubble->vy<0&&heavy->vy>0);
+    bubble->y=59;waterfx_draw(picture,&fx,0.03f);assert(!bubble->life);
+    solid[50*PW+80]=1;waterfx_draw(picture,&fx,0.03f);assert(heavy->settled);
+    setup(3);fx=(WorldSceneFx){0};fx.sparks=fx.impact_motes=1;
+    for(int kind=WF_SPARK;kind<=WF_MOTE;++kind)for(int n=0;n<wf_start[kind+1]-wf_start[kind];++n){
+        waterfx_begin_frame();WaterFx *p=wf_spawn(kind,20+n%280,90+n%100,1);assert(p);p->age=0.1f;
+    }
+    waterfx_draw(picture,&fx,0);assert(wf_samples<=448);
+    /* Every visible subpixel is protected when covered by a sprite. */
+    for(int i=0;i<N*9;++i){sprite_px[i]=1;picture[i]=clean[i]=0xff123456;}
+    waterfx_draw(picture,&fx,0);assert(!memcmp(picture,clean,sizeof(uint32_t)*N*9));
+    world_settings_defaults(&saved);saved.fx_sparks=0;saved.fx_impact_motes=1;
+    assert(world_settings_save(".local/waterfx-review/settings-test.ini",&saved)==WORLD_SETTINGS_OK);
+    assert(world_settings_load(".local/waterfx-review/settings-test.ini",&loaded)==WORLD_SETTINGS_OK);
+    assert(!loaded.fx_sparks&&loaded.fx_impact_motes);
+    FILE *legacy=fopen(".local/waterfx-review/settings-test.ini","ab");assert(legacy);
+    fputs("\nfx_shimmer=1\n",legacy);fclose(legacy);
+    assert(world_settings_load(".local/waterfx-review/settings-test.ini",&loaded)==WORLD_SETTINGS_OK);
+    assert(!loaded.fx_sparks&&loaded.fx_impact_motes);
+    assert(world_settings_save(".local/waterfx-review/settings-test.ini",&loaded)==WORLD_SETTINGS_OK);
+    legacy=fopen(".local/waterfx-review/settings-test.ini","rb");assert(legacy);
+    char settings_text[16384];size_t settings_size=fread(settings_text,1,sizeof settings_text-1,legacy);
+    settings_text[settings_size]=0;fclose(legacy);assert(!strstr(settings_text,"fx_shimmer"));
+    /* Cached lighting is the same bilinear lookup, including image borders. */
+    for(int i=0;i<PN;++i){total[0][i]=(i%19)*0.03f;total[1][i]=(i%23)*0.02f;
+        total[2][i]=(i%29)*0.01f;light_dx[i]=(i%7)-3;light_dy[i]=(i%11)-5;sun_vis[i]=(i%5)*0.25f;}
+    cache_transport();
+    for(int y=0;y<HUD;++y)for(int x=0;x<W;++x){
+        PixelLight *p=&pixel_light[y*W+x];float dx=probe_sample(light_dx,x,y),dy=probe_sample(light_dy,x,y);
+        float inv=1.0f/sqrtf(dx*dx+dy*dy+0.0001f);
+        assert(fabsf(p->r-probe_sample(total[0],x,y))<0.00001f);
+        assert(fabsf(p->g-probe_sample(total[1],x,y))<0.00001f);
+        assert(fabsf(p->b-probe_sample(total[2],x,y))<0.00001f);
+        assert(fabsf(p->sun-probe_sample(sun_vis,x,y))<0.00001f);
+        assert(fabsf(p->dx-dx*inv)<0.00001f&&fabsf(p->dy-dy*inv)<0.00001f);
+    }
+    puts("PASS: cached lighting matches exact bilinear samples over all native pixels");
+    puts("PASS: micro sparks/motes emission, dedup, budgets, drag, buoyancy, settling, surface, expiry, occlusion, settings");
     puts("PASS: independent emission, tracing-off terrain, camera crossing, caps, occlusion, HUD/sky, expiry, settling, reset, settings round trip");
     return 0;
 }

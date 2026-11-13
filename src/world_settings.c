@@ -40,7 +40,6 @@ static const NumberSetting numbers[] = {
     {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
     {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
     {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1},
-    {"fx_shimmer", offsetof(WorldSettings, fx_shimmer), 0, 1},
     {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
     {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
     {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
@@ -63,7 +62,15 @@ static const NumberSetting numbers[] = {
     {"fx_wakes", offsetof(WorldSettings, fx_wakes), 0, 1},
     {"fx_debris", offsetof(WorldSettings, fx_debris), 0, 1},
     {"fx_silt", offsetof(WorldSettings, fx_silt), 0, 1},
-    {"fx_splashes", offsetof(WorldSettings, fx_splashes), 0, 1}
+    {"fx_splashes", offsetof(WorldSettings, fx_splashes), 0, 1},
+    {"fx_sparks", offsetof(WorldSettings, fx_sparks), 0, 1},
+    {"fx_impact_motes", offsetof(WorldSettings, fx_impact_motes), 0, 1},
+    {"fx_pressure", offsetof(WorldSettings, fx_pressure), 0, 1},
+    {"fx_sediment_light", offsetof(WorldSettings, fx_sediment_light), 0, 1},
+    {"fx_water_volume", offsetof(WorldSettings, fx_water_volume), 0, 1},
+    {"fx_ocean_depth", offsetof(WorldSettings, fx_ocean_depth), 0, 1},
+    {"fx_aftermath", offsetof(WorldSettings, fx_aftermath), 0, 1},
+    {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -109,6 +116,14 @@ void world_settings_defaults(WorldSettings *settings)
     settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
     settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
     settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
+    settings->fx_sparks = settings->fx_impact_motes = 1;
+    settings->fx_pressure = 1;
+    settings->fx_sediment_light = 1;
+    settings->fx_water_volume = 1;
+    settings->fx_ocean_depth = 1;
+    settings->fx_aftermath = 1;
+    settings->fx_materials = 1;
+    settings->fx_shake = 0; /* Readable enhancement preset; still independently selectable. */
     strcpy(settings->shader, "pixels");
     strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);
