@@ -131,6 +131,37 @@ Use slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`. The scrip
 
 Game and host source live in `src/`; `tools/` contains build, import and runtime support. The application icon is a build input. Generated files, imported ROMs and local settings are ignored. RecompLauncher configuration and its setup script are retained for launcher support.
 
+## RecompLauncher
+
+The Windows ZIP includes `recomplauncher.json` and an import-only setup helper.
+Select your own World `inthunt.zip` or `inthunt.7z` in Easy Setup; the importer
+checks the original chip sizes and SHA-1 hashes. Play starts `InTheHunt.exe`
+directly. Settings include every enhancement, audio, display, arcade timing,
+lives and difficulty. Keyboard/controller rebinding remains in the game menu.
+
+First-run defaults use arcade slowdown, integer scaling at 3x, display-synchronised
+Smooth pacing, normal difficulty and three lives. Enhancements, CRT shaders and
+autofire are off; borders are black. Pause on focus loss is on. Big Picture
+starts fullscreen. Controllers use XInput; other pads need an XInput-compatible
+mapping. Quit from the game menu to return to the launcher.
+
+Only `native-settings.ini` is included in launcher backups; ROM data is excluded.
+Imports and package updates preserve existing settings and game data. External
+launcher Looks are disabled because the game supplies its own CRT presets.
+
+To test an unpublished build, enable Settings → Developers → Developer tools in
+RecompLauncher and use **Add a build** on the extracted Windows ZIP. Check the
+Developer tab, run Easy Setup, change a setting, then test Play, Quit and Big
+Picture. Catalogue inclusion is separate: submit the repository through
+[Submit a Game](https://recomplauncher.com/submit?platform=pc) after publishing a
+tested Windows release. A local manifest does not create a catalogue listing.
+
+Build the native executables first, then run `python tools/package_native.py`.
+`tools/test_launcher_settings.c` and `tools/test_recomplauncher.py` verify the
+shipping settings parser, current upstream schema, manifest commands, imports,
+update preservation and a headless gameplay run. Live launcher UI and physical
+controller testing are separate checks; automated checks do not prove them.
+
 ## Credits and licences
 
 **In the Hunt © 1993 Irem.** This unofficial project is not affiliated with Irem. The translated program derives from the original game; original ROM data is not distributed. A top-level project licence has not yet been settled. Required dependency notices remain in [LICENSES](LICENSES) and the source headers.
