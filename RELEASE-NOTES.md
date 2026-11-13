@@ -1,58 +1,22 @@
-# In the Hunt — v0.1.0-rc.2: underwater enhancements
+# Underwater enhancement update
 
-Updated 14 November 2026. **Pre-release candidate.** Native Windows x64 build;
-original game data is not included. The top-level project licence decision and
-RecompLauncher catalogue listing remain open. Dependency notices are included.
+**Windows x64 · Pre-release**
 
-## What changed
+- New sparks, debris, pressure waves, lit sediment and lingering battle effects.
+- Improved underwater lighting and sprite materials.
+- Rendering optimisations; removed Water Shimmer and Diorama Parallax.
+- RecompLauncher profile and ROM-import support included.
 
-- Added independently selectable underwater sparks, impact particles, sprite
-  materials, pressure waves, illuminated sediment, volumetric water, ocean depth
-  and battle aftermath.
-- Rebalanced dynamic lighting: colour-preserving highlights, underwater light
-  attenuation and material highlights that inherit the light colour.
-- Audited all 34 Enhance switches. Shared caches reduce repeated work; Water Glow
-  works independently; overlapping haze, shafts, glow and pressure effects are
-  balanced. Scene changes clear old effects, and fast fragments respect thin terrain.
-- Removed Water Shimmer and Diorama Parallax completely. Legacy saved keys are
-  ignored and omitted when settings are saved.
-- Retained the submarine application icon and RecompLauncher profile/import support.
+Enhancements are **off by default**. Enable them under **Options → Enhance**.
 
-The short boss comparison measured 11% less CPU render time for the combined
-preset, 27% less for materials and 34% less for vivid colour. Not every switch
-became faster. These are workload-specific CPU measurements, not guaranteed FPS gains. Enhancements remain **off by default**.
+## Play
 
-## Download and play
+Requires **Windows 10/11 x64**, PowerShell 5+ and your own **World `inthunt.7z`** ROM archive. No game data is included; Japanese/US sets are unsupported. CRT presets need Direct3D 12.
 
-Download **InTheHunt-Windows-x64.zip**, extract the entire ZIP to a writable folder,
-and open **play.cmd**. Supply your own World `inthunt.7z` archive when prompted.
-Requires Windows 10/11 x64 and PowerShell 5 or later; no compiler or Python is
-needed. CRT presets require Direct3D 12.
+1. Download **InTheHunt-Windows-x64.zip** and extract everything.
+2. Open **play.cmd** and select your ROM archive.
+3. **5** inserts a coin, **1** starts, arrows move and **Z/X** fire. **F1/Esc** opens options. Xbox-style controllers are supported.
 
-Arrow keys move, Z/X fire, and F1 or Esc opens the pause menu. Xbox-style
-controllers use the D-pad/stick, A/B and Start. Only the World ROM set is supported.
+**Updating:** back up `.local/world`, extract into a new folder and copy that directory across.
 
-Extract updates to a new folder rather than overwriting a running installation.
-Back up your existing `.local/world` directory before carrying imported data and
-settings forward. No ROMs, save data or local settings are included in the release.
-
-## Verification
-
-The enhancement build passed native compositor, lighting, particle and settings
-regressions; all-effects-off matches the reference renderer at 1x–4x in the
-synthetic fixture. All 34 options were profiled on a retained boss replay, and
-before/after captures were inspected. The 1,201-frame combined replay at native
-and 3x scale retained the same gameplay-state hash. Packaging checks bind the
-Windows executable and source archive to this release's commit and checksums.
-
-Earlier rc.1 launcher/import verification is historical evidence; it is not a
-fresh interactive launcher qualification of rc.2. No new desktop, physical
-controller, audible playback or full-six-stage visual qualification is claimed.
-
-## Known limitations
-
-Arcade slowdown remains a CPU-cost estimate, not cycle-exact timing. Whole-game
-frame-by-frame equivalence and bit-identical audio have not been established.
-Material masks are authored for inspected player/boss families; other large
-sprites use conservative fallback materials, not bespoke high-resolution maps.
-Some enhancement combinations are unavailable with CRT presets. Enable effects individually to balance appearance and performance.
+**Preview limitations:** slowdown is approximate; live RecompLauncher, audio and controller testing remains incomplete. Some effects cannot run with CRT presets. Catalogue listing is pending.
