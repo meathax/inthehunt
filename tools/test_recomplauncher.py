@@ -78,6 +78,8 @@ def main():
     with zipfile.ZipFile(package) as archive:
         assert archive.testzip() is None
         assert 'recomplauncher.json' in archive.namelist()
+        assert not any(n.startswith(('tools/', 'docs/')) or n.endswith(('.ps1', '.cmd')) for n in archive.namelist())
+        assert 'InTheHunt-Setup.exe' not in archive.namelist()
         assert not any(n.startswith('.local/') for n in archive.namelist())
         archive.extractall(install)
     assert json.loads((install / 'recomplauncher.json').read_text()) == profile
@@ -101,7 +103,7 @@ def main():
     # Path punctuation and non-ASCII are data, never shell syntax.
     rom = out / 'World & copy \u03a9.zip'
     shutil.copyfile(args.rom, rom)
-    setup = install / 'InTheHunt-Setup.exe'
+    setup = install / 'InTheHunt.exe'
     run(profile_command('prepare', rom), 'fresh-import', cwd=install)
     world = install / '.local/world'
     regions = ['maincpu.bin', 'soundcpu.bin', 'gfx1.bin', 'gfx2.bin', 'irem.bin']
@@ -109,12 +111,12 @@ def main():
     settings = world / 'native-settings.ini'
     settings.write_text('version=1\nvolume=35\nfullscreen=0\n')
     original = settings.read_bytes()
-    run([setup, rom], 'repeat-import', cwd=install)
+    run([setup, '--import-rom', rom], 'repeat-import', cwd=install)
     assert settings.read_bytes() == original
     bad = out / 'wrong.zip'
     with zipfile.ZipFile(bad, 'w') as archive:
         archive.writestr('wrong.txt', 'not the World ROM set')
-    run([setup, bad], 'reject-wrong-rom', expected=1, cwd=install)
+    run([setup, '--import-rom', bad], 'reject-wrong-rom', expected=1, cwd=install)
     assert before == {n: sha(world / n) for n in regions}
     assert settings.read_bytes() == original
     # Updates must not include or overwrite live settings/data.
@@ -125,6 +127,8 @@ def main():
     script = out / 'smoke.txt'
     script.write_text('0 0 0\n300 0 4\n306 0 0\n420 0 1\n426 0 0\n2040 ac1 0\n3600 end\n')
     run(profile_command('start') + ['--headless=' + str(script)], 'gameplay', cwd=install)
+    rom.unlink()
+    run(profile_command('start') + ['--headless=' + str(script)], 'without-original-archive', cwd=out)
     actors = (world / 'headless-actors.txt').read_text()
     assert actors.startswith('frame 3600'), actors[:80]
     assert not (world / 'native-stops.tsv').exists()

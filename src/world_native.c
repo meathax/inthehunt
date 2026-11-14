@@ -23,6 +23,7 @@
 #include "world_clock.h"
 #include "world_settings.h"
 #include "world_file.h"
+#include "world_setup.h"
 #include "world_menu.h"
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
@@ -45,7 +46,7 @@ static unsigned elapsed_board_frames = 1;
 static char settings_path[4096];
 static WorldMenu menu;
 
-/* Border presets fetched by tools/get_border_art.ps1 into .local/art-sources. */
+/* Optional player-supplied border in .local/art-sources. */
 static void menu_borders(const char *dir)
 {
     static char paths[2][4096];
@@ -1225,7 +1226,8 @@ static int play_tick(uint16_t pads, uint16_t system)
 
 static int run_game(int argc, char **argv)
 {
-    const char *dir = argc > 1 ? argv[1] : ".local/world";
+    const char *dir = argc > 1 ? argv[1] : world_default_directory();
+    if (!dir) return 1;
     data_directory = dir;
     int path_length = snprintf(settings_path, sizeof settings_path, "%s/native-settings.ini", dir);
     if (path_length < 0 || (size_t)path_length >= sizeof settings_path) return 1;
@@ -1251,11 +1253,12 @@ static int run_game(int argc, char **argv)
         settings.fullscreen = 1;
     }
     world_clock_reset(&board_clock, settings.timing_mode);
+load_game_data:
     if (!load(dir, "maincpu.bin", rom, sizeof rom) || !load(dir, "gfx1.bin", gfx1, sizeof gfx1)
         || !load(dir, "gfx2.bin", gfx2, sizeof gfx2)
         || !load(dir, "soundcpu.bin", sound_rom, sizeof sound_rom)
         || !load(dir, "irem.bin", samples, sizeof samples)) {
-        if (!headless) MessageBoxA(NULL, "Open play.cmd to import your World ROM archive.", "In The Hunt", MB_ICONERROR);
+        if (!headless && world_setup_screen(dir)) goto load_game_data;
         return 1;
     }
     if (!headless) set_cabinet_switches();      /* scripted runs keep the factory setting */
@@ -1609,6 +1612,11 @@ finished:
 /* Decode arguments once, losslessly, before settings, ROM or shader access. */
 int wmain(int argc, wchar_t **wide_argv)
 {
+    if (argc == 3 && !wcscmp(wide_argv[1], L"--import-rom")) return world_setup_import(wide_argv[2]);
+    if (argc == 1) {
+        DWORD process;
+        if (GetConsoleProcessList(&process, 1) == 1) ShowWindow(GetConsoleWindow(), SW_HIDE);
+    }
     char **argv = calloc((size_t)argc + 1, sizeof *argv);
     if (!argv) return 1;
     int result = 1, converted = 0;

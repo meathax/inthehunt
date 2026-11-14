@@ -21,9 +21,10 @@
   ],
   "prepare": {
     "program": [
-      "InTheHunt-Setup.exe"
+      "InTheHunt.exe"
     ],
     "args": [
+      "--import-rom",
       "{input:rom}"
     ],
     "label": "Checking World ROM chips and importing game data",
