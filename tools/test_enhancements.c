@@ -138,7 +138,7 @@ int main(void){
     sprite_px[100*W+100]=1;add_block(picture,100,100,1,200,200,200);assert(picture[100*W+100]==0xff123456);
     add_block(picture,100,HUD,1,200,200,200);assert(picture[HUD*W+100]!=0xff123456);
     puts("PASS: immediate toggles, repeat-refresh cache, scene-cut reset, swept terrain, pressure precedence and particle occlusion");
-    fixture();fx=(WorldSceneFx){.materials=1,.vivid=1,.vignette=1,.surface=1};
+    fixture();fx=(WorldSceneFx){.materials=1,.vivid=1,.surface=1};
     static uint32_t reference[N*9];
     world_scene_render(picture,3,1,&fx,24000);memcpy(reference,picture,sizeof reference);
     world_scene_render(picture,3,1,&fx,24000);assert(!memcmp(reference,picture,sizeof reference));
@@ -173,5 +173,18 @@ int main(void){
         }
     }
     puts("PASS: effects reach every bottom row, opaque HUD tiles/sprites stay exact, transparent gaps remain enhanced at 1x-4x");
+    /* Upgrade a disabled legacy preset, then keep the player's overrides. */
+    const char *preset_file="build/light-colour-20261113/settings.ini";
+    FILE *legacy=fopen(preset_file,"wb"); assert(legacy);
+    fputs("version=1\nfx_enable=0\nfx_vignette=1\nfx_dof=0\nfx_trails=0\n",legacy); fclose(legacy);
+    assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
+    loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
+    assert(loaded.fx_dof && loaded.fx_trails && loaded.fx_shake && loaded.fx_vivid);
+    loaded.fx_dof=0; loaded.fx_enable=0;
+    assert(world_settings_save(preset_file,&loaded)==WORLD_SETTINGS_OK);
+    assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
+    loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
+    assert(!loaded.fx_dof && loaded.fx_trails);
+    puts("PASS: first-enable upgrade and saved custom enhancement selection");
     return 0;
 }

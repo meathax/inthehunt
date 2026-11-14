@@ -30,13 +30,13 @@ typedef struct {
     unsigned crt_shader;         /* 0 off, else 1 + index in world_gpu_preset_path */
     unsigned autofire;           /* held fire buttons repeat */
     unsigned fx_enable;
+    unsigned enhance_preset_pending;
     unsigned fx_caustics;
     unsigned fx_rays;
     unsigned fx_lights;
     unsigned fx_depth;
     unsigned fx_snow;
     unsigned fx_vivid;
-    unsigned fx_vignette;
     unsigned fx_trails;
     unsigned fx_shadows;
     unsigned fx_dof;
@@ -45,7 +45,6 @@ typedef struct {
     unsigned fx_sunshadow;
     unsigned fx_glow;
     unsigned fx_reflect;
-    unsigned fx_stereo;
     unsigned fx_shock;
     unsigned fx_particles;
     unsigned fx_shake;
@@ -75,6 +74,7 @@ typedef enum {
 /* Integer scaling and the original 4:3 viewport are renderer invariants.
  * Arcade timing is the default selection. Its fidelity depends on the clock
  * and recovered routine costs supplied by the native game. */
+void world_settings_activate_enhancements(WorldSettings *settings);
 void world_settings_defaults(WorldSettings *settings);
 int world_settings_valid(const WorldSettings *settings);
 

@@ -13,7 +13,7 @@
  * only: nothing feeds back into the game. */
 
 typedef struct {
-    unsigned caustics, rays, depth, snow, vivid, vignette, trails;
+    unsigned caustics, rays, depth, snow, vivid, trails;
     unsigned lights;     /* path-traced light from fire: soft shadows and bounce light */
     unsigned shadows;    /* sprites cast soft shadows on the scenery behind them */
     unsigned dof;        /* far layer slightly out of focus */
@@ -22,7 +22,6 @@ typedef struct {
     unsigned sunshadow;  /* rock blocks the sunlight: shafts, caustics and shading */
     unsigned glow;       /* light scattered by the water around lights */
     unsigned reflect;    /* the surface mirrors what is above it */
-    unsigned stereo;     /* red-cyan anaglyph from layer depth */
     unsigned shock;      /* refraction rings from explosions */
     unsigned particles;  /* embers and bubbles from explosions */
     unsigned shake;      /* screen shake (and rumble) on explosions */

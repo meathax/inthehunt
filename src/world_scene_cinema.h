@@ -38,11 +38,13 @@ static uint32_t material_shade(uint32_t c,uint32_t surface,int x,int y)
     float peak=fmaxf(l->r,fmaxf(l->g,l->b));
     float dynamic=peak>0?fminf(l->energy,2)*28/peak:0;
     int wet=g.waterline<0 || y>=g.waterline;
-    float hr=highlight*((wet?10:18)+l->r*dynamic);
-    float hg=highlight*((wet?15:18)+l->g*dynamic);
-    float hb=highlight*(18+l->b*dynamic);
+    float sunlight = wet && g.fx->sunshadow && transport_valid ? pixel_light[y*W+x].sun : 1.0f;
+    float hr=highlight*((wet?13:18)*sunlight+l->r*dynamic);
+    float hg=highlight*((wet?17:18)*sunlight+l->g*dynamic);
+    float hb=highlight*(19*sunlight+l->b*dynamic);
     float relief=1+clampi((int)((nx*.25f-ny*.40f)*30),-12,16)/100.0f;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
+    if (wet && g.fx->lights && g.fx->sunshadow) relief *= 0.74f + 0.26f * sunlight;
     float dark=kind==MAT_RUST?(grain-.5f)*8:0;
     r=(int)(r*relief+hr*((m->tint>>16)&255)/255.0f+(r+12)*l->r*.24f+dark);
     gr=(int)(gr*relief+hg*((m->tint>>8)&255)/255.0f+(gr+12)*l->g*.24f+dark);
@@ -142,7 +144,7 @@ static uint32_t cinema_background(uint32_t c,int layer,int x,int y)
 {
     if(layer<1 || layer>2 || y>=H || (g.waterline>=0 && y<g.waterline))return c;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
-    if(g.fx->ocean_depth){int f=layer==2?(g.fx->haze?12:36):5;r+=(10-r)*f/256;gr+=(46-gr)*f/256;b+=(72-b)*f/256;}
+    if(g.fx->ocean_depth){int f=layer==2?(g.fx->haze?8:24):3;r+=(5-r)*f/256;gr+=(28-gr)*f/256;b+=(52-b)*f/256;}
     if(g.fx->water_volume){unsigned v=water_volume[(y/4)*VW+x/4];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
     return light_rgb(r,gr,b);
 }

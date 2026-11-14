@@ -180,9 +180,9 @@ static WorldSceneFx scene_effects(void)
     fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
     fx.sunshadow = settings.fx_sunshadow; fx.glow = settings.fx_glow; fx.reflect = settings.fx_reflect;
     fx.depth = settings.fx_depth;
-    fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid; fx.vignette = settings.fx_vignette;
+    fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid;
     fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
-    fx.haze = settings.fx_haze; fx.normals = settings.fx_normals; fx.stereo = settings.fx_stereo;
+    fx.haze = settings.fx_haze; fx.normals = settings.fx_normals;
     fx.shock = settings.fx_shock; fx.particles = settings.fx_particles; fx.shake = settings.fx_shake;
     fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
     fx.wakes = settings.fx_wakes; fx.debris = settings.fx_debris;
@@ -839,9 +839,9 @@ static void headless_run(const char *dir, const char *script_path)
                 {"lights", offsetof(WorldSettings, fx_lights)},
                 {"depth", offsetof(WorldSettings, fx_depth)},
                 {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
-                {"vignette", offsetof(WorldSettings, fx_vignette)}, {"shadows", offsetof(WorldSettings, fx_shadows)},
+                {"shadows", offsetof(WorldSettings, fx_shadows)},
                 {"dof", offsetof(WorldSettings, fx_dof)}, {"haze", offsetof(WorldSettings, fx_haze)},
-                {"normals", offsetof(WorldSettings, fx_normals)}, {"stereo", offsetof(WorldSettings, fx_stereo)},
+                {"normals", offsetof(WorldSettings, fx_normals)},
                 {"shock", offsetof(WorldSettings, fx_shock)}, {"particles", offsetof(WorldSettings, fx_particles)},
                 {"surface", offsetof(WorldSettings, fx_surface)}, {"sunshadow", offsetof(WorldSettings, fx_sunshadow)},
                 {"glow", offsetof(WorldSettings, fx_glow)}, {"reflect", offsetof(WorldSettings, fx_reflect)},

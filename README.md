@@ -1,6 +1,6 @@
 # IN THE HUNT
 
-**0.9.2 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
+**0.9.3 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
 
 [**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
@@ -38,7 +38,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 ## Make it yours
 
-Open **Options** for video, sound, difficulty and enhancements. Effects are **off by default** to preserve the arcade picture. Enable lighting, reflections, particles and more under **Enhance**.
+Open **Options** for video, sound, difficulty and enhancements. Effects are **off by default** to preserve the arcade picture. Turn on **Enhancements** to start with every effect enabled. Individual choices are saved and restored when you turn the master switch back on.
 
 <details>
 <summary>Every enhancement at a glance</summary>
@@ -54,7 +54,6 @@ Open **Options** for video, sound, difficulty and enhancements. Effects are **of
 | **Absorption** | Red light fades with depth. |
 | **Marine Snow** | Drifting underwater particles. |
 | **Vivid Color** | Stronger colour and contrast. |
-| **Vignette** | Darker corners. |
 | **Motion Trails** | Phosphor-style afterimages. |
 | **Smooth Scroll** | Smoother camera movement between pixels. |
 | **Motion X2** | Intermediate motion frames on supported 120 Hz+ displays. |
@@ -79,7 +78,6 @@ Open **Options** for video, sound, difficulty and enhancements. Effects are **of
 | **Ocean Depth** | Distant scenery blends into the ocean. |
 | **Battle Aftermath** | Lingering bubbles and cooling flecks. |
 | **Sprite Materials** | Distinct lighting for paint, metal, rust and glass. |
-| **Stereo 3D** | Red-cyan picture for anaglyph glasses. |
 
 </details>
 

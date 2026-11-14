@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <math.h>
+#include <emmintrin.h>  /* SSE2 is baseline on the Windows x64 target. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +51,7 @@ static uint32_t layer_col[3][LN];
 static uint8_t layer_lum[3][LN], layer_wat[3][LN];
 
 static uint16_t sprite_px[MAXK * MAXK * N];      /* palette index | 0x8000 behind tiles */
-static uint32_t eye[MAXK * MAXK * N], history[MAXK * MAXK * N];
+static uint32_t history[MAXK * MAXK * N];
 static int have_history;
 /* Only opaque HUD pixels are exempt; water continues behind their gaps. */
 static uint32_t hud_overlay[W * (H - HUD) * MAXK * MAXK];
@@ -59,7 +60,6 @@ static uint16_t hot_count[GW * GH], hot_before[GW * GH];
 static uint8_t water_map[N];                     /* 1x: open water under this pixel */
 static int8_t field_x[N], field_y[N];            /* shockwave displacement, 1/4 px */
 static int field_on;
-static uint8_t corner[N];
 static int16_t sine[8192];
 static float light_absorb[3][320];
 static uint16_t absorb[3][320];                  /* 256 = nothing absorbed, by depth */
@@ -133,14 +133,9 @@ static void prepare(void)
 {
     for (int i = 0; i < 8192; ++i) sine[i] = (int16_t)lrint(256.0 * sin(i * 6.283185307179586 / 8192.0));
     /* Beer-Lambert per channel: red goes first, then green; blue lasts. */
-    static const double rate[3] = {0.0028, 0.0011, 0.0004};
+    static const double rate[3] = {0.0036, 0.0018, 0.0010};
     for (int c = 0; c < 3; ++c)
         for (int d = 0; d < 320; ++d) absorb[c][d] = (uint16_t)lrint(256.0 * exp(-rate[c] * d));
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x) {
-            double dx = (x - 159.5) / 160.0, dy = (y - 119.5) / 120.0, d = dx * dx + dy * dy;
-            corner[y * W + x] = (uint8_t)lrint(255.0 * (1.0 - 0.22 * (d > 0.55 ? (d - 0.55) / 1.45 : 0.0)));
-        }
     static const float extinction[3]={.012f,.005f,.0025f};
     for(int c=0;c<3;++c)for(int d=0;d<320;++d)light_absorb[c][d]=expf(-extinction[c]*d);
     ready = 1;
@@ -442,10 +437,16 @@ static void soften(uint32_t *c)
         for (int x = 0; x < LW; ++x) line[x] = MIX(row[x ? x - 1 : 0], row[x], row[x < LW - 1 ? x + 1 : x]);
         memcpy(row, line, sizeof(uint32_t) * LW);
     }
-    for (int x = 0; x < LW; ++x) {
-        for (int y = 0; y < LH; ++y)
-            line[y] = MIX(c[(y ? y - 1 : 0) * LW + x], c[y * LW + x], c[(y < LH - 1 ? y + 1 : y) * LW + x]);
-        for (int y = 0; y < LH; ++y) c[y * LW + x] = line[y];
+    /* Walk rows in display order, retaining the unblurred previous row. */
+    memcpy(line, c, LW * sizeof *line);
+    for (int y = 0; y < LH; ++y) {
+        uint32_t *row = c + y * LW;
+        const uint32_t *next = y + 1 < LH ? row + LW : row;
+        for (int x = 0; x < LW; ++x) {
+            uint32_t center = row[x];
+            row[x] = MIX(line[x], center, next[x]);
+            line[x] = center;
+        }
     }
 #undef MIX
 }
@@ -763,7 +764,21 @@ static void transport_rows(int from, int to)
             if (fx->sunshadow && y < PH) {
                 float limit = surface < 0 ? fy0 - 6.0f : fy0 - surface - 12.0f;
                 sv = limit <= 0.0f ? 1.0f : trace_soft(fx0, fy0, sun_x, sun_y, limit / -sun_y, 10.0f);
-                if (sv > 1.0f) sv = 1.0f;
+                /* Fade into occlusion as the water column gains thickness.
+                   A short ray crossing the first solid probe otherwise casts
+                   a full-strength shadow along a single horizontal row. */
+                float coverage = fminf(1.0f, fmaxf(0.0f, limit / 16.0f));
+                sv = 1.0f - coverage * (1.0f - fminf(sv, 1.0f));
+            }
+            /* Sunlit rock contributes to the same radiance field that bounce
+               rays sample on the next frame. Water filters the incoming ray. */
+            if (fx->sunshadow && fx->lights && solid[p] && sv > 0.0f) {
+                float depth = fmaxf(0.0f, fy0 - fmaxf(surface, 0.0f));
+                int wet = clampi((int)(2.0f * depth / -sun_y), 0, 319);
+                float sun = 0.48f * sv;
+                direct[0][p] += sun * light_absorb[0][wet];
+                direct[1][p] += sun * 0.96f * light_absorb[1][wet];
+                direct[2][p] += sun * 0.86f * light_absorb[2][wet];
             }
             sun_vis[p] = sv;
         }
@@ -911,8 +926,18 @@ static void layer_rows_fx(int from, int to)
                 }
                 if (fx->haze && layer == 2 && under) {
                     /* Distance in water: the far layer drifts toward blue. */
-                    int t = 42 * under >> 8;
-                    r += (14 - r) * t >> 8; gr += (58 - gr) * t >> 8; b += (98 - b) * t >> 8;
+                    int t = 23 * under >> 8;
+                    r += (6 - r) * t >> 8; gr += (34 - gr) * t >> 8; b += (64 - b) * t >> 8;
+                }
+                /* Expose ambient scenery before adding direct and scattered light.
+                   Submerged distance and traced sunlight set the local exposure. */
+                if (fx->lights && under) {
+                    float distance = clampi(depth, 0, 220) / 220.0f;
+                    float exposure = 1.0f - (under / 256.0f) *
+                        (0.09f + 0.24f * distance + 0.24f * (1.0f - sv));
+                    r = (int)(r * exposure);
+                    gr = (int)(gr * exposure);
+                    b = (int)(b * exposure);
                 }
                 /* Surface normal from the pixel art's shading (bright = raised). */
                 float nx = 0.0f, ny = 0.0f, nz = 1.0f;
@@ -943,7 +968,7 @@ static void layer_rows_fx(int from, int to)
                 }
                 if (shadowed && surface && under && in_play) {
                     /* Rock out of the sun's reach is a little darker. */
-                    int keep = 196 + (int)(60 * sv);
+                    int keep = 222 + (int)(34 * sv);
                     r = r * keep >> 8; gr = gr * keep >> 8; b = b * keep >> 8;
                 }
                 if (lit && in_play) {
@@ -958,7 +983,7 @@ static void layer_rows_fx(int from, int to)
                                 float ndl = (nx * light->dx + ny * light->dy) * 0.8f + nz * 0.6f;
                                 shade = 0.25f + 1.1f * (ndl < 0 ? 0 : ndl);
                             }
-                            float k = reach * shade * (128 - w) / 128.0f;
+                            float k = 1.18f * reach * shade * (128 - w) / 128.0f;
                             r += (int)((r0 + 70) * lr * k); gr += (int)((g0 + 70) * lg * k); b += (int)((b0 + 70) * lb * k);
                         }
                         if (fx->glow && under) {
@@ -979,7 +1004,7 @@ static void layer_rows_fx(int from, int to)
                         ridge = ridge * ridge >> 8;
                         ridge = ridge * ridge >> 8;
                         int fade = depth < 300 ? 300 - depth : 0;
-                        int add = (int)(ridge * w * fade / (255 * 300) * 7 / 20 * sv);
+                        int add = (int)(ridge * w * fade / (255 * 300) * 0.43f * sv);
                         r += add * 50 >> 8; gr += add * 95 >> 8; b += add * 105 >> 8;
                     }
                 }
@@ -1008,7 +1033,7 @@ static void compose_rows(int from, int to)
     const int shadow_keep[3] = {256, 180, 208};
     const uint32_t backdrop = cur.colors[0];
     struct Memo {int mat_cell,post_cell;uint32_t mat,base,shaded,input,result;} memo[W];
-    if(fx->materials || fx->vivid || fx->vignette || fx->surface)memset(memo,0,sizeof memo);
+    if(fx->materials || fx->vivid || fx->surface)memset(memo,0,sizeof memo);
     for (int Y = from; Y < to; ++Y) {
         int y1 = Y / k;
         uint32_t *o = g.out + (size_t)Y * ow;
@@ -1106,7 +1131,7 @@ static void compose_rows(int from, int to)
             int cell = y1 * W + x1;
             int hud_pixel = y1 >= HUD && (id == 0 || id == 3);
             if (y1 >= HUD) hud_overlay[(size_t)(Y - HUD*k)*ow + X] = hud_pixel ? c : 0;
-            int needs = !hud_pixel && (glint || fx->vivid || (fx->vignette && corner[cell] != 255));
+            int needs = !hud_pixel && (glint || fx->vivid);
             struct Memo *post=&memo[x1];uint32_t post_input=c;
             int post_tag=(cell+1)*2+(glint && id>0 && id<3 && wet>60);
             if(needs && post->post_cell==post_tag && post->input==c)c=post->result;
@@ -1119,12 +1144,7 @@ static void compose_rows(int from, int to)
                 }
                 if (fx->vivid) {
                     int lum = (r * 3 + gr * 5 + b * 2) / 10;
-                    r = lum + (r - lum) * 18 / 16; gr = lum + (gr - lum) * 18 / 16; b = lum + (b - lum) * 18 / 16;
-                    r = (r - 128) * 17 / 16 + 128; gr = (gr - 128) * 17 / 16 + 128; b = (b - 128) * 17 / 16 + 128;
-                }
-                if (fx->vignette) {
-                    int m = corner[y1 * W + x1] + 1;
-                    r = r * m >> 8; gr = gr * m >> 8; b = b * m >> 8;
+                    r = lum + (r - lum) * 17 / 16; gr = lum + (gr - lum) * 17 / 16; b = lum + (b - lum) * 17 / 16;
                 }
                 c = light_rgb(r,gr,b);
                 post->post_cell=post_tag;post->input=post_input;post->result=c;
@@ -1372,18 +1392,6 @@ static double stamp(void)
     return (double)t.QuadPart * 1000.0 / (double)f.QuadPart;
 }
 
-static void compose(uint32_t *out, int disparity)
-{
-    int k = g.k;
-    g.out = out;
-    int keep_x[3], near_shift = k * 3 / 4 > 0 ? k * 3 / 4 : 1;
-    memcpy(keep_x, g.off_x, sizeof keep_x);
-    g.off_x[1] += disparity * near_shift;            /* behind the screen plane */
-    g.off_x[2] += disparity * near_shift * 2;
-    parallel(compose_rows, g.oh);
-    memcpy(g.off_x, keep_x, sizeof keep_x);
-}
-
 int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldSceneFx *fx, uint32_t clock)
 {
     static int audit_selection=-2;
@@ -1396,7 +1404,6 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         case 3: audit_fx.depth=1;break;
         case 4: audit_fx.snow=1;break;
         case 5: audit_fx.vivid=1;break;
-        case 6: audit_fx.vignette=1;break;
         case 7: audit_fx.trails=1;break;
         case 8: audit_fx.lights=1;break;
         case 9: audit_fx.shadows=1;break;
@@ -1406,7 +1413,6 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         case 13: audit_fx.sunshadow=1;break;
         case 14: audit_fx.glow=1;break;
         case 15: audit_fx.reflect=1;break;
-        case 16: audit_fx.stereo=1;break;
         case 17: audit_fx.shock=1;break;
         case 18: audit_fx.particles=1;break;
         case 19: audit_fx.shake=1;break;
@@ -1511,13 +1517,8 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     cinema_update(dt);
     if(changed_frame || fx_changed)material_prepare();
 
-    if (fx->stereo) {
-        compose(eye, -1);
-        compose(out, 1);
-        for (size_t i = 0, n = (size_t)g.ow * g.oh; i < n; ++i)
-            out[i] = (eye[i] & 0xffff0000u) | (out[i] & 0x0000ffffu);
-    } else
-        compose(out, 0);
+    g.out = out;
+    parallel(compose_rows, g.oh);
     double t4 = stamp();
 
     if (fx->reflect) reflect_surface(out);
@@ -1529,14 +1530,22 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
 
     if (fx->trails) {
         size_t n = (size_t)g.ow * (size_t)(H * k);
-        if (have_history)
-            for (size_t i = 0; i < n; ++i) {
-                uint32_t p = out[i], q = history[i];
-                unsigned r = ((q >> 16) & 255) * 112 >> 8, gr = ((q >> 8) & 255) * 112 >> 8, b = (q & 255) * 112 >> 8;
-                unsigned pr = (p >> 16) & 255, pg = (p >> 8) & 255, pb = p & 255;
-                out[i] = 0xff000000u | (pr > r ? pr : r) << 16 | (pg > gr ? pg : gr) << 8 | (pb > b ? pb : b);
+        if (have_history) {
+            /* Four BGRA pixels at once. 7/16 is the exact phosphor decay. */
+            const __m128i zero = _mm_setzero_si128(), seven = _mm_set1_epi16(7);
+            for (size_t i = 0; i < n; i += 4) {
+                __m128i old = _mm_loadu_si128((const __m128i *)(history + i));
+                __m128i lo = _mm_unpacklo_epi8(old, zero), hi = _mm_unpackhi_epi8(old, zero);
+                lo = _mm_srli_epi16(_mm_mullo_epi16(lo, seven), 4);
+                hi = _mm_srli_epi16(_mm_mullo_epi16(hi, seven), 4);
+                __m128i color = _mm_loadu_si128((const __m128i *)(out + i));
+                color = _mm_max_epu8(color, _mm_packus_epi16(lo, hi));
+                _mm_storeu_si128((__m128i *)(out + i), color);
+                _mm_storeu_si128((__m128i *)(history + i), color);
             }
-        memcpy(history, out, n * sizeof *out);
+        } else {
+            memcpy(history, out, n * sizeof *out);
+        }
         have_history = 1;
     } else
         have_history = 0;

@@ -19,9 +19,9 @@ enum {
     ITEM_SCALING, ITEM_VSYNC, ITEM_FPS, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
     ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
-    ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_VIGNETTE, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
+    ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
     ITEM_CRT, ITEM_BEAM, ITEM_PACING,
-    ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_STEREO, ITEM_FX_SHOCK,
+    ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_SHOCK,
     ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
     ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
@@ -47,7 +47,6 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_DEPTH: return &s->fx_depth;
     case ITEM_FX_SNOW: return &s->fx_snow;
     case ITEM_FX_VIVID: return &s->fx_vivid;
-    case ITEM_FX_VIGNETTE: return &s->fx_vignette;
     case ITEM_FX_TRAILS: return &s->fx_trails;
     case ITEM_FX_SHADOWS: return &s->fx_shadows;
     case ITEM_FX_DOF: return &s->fx_dof;
@@ -56,7 +55,6 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_SUNSHADOW: return &s->fx_sunshadow;
     case ITEM_FX_GLOW: return &s->fx_glow;
     case ITEM_FX_REFLECT: return &s->fx_reflect;
-    case ITEM_FX_STEREO: return &s->fx_stereo;
     case ITEM_FX_SHOCK: return &s->fx_shock;
     case ITEM_FX_PARTICLES: return &s->fx_particles;
     case ITEM_FX_SHAKE: return &s->fx_shake;
@@ -275,7 +273,6 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED FADES FIRST WITH DEPTH");
             ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
             ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
-            ADD(ITEM_FX_VIGNETTE, "VIGNETTE", "DARKER CORNERS");
             ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
             ADD(ITEM_FX_SMOOTH, "SMOOTH SCROLL", "SUBPIXEL CAMERA. NO CRT SHADER");
             ADD(ITEM_FX_INTERP, "MOTION X2", "IN-BETWEEN FRAMES AT 120 HZ+");
@@ -300,7 +297,6 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_OCEAN_DEPTH, "OCEAN DEPTH", "DISTANT SCENERY FADES INTO THE OCEAN");
             ADD(ITEM_FX_AFTERMATH, "BATTLE AFTERMATH", "COOLING FLECKS AND LINGERING BUBBLES");
             ADD(ITEM_FX_MATERIALS, "SPRITE MATERIALS", "PAINT, METALS, RUST AND GLASS RELIEF");
-            ADD(ITEM_FX_STEREO, "STEREO 3D", "RED-CYAN GLASSES");
         }
         ADD(ITEM_BACK, "BACK", m->title ? "RETURN TO THE TITLE MENU" : "RETURN TO THE PAUSE MENU");
         break;
@@ -473,6 +469,7 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
         unsigned *field = toggle_field(s, id);
         if (!field || item_disabled(m, s, id)) return 0;
         *field = !*field;
+        if (id == ITEM_FX) world_settings_activate_enhancements(s);
         return WORLD_MENU_VIEW;
     }
     }

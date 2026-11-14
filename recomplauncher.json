@@ -891,38 +891,12 @@
         }
       ],
       "defaults": {
-        "fx_vivid": "0"
+        "fx_vivid": "1"
       },
       "when": {
         "fx_enable": "1"
       },
       "help": "Richer colour and contrast."
-    },
-    {
-      "id": "fx_vignette",
-      "label": "Vignette",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_vignette": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_vignette": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_vignette": "1"
-      },
-      "when": {
-        "fx_enable": "1"
-      },
-      "help": "Darkens the corners."
     },
     {
       "id": "fx_trails",
@@ -943,7 +917,7 @@
         }
       ],
       "defaults": {
-        "fx_trails": "0"
+        "fx_trails": "1"
       },
       "when": {
         "fx_enable": "1"
@@ -995,7 +969,7 @@
         }
       ],
       "defaults": {
-        "fx_dof": "0"
+        "fx_dof": "1"
       },
       "when": {
         "fx_enable": "1"
@@ -1133,32 +1107,6 @@
       "help": "The surface reflects the sky."
     },
     {
-      "id": "fx_stereo",
-      "label": "Stereo 3D",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_stereo": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_stereo": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_stereo": "0"
-      },
-      "when": {
-        "fx_enable": "1"
-      },
-      "help": "Requires red-cyan glasses."
-    },
-    {
       "id": "fx_shock",
       "label": "Shockwaves",
       "group": "Enhance",
@@ -1229,7 +1177,7 @@
         }
       ],
       "defaults": {
-        "fx_shake": "0"
+        "fx_shake": "1"
       },
       "when": {
         "fx_enable": "1"

@@ -36,6 +36,7 @@ static const NumberSetting numbers[] = {
     {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
     {"crt_shader", offsetof(WorldSettings, crt_shader), 0, 12},
     {"autofire", offsetof(WorldSettings, autofire), 0, 1},
+    {"enhance_preset_pending", offsetof(WorldSettings, enhance_preset_pending), 0, 1},
     {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
     {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
     {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
@@ -43,7 +44,6 @@ static const NumberSetting numbers[] = {
     {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
     {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
     {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
-    {"fx_vignette", offsetof(WorldSettings, fx_vignette), 0, 1},
     {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
     {"fx_shadows", offsetof(WorldSettings, fx_shadows), 0, 1},
     {"fx_dof", offsetof(WorldSettings, fx_dof), 0, 1},
@@ -52,7 +52,6 @@ static const NumberSetting numbers[] = {
     {"fx_sunshadow", offsetof(WorldSettings, fx_sunshadow), 0, 1},
     {"fx_glow", offsetof(WorldSettings, fx_glow), 0, 1},
     {"fx_reflect", offsetof(WorldSettings, fx_reflect), 0, 1},
-    {"fx_stereo", offsetof(WorldSettings, fx_stereo), 0, 1},
     {"fx_shock", offsetof(WorldSettings, fx_shock), 0, 1},
     {"fx_particles", offsetof(WorldSettings, fx_particles), 0, 1},
     {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1},
@@ -94,6 +93,32 @@ static int bounded_string(const char *text, size_t size, int identifier)
     return valid_utf8(text);
 }
 
+static void all_enhancements_on(WorldSettings *settings)
+{
+    settings->fx_caustics = settings->fx_rays = settings->fx_lights = 1;
+    settings->fx_depth = settings->fx_snow = settings->fx_vivid = 1;
+    settings->fx_normals = settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
+    settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
+    settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
+    settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
+    settings->fx_sparks = settings->fx_impact_motes = 1;
+    settings->fx_pressure = 1;
+    settings->fx_sediment_light = 1;
+    settings->fx_water_volume = 1;
+    settings->fx_ocean_depth = 1;
+    settings->fx_aftermath = 1;
+    settings->fx_materials = 1;
+    settings->fx_dof = settings->fx_trails = 1;
+}
+
+void world_settings_activate_enhancements(WorldSettings *settings)
+{
+    if (settings->fx_enable && settings->enhance_preset_pending) {
+        all_enhancements_on(settings);
+        settings->enhance_preset_pending = 0;
+    }
+}
+
 void world_settings_defaults(WorldSettings *settings)
 {
     if (!settings) return;
@@ -109,21 +134,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->dip_lives = 1;         /* factory: 3 submarines */
     settings->dip_difficulty = 2;    /* factory: normal */
     settings->dip_demo_sound = 1;
-    /* The master switch is off, so the first picture is the arcade's own. */
-    settings->fx_caustics = settings->fx_rays = settings->fx_lights = 1;
-    settings->fx_depth = settings->fx_snow = settings->fx_vignette = 1;
-    settings->fx_normals = settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
-    settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
-    settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
-    settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
-    settings->fx_sparks = settings->fx_impact_motes = 1;
-    settings->fx_pressure = 1;
-    settings->fx_sediment_light = 1;
-    settings->fx_water_volume = 1;
-    settings->fx_ocean_depth = 1;
-    settings->fx_aftermath = 1;
-    settings->fx_materials = 1;
-    settings->fx_shake = 0; /* Readable enhancement preset; still independently selectable. */
+    all_enhancements_on(settings);
     strcpy(settings->shader, "pixels");
     strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);
@@ -236,7 +247,7 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
     if (length >= 3 && !memcmp(data, "\xef\xbb\xbf", 3)) line += 3;
     WorldSettings candidate = *settings;
     unsigned version = 0, saw_version = 0;
-    int invalid = 0;
+    int invalid = 0, legacy_enhancements = 0, preset_state_saved = 0;
     while (*line) {
         char *next = strchr(line, '\n');
         if (next) *next++ = 0;
@@ -248,6 +259,9 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
                 *value++ = 0;
                 key = trim(key);
                 value = trim(value);
+                /* Older full saves contain the retired switches and a mixed preset. */
+                if (!strcmp(key, "fx_vignette") || !strcmp(key, "fx_stereo")) legacy_enhancements = 1;
+                if (!strcmp(key, "enhance_preset_pending")) preset_state_saved = 1;
                 if (!strcmp(key, "version")) {
                     if (saw_version++ || !number(value, &version)) invalid = 1;
                 } else if (apply_setting(&candidate, key, value) < 0) invalid = 1;
@@ -258,6 +272,8 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
     }
     if (version > WORLD_SETTINGS_VERSION) return WORLD_SETTINGS_NEWER_VERSION;
     if (invalid || !world_settings_valid(&candidate)) return WORLD_SETTINGS_INVALID;
+    if (legacy_enhancements && !preset_state_saved) candidate.enhance_preset_pending = 1;
+    world_settings_activate_enhancements(&candidate);
     *settings = candidate;
     return WORLD_SETTINGS_OK;
 }
