@@ -9,6 +9,14 @@
 - Integer scaling, fullscreen, 12 CRT presets and optional underwater effects.
 - Arcade-style slowdown or Remove Slowdown; RecompLauncher import and settings support.
 
+<p align="center">
+  <img src="artwork/screenshots/title.png" alt="In the Hunt title screen and main menu" width="64%">
+</p>
+<p align="center">
+  <img src="artwork/screenshots/ice-cavern.png" alt="Submarine combat beneath the ice" width="49%">
+  <img src="artwork/screenshots/minefield.png" alt="Navigating an underwater minefield" width="49%">
+</p>
+
 ## Play
 
 **Requires Windows 10/11 x64 and your own World `inthunt.zip` or `inthunt.7z` ROM archive.** No game data is included; Japanese/US sets are unsupported.
