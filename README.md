@@ -1,45 +1,39 @@
 # IN THE HUNT
 
-An unofficial native Windows port of Irem's 1993 submarine shooter. Play all six stages, both endings and local two-player co-op.
+**0.9.0 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
 
-[**Download for Windows x64**](https://github.com/meathax/inthehunt/releases/download/v0.1.0-rc.2/InTheHunt-Windows-x64.zip) · [All releases](https://github.com/meathax/inthehunt/releases) · [Release notes](RELEASE-NOTES.md)
+[**Download for Windows**](https://github.com/meathax/inthehunt/releases/download/v0.9.0/InTheHunt-Windows-x64.zip) · [Release notes](RELEASE-NOTES.md) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
-## Highlights
+- All six stages, both endings and local two-player co-op.
+- Keyboard and Xbox-style controllers, saved settings and pause menus.
+- Integer scaling, fullscreen, 12 CRT presets and optional underwater effects.
+- Arcade-style slowdown or Remove Slowdown; RecompLauncher import and settings support.
 
-- Keyboard and Xbox-style controllers, with pause menus and saved settings.
-- Integer scaling, fullscreen and 12 CRT presets.
-- Optional underwater lighting, reflections, particles and smoother motion.
-- Choose arcade-style slowdown or Remove Slowdown.
-- RecompLauncher setup and settings support; catalogue listing and live launcher testing remain pending.
+## Play
 
-## Install and play
+**Requires Windows 10/11 x64 and your own World `inthunt.zip` or `inthunt.7z` ROM archive.** No game data is included; Japanese/US sets are unsupported.
 
-**Requires:** Windows 10/11 x64 and your own World `inthunt.zip` or `inthunt.7z` ROM archive. Japanese/US sets are unsupported. **No game data is included.** CRT presets need Direct3D 12; no Python or compiler is needed for the Windows package.
+1. Download **InTheHunt-Windows-x64.zip** and extract everything.
+2. Open **play.cmd**, select your ROM archive and choose **Start Game**.
 
-1. Download **InTheHunt-Windows-x64.zip** from [Releases](https://github.com/meathax/inthehunt/releases), not the source-code ZIP.
-2. Extract everything to a writable folder.
-3. Open **play.cmd**, select your ROM archive and choose **Start Game**.
-
-ROM import uses PowerShell 5+ and Windows `tar.exe`. After importing, you no longer need the archive.
+No Python or compiler needed. Import uses PowerShell 5+ and Windows `tar.exe`; CRT presets need Direct3D 12.
 
 ## Controls
 
-| Action | Player 1 | Player 2 | Xbox-style controller |
+| Action | Player 1 | Player 2 | Xbox-style pad |
 |---|---|---|---|
 | Move | Arrows | W A S D | D-pad / left stick |
 | Fire | Z / X | G / H | A / B |
-| Insert coin | 5 | 6 | Back |
+| Coin | 5 | 6 | Back |
 | Start / join | 1 | 2 | A |
-| Pause / options | F1 / Esc | F1 / Esc | Start |
+| Options | F1 / Esc | F1 / Esc | Start |
 
-Open **Options** for video, sound, difficulty and enhancements. Q/E or shoulder buttons change tabs. Settings save when the menu closes. Other controllers need an XInput-compatible mapping.
+## Make it yours
 
-## Enhancements
-
-**Off by default.** Turn on **Options → Enhance → Enhancements**, then choose the effects you like. CRT presets are under **Video**.
+Open **Options** for video, sound, difficulty and enhancements. Effects are **off by default** to preserve the arcade picture. Enable lighting, reflections, particles and more under **Enhance**.
 
 <details>
-<summary>Each enhancement at a glance</summary>
+<summary>Every enhancement at a glance</summary>
 
 | Option | Effect |
 |---|---|
@@ -81,15 +75,15 @@ Open **Options** for video, sound, difficulty and enhancements. Q/E or shoulder 
 
 </details>
 
-Smooth Scroll and Motion X2 require compatible scaling and cannot run with CRT presets. Motion X2 needs a supported 120 Hz+ display. Effects can reduce performance; enable them gradually.
+CRT presets are under **Video**. Smooth Scroll and Motion X2 cannot run with CRT; Motion X2 needs a supported 120 Hz+ display. Effects can reduce performance.
 
-## Updates and support
+## Updates & beta status
 
-Back up **`.local/world`** (imported data and settings). Extract updates into a new folder, then copy that directory across. Keep the old installation until the update works.
+To update, back up **`.local/world`**, extract the new version into a fresh folder and copy that directory across.
 
-**Preview build:** arcade slowdown is approximate; live launcher, audio and controller testing is still incomplete. [Report a problem](https://github.com/meathax/inthehunt/issues) with your version, hardware, stage and enabled effects. Do not upload ROMs.
+Nearly feature-complete. Arcade slowdown is approximate; live launcher, audio, GPU presentation and physical-controller testing remain incomplete. RecompLauncher catalogue listing is pending. Include your version, hardware, stage and enabled effects when reporting bugs; never upload ROMs.
 
-## Building and credits
+## Build & credits
 
 [Build instructions](tools/BUILDING.md) · [Dependency licences](LICENSES)
 

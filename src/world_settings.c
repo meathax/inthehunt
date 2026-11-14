@@ -285,6 +285,10 @@ static int write_settings(FILE *file, const WorldSettings *settings)
 WorldSettingsStatus world_settings_save(const char *path, const WorldSettings *settings)
 {
     if (!world_settings_valid(settings)) return WORLD_SETTINGS_INVALID;
+    /* All save paths, including menu changes/reset, preserve newer formats. */
+    WorldSettings existing;
+    if (world_settings_load(path, &existing) == WORLD_SETTINGS_NEWER_VERSION)
+        return WORLD_SETTINGS_NEWER_VERSION;
     wchar_t *destination = wide_path(path);
     if (!destination) return WORLD_SETTINGS_INVALID;
     size_t capacity = wcslen(destination) + 80;

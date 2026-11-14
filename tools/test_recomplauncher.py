@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--schema', type=Path, required=True)
     parser.add_argument('--settings-test', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--package', type=Path, default=ROOT / '.local/release/InTheHunt-Windows-x64.zip')
     args = parser.parse_args()
     import jsonschema
     import pefile
@@ -72,8 +73,8 @@ def main():
             saved = read_config()
             assert all(saved[k] == v for k, v in values.items()), values
             checks += 1
-    install = out / 'install with spaces & symbols'
-    package = ROOT / '.local/release/InTheHunt-Windows-x64.zip'
+    install = out / 'install with spaces & symbols \u6f22 \u03a9'
+    package = args.package.resolve()
     with zipfile.ZipFile(package) as archive:
         assert archive.testzip() is None
         assert 'recomplauncher.json' in archive.namelist()

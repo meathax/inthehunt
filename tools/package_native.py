@@ -1,9 +1,11 @@
 """Build the portable native Windows ZIP from the compiled host and launcher."""
 from pathlib import Path
+import argparse
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {
+    "VERSION": "VERSION",
     "recomplauncher.json": "recomplauncher.json",
     "InTheHunt-Setup.exe": ".local/native/InTheHunt-Setup.exe",
     "tools/recomplauncher_setup.ps1": "tools/recomplauncher_setup.ps1",
@@ -16,6 +18,7 @@ FILES = {
     "tools/world_regions.json": "tools/world_regions.json",
     "tools/world_native.ps1": "tools/world_native.ps1",
     "README.md": "README.md",
+    "tools/BUILDING.md": "tools/BUILDING.md",
     "RELEASE-NOTES.md": "RELEASE-NOTES.md",
     "tools/get_border_art.ps1": "tools/get_border_art.ps1",
     # CRT shader runtime: librashader (MPL-2.0, unmodified v0.12.0 build) and the DirectX Shader Compiler.
@@ -59,12 +62,17 @@ game code with native music and sample playback.
 """
 
 if __name__ == "__main__":
-    output = ROOT / ".local/release/InTheHunt-Windows-x64.zip"
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--native-dir', type=Path, default=ROOT / '.local/native')
+    parser.add_argument('--output', type=Path, default=ROOT / '.local/release/InTheHunt-Windows-x64.zip')
+    args = parser.parse_args()
+    output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".tmp")
     with ZipFile(temporary, "w", ZIP_DEFLATED) as archive:
         for target, source in FILES.items():
-            archive.write(ROOT / source, target)
+            path = args.native_dir / Path(source).name if source.startswith('.local/native/') else ROOT / source
+            archive.write(path, target)
         for f in sorted((ROOT / "docs").rglob("*")):
             if f.is_file() and f.suffix in {".md", ".png", ".json"}:
                 archive.write(f, f.relative_to(ROOT).as_posix())

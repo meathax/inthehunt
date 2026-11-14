@@ -22,6 +22,7 @@
 #include "world_ym.h"
 #include "world_clock.h"
 #include "world_settings.h"
+#include "world_file.h"
 #include "world_menu.h"
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
@@ -160,6 +161,18 @@ static void scene_submit(void)
     world_scene_submit(&frame);
 }
 
+/* The default arcade picture does not consume decoded enhancement layers. */
+static int scene_live_active;
+static void scene_submit_live(void)
+{
+    if (!settings.fx_enable) { scene_live_active = 0; return; }
+    if (!scene_live_active) {
+        world_scene_reset(); /* No interpolation or stale particles across disabled frames. */
+        scene_live_active = 1;
+    }
+    scene_submit();
+}
+
 static WorldSceneFx scene_effects(void)
 {
     WorldSceneFx fx = {0};
@@ -280,6 +293,14 @@ static void apply_border(void)
 /* Runs the open menu for one frame: the pause menu on the paused picture,
  * the title menu (drawn by present_game over the live game). Returns the
  * world_menu_update result bits. */
+static unsigned launch_fullscreen_override, desktop_fullscreen;
+static WorldSettingsStatus save_runtime_settings(void)
+{
+    WorldSettings saved = settings;
+    if (launch_fullscreen_override) saved.fullscreen = desktop_fullscreen;
+    return world_settings_save(settings_path, &saved);
+}
+
 static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggle, unsigned rising, int gamepad)
 {
     if (toggle & 2) held |= WORLD_MENU_BACK;           /* Esc steps back inside the menu */
@@ -289,11 +310,17 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         result = WORLD_MENU_RESUME | (menu.dirty ? WORLD_MENU_SAVE : 0);
     } else
         result = world_menu_update(&menu, &settings, held, gamepad, GetTickCount());
-    if (result & WORLD_MENU_DISPLAY) world_window_set_display(settings.fullscreen, settings.window_scale);
+    if (result & WORLD_MENU_DISPLAY) {
+        launch_fullscreen_override = 0; /* An explicit player choice supersedes launch mode. */
+        world_window_set_display(settings.fullscreen, settings.window_scale);
+    }
     if (result & WORLD_MENU_BORDER) apply_border();
-    if (result & WORLD_MENU_VIEW) apply_view();
+    if (result & WORLD_MENU_VIEW) {
+        apply_view();
+        scene_submit_live(); /* Refresh immediately for a paused-menu preview. */
+    }
     if (result & WORLD_MENU_TIMING) world_clock_request_mode(&board_clock, settings.timing_mode);
-    if ((result & WORLD_MENU_SAVE) && world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
+    if ((result & WORLD_MENU_SAVE) && save_runtime_settings() != WORLD_SETTINGS_OK)
         fprintf(stderr, "Could not save native settings.\n");
     if ((result & WORLD_MENU_QUIT) || menu.title) return result;
     if (menu.open && menu.peek) {
@@ -317,7 +344,7 @@ static int load(const char *dir, const char *name, void *data, size_t size)
     char path[4096];
     int n = snprintf(path, sizeof path, "%s/%s", dir, name);
     if (n < 0 || (size_t)n >= sizeof path) return 0;
-    FILE *f = fopen(path, "rb");
+    FILE *f = world_fopen(path, "rb");
     if (!f) return 0;
     int ok = fread(data, 1, size, f) == size && fgetc(f) == EOF && !ferror(f);
     fclose(f);
@@ -352,7 +379,7 @@ static void sound_unrecovered(void *context, uint16_t task, uint8_t state, uint1
     char path[4096];
     int n = snprintf(path, sizeof path, "%s/native-audio-stops.tsv", data_directory);
     if (n < 0 || (size_t)n >= sizeof path) return;
-    FILE *f = fopen(path, "a");
+    FILE *f = world_fopen(path, "a");
     if (!f) return;
     fprintf(f, "%lu\t%04x\t%02x\t%04x\n", ticks, task, state, cursor);
     fclose(f);
@@ -600,7 +627,7 @@ static void record_stop(const char *dir)
     char path[4096];
     int n = snprintf(path, sizeof path, "%s/native-stops.tsv", dir);
     if (n < 0 || (size_t)n >= sizeof path) return;
-    FILE *f = fopen(path, "a");
+    FILE *f = world_fopen(path, "a");
     if (!f) return;
     fprintf(f, "%lu\tstage=%u\t%s\n", ticks, word(ram + 0x84), failure);
     fclose(f);
@@ -619,7 +646,7 @@ static void headless_shot(const char *dir, const char *name)
     char path[4096];
     int n = snprintf(path, sizeof path, "%s/headless-%s.bmp", dir, name);
     if (n < 0 || (size_t)n >= sizeof path) return;
-    FILE *f = fopen(path, "wb");
+    FILE *f = world_fopen(path, "wb");
     if (!f) return;
     BITMAPFILEHEADER file;
     BITMAPINFOHEADER info;
@@ -703,7 +730,7 @@ static unsigned headless_autopilot(unsigned fallback)
 
 static void headless_run(const char *dir, const char *script_path)
 {
-    FILE *script = fopen(script_path, "r");
+    FILE *script = world_fopen(script_path, "r");
     if (!script) {
         snprintf(failure, sizeof failure, "Cannot open the headless input script.");
         return;
@@ -715,7 +742,7 @@ static void headless_run(const char *dir, const char *script_path)
     int fields = fscanf(script, "%lu %31s", &at, first);
     char trace_path[4096];
     snprintf(trace_path, sizeof trace_path, "%s/headless-trace.txt", dir);
-    FILE *trace = fopen(trace_path, "w");
+    FILE *trace = world_fopen(trace_path, "w");
     /* Debug acceleration only: WORLD_SNAPSHOT_LOAD=path resumes from a
        snapshot; WORLD_SNAPSHOT_SAVE=frame,path writes one. Not an exact
        machine state (YM/PCM and per-pass dispatch caches are not kept). */
@@ -728,7 +755,7 @@ static void headless_run(const char *dir, const char *script_path)
         if (save_path) ++save_path;
     }
     if (load_path) {
-        FILE *f = fopen(load_path, "rb");
+        FILE *f = world_fopen(load_path, "rb");
         if (!f || fread(ram, sizeof ram, 1, f) != 1 || fread(tiles, sizeof tiles, 1, f) != 1 ||
             fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
             fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
@@ -752,7 +779,7 @@ static void headless_run(const char *dir, const char *script_path)
             last_stage = word(ram + 0x84);
             char path[4096];
             snprintf(path, sizeof path, "%s/stage%02u-%u.snap", stage_dir, stage_count++, last_stage);
-            FILE *f = fopen(path, "wb");
+            FILE *f = world_fopen(path, "wb");
             if (f) {
                 fwrite(ram, sizeof ram, 1, f);
                 fwrite(tiles, sizeof tiles, 1, f);
@@ -889,7 +916,7 @@ static void headless_run(const char *dir, const char *script_path)
                     fprintf(stderr, "CRT preset %u (%s) failed: %s\n", i, i ? world_gpu_preset_name[i - 1] : "OFF", error);
                     continue;
                 }
-                FILE *f = fopen(path, "wb");
+                FILE *f = world_fopen(path, "wb");
                 if (!f) continue;
                 BITMAPFILEHEADER file = {0};
                 BITMAPINFOHEADER info = {0};
@@ -945,7 +972,7 @@ static void headless_run(const char *dir, const char *script_path)
             if (border_failed) break;
         }
         if (save_path && ticks >= save_at) {
-            FILE *f = fopen(save_path, "wb");
+            FILE *f = world_fopen(save_path, "wb");
             if (f) {
                 fwrite(ram, sizeof ram, 1, f);
                 fwrite(tiles, sizeof tiles, 1, f);
@@ -984,7 +1011,7 @@ static void headless_run(const char *dir, const char *script_path)
         if (!scroll_log_checked) {
             scroll_log_checked = 1;
             const char *path = getenv("WORLD_SCROLL_LOG");
-            if (path) scroll_log = fopen(path, "w");
+            if (path) scroll_log = world_fopen(path, "w");
         }
         if (scroll_log)
             for (unsigned long f = before; f < ticks; ++f)
@@ -1027,7 +1054,7 @@ static void headless_run(const char *dir, const char *script_path)
             const char *micro = getenv("WORLD_SCENE_MICRO");
             if (micro) settings.fx_sparks = settings.fx_impact_motes = atoi(micro) != 0;
             if (!scene_stats && getenv("WORLD_SCENE_STATS")) {
-                scene_stats = fopen(getenv("WORLD_SCENE_STATS"), "w");
+                scene_stats = world_fopen(getenv("WORLD_SCENE_STATS"), "w");
                 if (scene_stats) fputs("frame,half,render_ms,waterfx_draw_ms,stage,boss,waterline,wakes,debris,silt,splashes,sparks,impact_motes\n", scene_stats);
             }
             scene_submit();
@@ -1097,7 +1124,7 @@ static void headless_run(const char *dir, const char *script_path)
             shot_source = pixels;
             char log_path[4096];
             snprintf(log_path, sizeof log_path, "%s/headless-scroll.txt", dir);
-            FILE *log = fopen(log_path, "a");
+            FILE *log = world_fopen(log_path, "a");
             if (log) {
                 fprintf(log, "%06lu stage %u", ticks, word(ram + 0x84));
                 for (unsigned i = 0; i < 3; ++i)
@@ -1116,7 +1143,7 @@ done:
     /* Test-only: the live actor list with its key words, for diagnosing runs. */
     char path[4096];
     snprintf(path, sizeof path, "%s/headless-actors.txt", dir);
-    FILE *list = fopen(path, "w");
+    FILE *list = world_fopen(path, "w");
     if (list) {
         fprintf(list, "frame %lu master %04x stage %u B700 %04x B70A %04x B70C %04x 26E %04x 262 %04x 264 %04x B8C2 %04x 28C %04x P1 %04x P2 %04x 25C %04x\n",
                 ticks, word(ram + 0x80), word(ram + 0x84), word(ram + 0xb700), word(ram + 0xb70a),
@@ -1196,7 +1223,7 @@ static int play_tick(uint16_t pads, uint16_t system)
     return tick(pads, system);
 }
 
-int main(int argc, char **argv)
+static int run_game(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".local/world";
     data_directory = dir;
@@ -1218,7 +1245,11 @@ int main(int argc, char **argv)
         timing_override = 1;
     }
     const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
-    if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) settings.fullscreen = 1;
+    if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) {
+        desktop_fullscreen = settings.fullscreen;
+        launch_fullscreen_override = 1;
+        settings.fullscreen = 1;
+    }
     world_clock_reset(&board_clock, settings.timing_mode);
     if (!load(dir, "maincpu.bin", rom, sizeof rom) || !load(dir, "gfx1.bin", gfx1, sizeof gfx1)
         || !load(dir, "gfx2.bin", gfx2, sizeof gfx2)
@@ -1249,7 +1280,7 @@ int main(int argc, char **argv)
     }
     if ((timing_override || settings_status == WORLD_SETTINGS_MISSING) &&
         settings_status != WORLD_SETTINGS_NEWER_VERSION &&
-        world_settings_save(settings_path, &settings) != WORLD_SETTINGS_OK)
+        save_runtime_settings() != WORLD_SETTINGS_OK)
         fprintf(stderr, "Could not save native settings.\n");
     fprintf(stderr, "Timing policy: %s (pass costs fitted to MAME measurements).\n",
             world_timing_mode_label(settings.timing_mode));
@@ -1301,7 +1332,7 @@ int main(int argc, char **argv)
     world_menu_open_title(&menu, 0, 0, GetTickCount());
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
-    FILE *pacing_log = getenv("WORLD_PACING_LOG") ? fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
+    FILE *pacing_log = getenv("WORLD_PACING_LOG") ? world_fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
     double run_seconds = getenv("WORLD_RUN_SECONDS") ? atof(getenv("WORLD_RUN_SECONDS")) : 0.0;
     LONGLONG run_start = now.QuadPart;
     while (world_window_poll(&pads, &system)) {
@@ -1468,7 +1499,7 @@ int main(int argc, char **argv)
             }
             if (!lock_wait) {
                 memcpy(live, pixels, sizeof live);
-                scene_submit();
+                scene_submit_live();
                 live_ticks = ticks;
                 lock_span = lock_next_span;
                 lock_wait = lock_k * lock_span;
@@ -1509,7 +1540,7 @@ int main(int argc, char **argv)
                 deadline += period * elapsed_board_frames;
                 ticks += elapsed_board_frames;
                 draw();
-                scene_submit();
+                scene_submit_live();
                 scene_alpha = 1.0;
                 counted += elapsed_board_frames;
                 fresh = 1;
@@ -1574,3 +1605,22 @@ finished:
     return 0;
 }
 
+
+/* Decode arguments once, losslessly, before settings, ROM or shader access. */
+int wmain(int argc, wchar_t **wide_argv)
+{
+    char **argv = calloc((size_t)argc + 1, sizeof *argv);
+    if (!argv) return 1;
+    int result = 1, converted = 0;
+    for (int i = 0; i < argc; ++i) {
+        int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_argv[i], -1, NULL, 0, NULL, NULL);
+        if (!n || !(argv[i] = malloc((size_t)n))) goto cleanup;
+        ++converted;
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_argv[i], -1, argv[i], n, NULL, NULL)) goto cleanup;
+    }
+    result = run_game(argc, argv);
+cleanup:
+    for (int i = 0; i < converted; ++i) free(argv[i]);
+    free(argv);
+    return result;
+}

@@ -220,7 +220,7 @@ function Build-WorldNative {
             & $Compiler c++ -target x86_64-windows-gnu $standard -O2 -c (Join-Path $Root $source) -o $object
             if ($LASTEXITCODE) { throw "Native C++ build failed for $source." }
         }
-        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra @sources @objects $resource -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -ld3d12 -ldxgi -ld3dcompiler_47 -lc++
+        & $Compiler cc -target x86_64-windows-gnu -std=c99 -O2 -s -Wall -Wextra -municode @sources @objects $resource -o $temp -lgdi32 -luser32 -lkernel32 -lwinmm -lole32 -lwindowscodecs -luuid -ld3d12 -ldxgi -ld3dcompiler_47 -lc++
         if ($LASTEXITCODE) { throw 'Native Windows build failed.' }
         try {
             Move-Item -Force -LiteralPath $temp -Destination $target -ErrorAction Stop

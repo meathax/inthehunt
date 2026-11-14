@@ -384,6 +384,10 @@ static void poll_controller(unsigned player, uint16_t *held, uint16_t *buttons)
     if (retry_at[player] && (LONG)(now - retry_at[player]) < 0) return;
     XINPUT_STATE state;
     if (controller_state(player, &state) != ERROR_SUCCESS) {
+        /* Menu navigation also consumes these cached levels. Do not leave a
+           held direction or Start behind when the controller disconnects. */
+        pad_buttons[player] = 0;
+        pad_lx[player] = pad_ly[player] = 0;
         retry_at[player] = now + 1000;
         return;
     }
