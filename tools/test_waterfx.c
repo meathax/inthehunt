@@ -71,7 +71,7 @@ int main(void) {
     wf_pixel(picture,120,50,185,230,240,128,0);
     assert(picture[50*W+120]!=clean[50*W+120]); /* airborne spray over city backdrop */
     wf_pixel(picture,120,HUD,185,230,240,128,0);
-    assert(picture[HUD*W+120]==clean[HUD*W+120]);
+    assert(picture[HUD*W+120]!=clean[HUD*W+120]);
     layer_on[0]=0;
     for(int i=0;i<12;i++)waterfx_draw(picture,&fx,0.1f);assert(!active(WF_WAKE));
     setup(1);p=wf_spawn(WF_DEBRIS,120,140,3);p->vy=40;p->size=2;
@@ -159,7 +159,7 @@ int main(void) {
     for(int i=0;i<PN;++i){total[0][i]=(i%19)*0.03f;total[1][i]=(i%23)*0.02f;
         total[2][i]=(i%29)*0.01f;light_dx[i]=(i%7)-3;light_dy[i]=(i%11)-5;sun_vis[i]=(i%5)*0.25f;}
     cache_transport();
-    for(int y=0;y<HUD;++y)for(int x=0;x<W;++x){
+    for(int y=0;y<H;++y)for(int x=0;x<W;++x){
         PixelLight *p=&pixel_light[y*W+x];float dx=probe_sample(light_dx,x,y),dy=probe_sample(light_dy,x,y);
         float inv=1.0f/sqrtf(dx*dx+dy*dy+0.0001f);
         assert(fabsf(p->r-probe_sample(total[0],x,y))<0.00001f);

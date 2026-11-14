@@ -1,6 +1,6 @@
 /* Bounded presentation-only water volumes.
  * No reads/writes of gameplay actors. Native tile/sprite priorities always win. */
-enum { CINEMA_EVENTS=24, VW=80, VH=56 };
+enum { CINEMA_EVENTS=24, VW=W/4, VH=H/4 };
 typedef struct {float x,y,age,life,power; int seabed;} CinemaEvent;
 static CinemaEvent cinema_events[CINEMA_EVENTS];
 static uint32_t water_volume[VW*VH];
@@ -11,7 +11,7 @@ static MaterialLight material_light[N];
 static void material_prepare(void)
 {
     if(!g.fx->materials)return;
-    for(int y=0;y<HUD;++y)for(int x=0;x<W;++x){
+    for(int y=0;y<H;++y)for(int x=0;x<W;++x){
         PixelLight *p=&pixel_light[y*W+x];MaterialLight *l=&material_light[y*W+x];
         float energy=transport_valid && g.fx->lights ? p->r+p->g+p->b : 0;
         float blend=energy/(1+energy);
@@ -62,7 +62,7 @@ static void cinema_scroll(int dx,int dy)
 static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
 {
     if (!(fx->pressure || fx->sediment_light || fx->water_volume || fx->aftermath) ||
-        y<0 || y>=HUD || (g.waterline>=0 && y<g.waterline)) return;
+        y<0 || y>=H || (g.waterline>=0 && y<g.waterline)) return;
     int slot=-1;
     for(int i=0;i<CINEMA_EVENTS;++i){
         CinemaEvent *p=&cinema_events[i];
@@ -83,7 +83,7 @@ static void cinema_update(float dt)
         CinemaEvent *p=&cinema_events[i];
         if(p->life<=0)continue;
         p->age+=dt;
-        if(p->age>=p->life || p->x<-80 || p->x>W+80 || p->y>HUD+40)p->life=0;
+        if(p->age>=p->life || p->x<-80 || p->x>W+80 || p->y>H+40)p->life=0;
     }
     if(!fx->pressure && !fx->sediment_light && !fx->water_volume && !fx->aftermath)
         memset(cinema_events,0,sizeof cinema_events);
@@ -94,8 +94,8 @@ static void cinema_update(float dt)
             if(p->life<=0 || p->age>.65f)continue;
             float radius=5+p->age*120,band=5+p->age*5,amp=(1-p->age/.65f)*7*p->power;
             int x0=clampi((int)(p->x-radius-band),0,W-1),x1=clampi((int)(p->x+radius+band),0,W-1);
-            int y0=clampi((int)(p->y-radius-band),g.waterline<0?0:clampi(g.waterline,0,HUD-1),HUD-1);
-            int y1=clampi((int)(p->y+radius+band),0,HUD-1);
+            int y0=clampi((int)(p->y-radius-band),g.waterline<0?0:clampi(g.waterline,0,H-1),H-1);
+            int y1=clampi((int)(p->y+radius+band),0,H-1);
             for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
                 float dx=x-p->x,dy=y-p->y,d2=dx*dx+dy*dy;
                 if(d2<(radius-band)*(radius-band)||d2>(radius+band)*(radius+band))continue;
@@ -140,7 +140,7 @@ static void cinema_update(float dt)
 
 static uint32_t cinema_background(uint32_t c,int layer,int x,int y)
 {
-    if(layer<1 || layer>2 || y>=HUD || (g.waterline>=0 && y<g.waterline))return c;
+    if(layer<1 || layer>2 || y>=H || (g.waterline>=0 && y<g.waterline))return c;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
     if(g.fx->ocean_depth){int f=layer==2?(g.fx->haze?12:36):5;r+=(10-r)*f/256;gr+=(46-gr)*f/256;b+=(72-b)*f/256;}
     if(g.fx->water_volume){unsigned v=water_volume[(y/4)*VW+x/4];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
@@ -168,7 +168,7 @@ static void cinema_draw(uint32_t *out)
                     int d=dx*dx+dy*dy*4;if(d>=radius*radius)continue;
                     int curl=S(dx*27+dy*49+(int)(p->age*140)+i*33);
                     int a=alpha*(radius*radius-d)/(radius*radius)*(210+curl/6)/256;
-                    int x=cx+dx,y=cy+dy;if(x<0||x>=W||y<0||y>=HUD)continue;
+                    int x=cx+dx,y=cy+dy;if(x<0||x>=W||y<0||y>=H)continue;
                     float hot=p->age<.5f?(1-p->age*2)*p->power:0;
                     PixelLight *l=&pixel_light[y*W+x];
                     int r=70+(int)(hot*120)+(transport_valid?(int)(l->r*45):0);

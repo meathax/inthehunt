@@ -1,8 +1,8 @@
 # IN THE HUNT
 
-**0.9.1 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
+**0.9.2 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
 
-[**Download for Windows**](https://github.com/meathax/inthehunt/releases/download/v0.9.1/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/tag/v0.9.1) · [Report a bug](https://github.com/meathax/inthehunt/issues)
+[**Download for Windows**](https://github.com/meathax/inthehunt/releases/download/v0.9.2/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/tag/v0.9.2) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 - All six stages, both endings and local two-player co-op.
 - Keyboard and Xbox-style controllers, saved settings and pause menus.

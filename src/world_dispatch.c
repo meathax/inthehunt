@@ -11059,7 +11059,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         /* fall through */
     case 0x14f7a: {
         uint16_t boss = s2b_ancestor(ram, actor, 1);
-        if (ram[boss + 0x0a] & 1) {
+        if (ram[boss + 0x0a] & 2) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -11074,7 +11074,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         uint16_t boss = s2b_ancestor(ram, actor, 1);
         write_word(ram, actor + 0x21, read_word(ram, boss + 0x21) + read_word(ram, actor + 0x31));
         write_word(ram, actor + 0x24, read_word(ram, boss + 0x24) + read_word(ram, actor + 0x34));
-        if (ram[boss + 0x0a] & 1) {
+        if (ram[boss + 0x0a] & 2) {
             write_word(ram, actor + 0x26, 0);
             surface_enemy_death_blast(ram, rom, actor);
             finish_animation(ram, actor);
@@ -11127,7 +11127,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     }
     case 0x150f9: {
         uint16_t boss = s2b_ancestor(ram, actor, 1);
-        if (ram[boss + 0x0a] & 1) {
+        if (ram[boss + 0x0a] & 2) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -13047,7 +13047,7 @@ static int s4_offscreen(const uint8_t *ram, uint16_t actor)
 static void s4_eel_follow(uint8_t *ram, uint16_t actor)
 {
     uint16_t parent = s5_parent(ram, actor);
-    if ((ram[parent + 0x0a] & 1) && s4_offscreen(ram, actor)) {
+    if ((ram[parent + 0x0a] & 2) && s4_offscreen(ram, actor)) {
         finish_animation(ram, actor);
         return;
     }
@@ -13061,7 +13061,7 @@ static void s4_eel_follow(uint8_t *ram, uint16_t actor)
 /* B000:DC2C. */
 static void s4_eel_parent_dead(uint8_t *ram, uint16_t actor)
 {
-    if (ram[s5_parent(ram, actor) + 0x0a] & 1) {
+    if (ram[s5_parent(ram, actor) + 0x0a] & 2) {
         write_word(ram, actor, 0xd647);
         write_word(ram, actor + 2, 0xb000);
     }
@@ -18500,7 +18500,8 @@ stage2_jumper_terrain:
         world_acquire_resource(ram, actor, 0x57);
         write_word(ram, actor + 0x42, 64);
         write_word(ram, actor, 0x8727);
-        break;
+        /* Original 8715 falls straight into the first scrolling tick. */
+        /* fall through */
     case 0xa8727:
         scroll_actor(ram, actor, 0xb72a);
         if (!decrement(ram, actor + 0x42)) write_word(ram, actor, 0x8737);
@@ -23346,8 +23347,6 @@ stage2_jumper_terrain:
         write_word(ram, actor, 0x76a6);
         break;
     }
-    case 0xb6744:
-    case 0xb6781:
     /* B000:6150 (init), 6176 and 643D: the gun flash that follows its
        parent, releases the B000:6272 shell, then plays a closing animation. */
     case 0xb6150:
@@ -23531,6 +23530,10 @@ stage2_jumper_terrain:
         }
         break;
     }
+    /* Hull covers and animated underside belong to the attachment/contact
+       path (original B6744/B6781), not the unrelated B6150 gun flash. */
+    case 0xb6744:
+    case 0xb6781:
     case 0xb64b6: {
         if (!warship_attachment(ram, actor)) break;
         uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
@@ -23621,6 +23624,112 @@ stage2_jumper_terrain:
         spawn_kill_blast(ram, actor);
         write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x50a4 + read_word(ram, actor + 0x60))));
         write_word(ram, actor, 0x6928);
+        break;
+    }
+    /* B67F3/B6844: exposed underside launcher, including its burst cycle. */
+    case 0xb67f3:
+    case 0xb6844: {
+        const uint8_t *bank = main_rom + 0xb0000;
+        if (address == 0xb67f3) {
+            write_word(ram, actor + 0x26, 0x300);
+            write_word(ram, actor + 0x36, 0x300);
+            write_word(ram, actor + 0x40, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor + 0x46, 6);
+            uint16_t cfg = 0x55d2 + read_word(bank, 0x5512 +
+                (read_word(ram, actor + 0x1e) & 32) + read_word(ram, 0x8c));
+            write_word(ram, actor + 0x50, read_word(bank, cfg));
+            write_word(ram, actor + 0x52, read_word(bank, cfg));
+            write_word(ram, actor + 0x2e, read_word(bank, cfg + 2));
+            write_word(ram, actor + 0x54, 2);
+            write_word(ram, actor + 0x56, 0);
+            write_word(ram, actor, 0x6844);
+        }
+        if (!warship_attachment(ram, actor)) break;
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            write_word(ram, actor + 0x2a, read_word(bank, 0x5418 +
+                (frame & 6) + read_word(ram, actor + 0x60)));
+            write_word(ram, actor + 0x44, read_word(bank, 0x5430 + read_word(ram, actor + 0x46)));
+            write_word(ram, actor + 0x40, frame + 2);
+        }
+        queue_sprite(ram, main_rom, actor, 0);
+        if (read_word(ram, actor + 0x46) && !decrement(ram, actor + 0x42)) {
+            write_word(ram, actor + 0x42, 0x40);
+            write_word(ram, actor + 0x46, read_word(ram, actor + 0x46) - 2);
+        }
+        int fire = 0;
+        if (read_word(ram, actor + 0x50)) fire = !decrement(ram, actor + 0x50);
+        else if (!decrement(ram, actor + 0x54)) {
+            write_word(ram, actor + 0x54, 2);
+            uint16_t count = read_word(ram, actor + 0x56) + 1;
+            if (count >= 60) {
+                write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
+                count = 0;
+            }
+            write_word(ram, actor + 0x56, count);
+            fire = 1;
+        }
+        if (fire) {
+            uint16_t shot = world_spawn_child(ram, actor, 0x696e);
+            if (shot) {
+                write_word(ram, shot + 2, 0xb000);
+                write_word(ram, shot + 0x24, read_word(ram, actor + 0x24) - 8);
+                write_word(ram, shot + 0x3a, -read_word(ram, actor + 0x2e));
+                write_word(ram, shot + 0x42, (uint16_t)(read_word(ram, actor + 0x56) + 2) >> 1);
+                write_word(ram, shot + 0x40, read_word(ram, actor + 0x56) & 15);
+            }
+        }
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_player_contact(ram, main_rom, actor);
+        if (read_word(ram, actor + 0x26)) {
+            ram[actor + 0x0d] = 0;
+            hit = world_projectile_contact(ram, main_rom, actor);
+            uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+            if (hit) ram[parent + 0x19] = (ram[parent + 0x19] & 1) + 32;
+        }
+        if (!read_word(ram, actor + 0x26)) {
+            world_award_score(ram, main_rom, actor, hit);
+            write_word(ram, actor + 0x2a, read_word(bank, 0x5438 + (read_word(ram, actor + 0x60) >> 2)));
+            write_word(ram, actor, 0x6928);
+        }
+        break;
+    }
+    /* B696E/B6998: the vertical burst follows its launcher's x coordinate. */
+    case 0xb696e:
+    case 0xb6998: {
+        if (!tiles) return 0;
+        if (address == 0xb696e) {
+            world_acquire_resource(ram, actor, 0x71);
+            ram[actor + 0x2d] = 0x29;
+            write_word(ram, actor + 0x3c, 0xf47b);
+            write_word(ram, actor + 0x26, 0x80);
+            write_word(ram, actor + 0x36, 0x80);
+            write_word(ram, actor + 0x2a, 0);
+            write_word(ram, actor + 0x44, 1);
+            write_word(ram, actor, 0x6998);
+        }
+        scroll_actor(ram, actor, 0xb71a);
+        uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+        write_word(ram, actor + 0x21, read_word(ram, parent + 0x21));
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
+        int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
+        if ((int16_t)y < top) { finish_animation(ram, actor); break; }
+        int draw = 1;
+        if (!decrement(ram, actor + 0x44)) {
+            uint16_t frame = read_word(ram, actor + 0x40);
+            draw = !(frame & 1);
+            if (draw) write_word(ram, actor + 0x2a, read_word(main_rom + 0xb0000, 0x5400 + (frame & 14)));
+            write_word(ram, actor + 0x44, 2);
+            write_word(ram, actor + 0x40, frame + 1);
+        }
+        if (draw) queue_sprite(ram, main_rom, actor, 1);
+        ram[actor + 0x0d] = 2;
+        world_player_contact(ram, main_rom, actor);
+        if (!decrement(ram, actor + 0x42) || (world_terrain_mask(ram, tiles + 0x4000, x, y - 8) & 0xff02))
+            finish_animation(ram, actor);
         break;
     }
     /* B000:6928: a destroyed gun. Further hits drain the hull pool at

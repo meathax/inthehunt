@@ -48,7 +48,7 @@ int main(void){
         else if(picture[y*3*W*3+x*3]!=plain[y*W+x])++changed;
     }
     assert(changed>0);puts("PASS: pressure change backdrop but preserve sprite positions/colours");
-    for(int y=HUD*3;y<H*3;++y)for(int x=0;x<W*3;++x)assert(picture[y*W*3+x]==plain[(y/3)*W+x/3]);
+
     /* Foreground priority remains at its arcade coordinates under pressure refraction. */
     for(int y=61;y<HUD;++y)for(int x=0;x<W;++x){
         int i=(y+MARGIN)*LW+x+MARGIN;
@@ -136,7 +136,7 @@ int main(void){
     g.k=1;g.ow=W;g.oh=H;g.shake_x=g.shake_y=0;
     for(int i=0;i<N;++i){water_map[i]=255;sprite_px[i]=NONE;picture[i]=0xff123456;}
     sprite_px[100*W+100]=1;add_block(picture,100,100,1,200,200,200);assert(picture[100*W+100]==0xff123456);
-    add_block(picture,100,HUD,1,200,200,200);assert(picture[HUD*W+100]==0xff123456);
+    add_block(picture,100,HUD,1,200,200,200);assert(picture[HUD*W+100]!=0xff123456);
     puts("PASS: immediate toggles, repeat-refresh cache, scene-cut reset, swept terrain, pressure precedence and particle occlusion");
     fixture();fx=(WorldSceneFx){.materials=1,.vivid=1,.vignette=1,.surface=1};
     static uint32_t reference[N*9];
@@ -145,5 +145,33 @@ int main(void){
     scene_cache_valid=0;world_scene_render(picture,3,1,&fx,24000);assert(!memcmp(reference,picture,sizeof reference));
     puts("PASS: cached refresh and forced full rebuild produce identical material/colour/surface pixels");
     puts("PASS: hue-preserving shoulders/output, water path crossings, spectral attenuation, legacy parallax setting removal");
+    /* Opaque HUD glyphs stay exact, but their transparent gaps receive effects
+     * through the final row, including post-composite trails and particles. */
+    fixture();
+    for(int y=0;y<8;++y)for(int x=0;x<4;++x)pen_tile(3,x,y,6);
+    frame.layers[0].master=2;
+    frame.layers[2].scroll_y=(uint16_t)-136;
+    for(int row=45;row<47;++row)put16(test_tiles+0x8000+(row*64+10)*4,3);
+    put16(test_sprites,360-224);put16(test_sprites+4,0x8b);
+    world_scene_submit(&frame);
+    for(int y=0;y<H;++y){uint16_t indices[W];world_video_scanline(indices,y,test_tiles,test_gfx1,test_gfx2,test_sprites,frame.layers,frame.video_control);
+        for(int x=0;x<W;++x)plain[y*W+x]=test_colors[indices[x]&1023];}
+    for(int k=1;k<=MAXK;++k){
+        fx=(WorldSceneFx){0};world_scene_render(picture,k,1,&fx,32000);
+        for(int y=0;y<H*k;++y)for(int x=0;x<W*k;++x)assert(picture[y*W*k+x]==plain[(y/k)*W+x/k]);
+        fx=(WorldSceneFx){.depth=1,.vivid=1,.caustics=1,.trails=1,.snow=1};
+        world_scene_render(picture,k,1,&fx,32133);
+        world_scene_render(picture,k,1,&fx,32266);
+        for(int y=224*k;y<H*k;++y){
+            int changes=0;
+            for(int x=0;x<W*k;++x){
+                int glyph=(x<4*k), sprite=sprite_px[y*W*k+x]!=NONE;
+                if(glyph||sprite)assert(picture[y*W*k+x]==plain[(y/k)*W+x/k]);
+                else changes+=picture[y*W*k+x]!=plain[(y/k)*W+x/k];
+            }
+            assert(changes>W*k/2);
+        }
+    }
+    puts("PASS: effects reach every bottom row, opaque HUD tiles/sprites stay exact, transparent gaps remain enhanced at 1x-4x");
     return 0;
 }

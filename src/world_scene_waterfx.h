@@ -71,7 +71,7 @@ static WaterFx *wf_spawn(int kind, float x, float y, float life)
 static int wf_rock(float x, float y)
 {
     int ix = (int)x, iy = (int)y;
-    if (x < 0 || y < 0 || ix >= W || iy >= HUD) return 0;
+    if (x < 0 || y < 0 || ix >= W || iy >= H) return 0;
     return solid[(iy / 2) * PW + ix / 2];
 }
 
@@ -107,7 +107,7 @@ static void waterfx_impact(float x, float y)
  * Separate fixed pools and per-frame caps keep these independent of tracing. */
 static void waterfx_micro(float x, float y, int size, const WorldSceneFx *fx)
 {
-    if (y >= HUD || (g.waterline >= 0 && y < g.waterline)) return;
+    if (y >= H || (g.waterline >= 0 && y < g.waterline)) return;
     for (int kind=WF_SPARK;kind<=WF_MOTE;++kind) {
         if (!(kind==WF_SPARK ? fx->sparks : fx->impact_motes)) continue;
         int nearby=0;
@@ -132,7 +132,7 @@ static void waterfx_micro(float x, float y, int size, const WorldSceneFx *fx)
 
 static void waterfx_blast(float x, float y, int size, const WorldSceneFx *fx)
 {
-    if (y >= HUD || (g.waterline >= 0 && y < g.waterline)) return;
+    if (y >= H || (g.waterline >= 0 && y < g.waterline)) return;
     cinema_blast(x,y,size,fx);
     waterfx_micro(x, y, size, fx);
     if (fx->silt) waterfx_impact(x, y);
@@ -154,7 +154,7 @@ static void waterfx_blast(float x, float y, int size, const WorldSceneFx *fx)
 
 static void wf_crossing(float x, const WorldSceneFx *fx)
 {
-    if (!fx->splashes || g.waterline < 3 || g.waterline >= HUD - 4) return;
+    if (!fx->splashes || g.waterline < 3 || g.waterline >= H - 4) return;
     for (int i = wf_start[WF_SPLASH]; i < wf_start[WF_SPLASH+1]; ++i)
         if (waterfx[i].life > 0 && waterfx[i].age < 0.25f && fabsf(waterfx[i].x - x) < 18) return;
     WaterFx *p = wf_spawn(WF_SPLASH, x, (float)g.waterline, 0.85f);
@@ -170,13 +170,13 @@ static void waterfx_motion(const WorldSceneFx *fx)
     int cy = (int16_t)(cur.layers[1].scroll_y - prev.layers[1].scroll_y);
     if (abs(cx) > 16 || abs(cy) > 16) return;
     /* Identity is inferred from nearby shape/palette/code-family matches;
-     * consume each old entry once, rejecting teleports and HUD lettering. */
+     * consume each old entry once, rejecting teleports and H lettering. */
     uint8_t used[MAX_SPRITES] = {0};
     for (int i = 0; i < n; ++i) {
         const Sprite *s = &now[i];
         int bank = s->attr & 0x7f, match = -1, best = 10000;
         int width = s->cols * 16, height = s->rows * 16;
-        if (bank == 11 || s->top < -height || s->top >= HUD || s->left < -width || s->left >= W) continue;
+        if (bank == 11 || s->top < -height || s->top >= H || s->left < -width || s->left >= W) continue;
         for (int j = i - 6; j <= i + 6; ++j) {
             if (j < 0 || j >= m || used[j]) continue;
             const Sprite *p = &old[j];
@@ -236,12 +236,12 @@ static void waterfx_motion(const WorldSceneFx *fx)
 }
 
 /* Blend small native-pixel stamps into the final image. Respect displaced
- * sprite coverage and the HUD: no effect hides gameplay. Underwater effects
+ * sprite coverage and the H: no effect hides gameplay. Underwater effects
  * also respect foreground terrain. Airborne spray must pass in front of
  * stage three's city backdrop, which happens to use layer zero. */
 static void wf_pixel(uint32_t *out, int x, int y, int r, int gr, int b, int a, int underwater)
 {
-    if (x < 0 || x >= W || y < 0 || y >= HUD || a <= 0) return;
+    if (x < 0 || x >= W || y < 0 || y >= H || a <= 0) return;
     if (underwater && ((g.waterline >= 0 && y < g.waterline) || water_map[y * W + x] < 60)) return;
     ++wf_samples;
     int k = g.k;
@@ -277,7 +277,7 @@ static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
             if (p->age >= p->life) { p->life = 0; continue; }
             float t = p->age / p->life, fade = 1 - t;
             if (kind == WF_SPLASH) {
-                if (g.waterline < 3 || g.waterline >= HUD - 4) { p->life = 0; continue; }
+                if (g.waterline < 3 || g.waterline >= H - 4) { p->life = 0; continue; }
                 p->y = (float)g.waterline;
             } else if (kind==WF_SPARK || kind==WF_MOTE) {
                 if (g.waterline>=0 && p->y<g.waterline) {p->life=0;continue;}
@@ -300,7 +300,7 @@ static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
                 if (!p->settled) { p->x = nx; p->y = ny; }
                 if (kind == WF_WAKE) p->x += S((int)(p->phase + p->age * 360)) / 256.0f * dt * 5;
             }
-            if (p->x < -32 || p->x >= W + 32 || p->y < -24 || p->y >= HUD + 16) { p->life = 0; continue; }
+            if (p->x < -32 || p->x >= W + 32 || p->y < -24 || p->y >= H + 16) { p->life = 0; continue; }
             if (kind == WF_WAKE && g.waterline >= 0 && p->y < g.waterline) { p->life = 0; continue; }
             if (budget <= 0) continue;
             if (kind == WF_SPLASH) {
