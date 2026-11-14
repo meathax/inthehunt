@@ -1,13 +1,13 @@
 # IN THE HUNT
 
-**0.9.3 Beta** · An unofficial native Windows port of Irem’s submarine shooter.
+**0.9.3 Beta** Ãƒâ€šÃ‚Â· An unofficial native Windows port of IremÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s submarine shooter.
 
-[**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
+[**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) Ãƒâ€šÃ‚Â· [Release notes](https://github.com/meathax/inthehunt/releases/latest) Ãƒâ€šÃ‚Â· [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 - All six stages, both endings and local two-player co-op.
 - Keyboard and Xbox-style controllers, saved settings and pause menus.
-- Integer scaling, fullscreen, 12 CRT presets and optional underwater effects.
-- Arcade-style slowdown or Remove Slowdown; RecompLauncher import and settings support.
+- Integer scaling, fullscreen and optional underwater effects.
+- Fixed arcade-speed pacing with arcade-style slowdown; RecompLauncher import and settings support.
 
 <p align="center">
   <img src="artwork/screenshots/title.png" alt="In the Hunt title screen and main menu" width="64%">
@@ -46,7 +46,6 @@ Open **Options** for video, sound, difficulty and enhancements. Effects are **of
 | Option | Effect |
 |---|---|
 | **Enhancements** | Master switch; off keeps the arcade picture. |
-| **Caustics** | Rippling underwater light. |
 | **Light Shafts** | Sunbeams from the surface. |
 | **Sun Shadows** | Scenery blocks sunlight. |
 | **Path Tracing** | Coloured lighting, soft shadows and light bounces; no RTX card required. |
@@ -55,12 +54,7 @@ Open **Options** for video, sound, difficulty and enhancements. Effects are **of
 | **Marine Snow** | Drifting underwater particles. |
 | **Vivid Color** | Stronger colour and contrast. |
 | **Motion Trails** | Phosphor-style afterimages. |
-| **Smooth Scroll** | Smoother camera movement between pixels. |
-| **Motion X2** | Intermediate motion frames on supported 120 Hz+ displays. |
-| **Drop Shadows** | Sprites cast shadows on scenery. |
 | **Depth Haze** | Distant scenery fades toward blue. |
-| **Depth of Field** | Softens the far background. |
-| **Normal Maps** | Surface-relief lighting on rock and ice. |
 | **Live Surface** | Waterline ripples and glints. |
 | **Reflections** | Sky reflections on the water. |
 | **Shockwaves** | Spreading distortion around blasts. |
@@ -77,11 +71,14 @@ Open **Options** for video, sound, difficulty and enhancements. Effects are **of
 | **Volumetric Water** | Light beams within the water. |
 | **Ocean Depth** | Distant scenery blends into the ocean. |
 | **Battle Aftermath** | Lingering bubbles and cooling flecks. |
+| **Bubble Lighting** | Sunlit wakes and blast-lit bubbles. |
+| **Contact Shadows** | Soft shading in underwater seams. |
+| **Blast Reflections** | Explosion light on wave crests. |
 | **Sprite Materials** | Distinct lighting for paint, metal, rust and glass. |
 
 </details>
 
-CRT presets are under **Video**. Smooth Scroll and Motion X2 cannot run with CRT; Motion X2 needs a supported 120 Hz+ display. Effects can reduce performance.
+Gameplay runs on the arcade clock. Each display refresh uses the newest game pose and fractional camera scrolling. Extra refreshes predict camera motion by at most one board tick.
 
 ## Updates & beta status
 
@@ -122,4 +119,4 @@ Game and host source live in `src/`; `tools/` contains build, import and runtime
 
 </details>
 
-In the Hunt © 1993 Irem. Unofficial and unaffiliated; a top-level project licence is not yet settled. Thanks to MAME, ymfm, CPS-2 Recomp, FinalBurn Neo, the MiSTer Irem M92 project, librashader, Libretro shader authors, DirectX Shader Compiler and Blur Busters. Dependency notices remain with the source and packaged libraries.
+In the Hunt Ãƒâ€šÃ‚Â© 1993 Irem. Unofficial and unaffiliated; a top-level project licence is not yet settled. Thanks to MAME, ymfm, CPS-2 Recomp, FinalBurn Neo, the MiSTer Irem M92 project, librashader, Libretro shader authors, DirectX Shader Compiler and Blur Busters. Dependency notices remain with the source and packaged libraries.

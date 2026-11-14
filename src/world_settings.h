@@ -12,7 +12,6 @@ enum {
 
 typedef struct {
     WorldTimingMode timing_mode;
-    unsigned border_brightness;
     unsigned volume;
     unsigned fullscreen;
     unsigned vsync;
@@ -31,17 +30,13 @@ typedef struct {
     unsigned autofire;           /* held fire buttons repeat */
     unsigned fx_enable;
     unsigned enhance_preset_pending;
-    unsigned fx_caustics;
     unsigned fx_rays;
     unsigned fx_lights;
     unsigned fx_depth;
     unsigned fx_snow;
     unsigned fx_vivid;
     unsigned fx_trails;
-    unsigned fx_shadows;
-    unsigned fx_dof;
     unsigned fx_haze;
-    unsigned fx_normals;
     unsigned fx_sunshadow;
     unsigned fx_glow;
     unsigned fx_reflect;
@@ -57,9 +52,8 @@ typedef struct {
     unsigned fx_splashes;
     unsigned fx_sparks, fx_impact_motes;
     unsigned fx_pressure, fx_sediment_light, fx_water_volume, fx_ocean_depth, fx_aftermath, fx_materials;
+    unsigned fx_bubble_light, fx_contact_shade, fx_blast_reflect;
     char shader[WORLD_SETTINGS_ID_SIZE];
-    char border[WORLD_SETTINGS_ID_SIZE];
-    char border_image[WORLD_SETTINGS_PATH_SIZE];
     WorldInputBindings bindings;
 } WorldSettings;
 

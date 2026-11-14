@@ -18,15 +18,11 @@ typedef struct {
 } NumberSetting;
 
 static const NumberSetting numbers[] = {
-    {"border_brightness", offsetof(WorldSettings, border_brightness), 0, 100},
     {"volume", offsetof(WorldSettings, volume), 0, 100},
     {"fullscreen", offsetof(WorldSettings, fullscreen), 0, 1},
-    {"vsync", offsetof(WorldSettings, vsync), 0, 1},
     {"window_scale", offsetof(WorldSettings, window_scale), 1, 12},
     {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1},
     {"scaling", offsetof(WorldSettings, scaling), 0, 2},
-    {"fps_limit", offsetof(WorldSettings, fps_limit), 0, 5},
-    {"pacing", offsetof(WorldSettings, pacing), 0, 2},
     {"show_fps", offsetof(WorldSettings, show_fps), 0, 1},
     {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1},
     {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100},
@@ -34,21 +30,16 @@ static const NumberSetting numbers[] = {
     {"dip_lives", offsetof(WorldSettings, dip_lives), 0, 3},
     {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3},
     {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
-    {"crt_shader", offsetof(WorldSettings, crt_shader), 0, 12},
     {"autofire", offsetof(WorldSettings, autofire), 0, 1},
     {"enhance_preset_pending", offsetof(WorldSettings, enhance_preset_pending), 0, 1},
     {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
-    {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1},
     {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
     {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1},
     {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
     {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
     {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
     {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
-    {"fx_shadows", offsetof(WorldSettings, fx_shadows), 0, 1},
-    {"fx_dof", offsetof(WorldSettings, fx_dof), 0, 1},
     {"fx_haze", offsetof(WorldSettings, fx_haze), 0, 1},
-    {"fx_normals", offsetof(WorldSettings, fx_normals), 0, 1},
     {"fx_sunshadow", offsetof(WorldSettings, fx_sunshadow), 0, 1},
     {"fx_glow", offsetof(WorldSettings, fx_glow), 0, 1},
     {"fx_reflect", offsetof(WorldSettings, fx_reflect), 0, 1},
@@ -56,8 +47,6 @@ static const NumberSetting numbers[] = {
     {"fx_particles", offsetof(WorldSettings, fx_particles), 0, 1},
     {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1},
     {"fx_surface", offsetof(WorldSettings, fx_surface), 0, 1},
-    {"fx_smooth", offsetof(WorldSettings, fx_smooth), 0, 1},
-    {"fx_interp", offsetof(WorldSettings, fx_interp), 0, 1},
     {"fx_wakes", offsetof(WorldSettings, fx_wakes), 0, 1},
     {"fx_debris", offsetof(WorldSettings, fx_debris), 0, 1},
     {"fx_silt", offsetof(WorldSettings, fx_silt), 0, 1},
@@ -69,7 +58,10 @@ static const NumberSetting numbers[] = {
     {"fx_water_volume", offsetof(WorldSettings, fx_water_volume), 0, 1},
     {"fx_ocean_depth", offsetof(WorldSettings, fx_ocean_depth), 0, 1},
     {"fx_aftermath", offsetof(WorldSettings, fx_aftermath), 0, 1},
-    {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1}
+    {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1},
+    {"fx_bubble_light", offsetof(WorldSettings, fx_bubble_light), 0, 1},
+    {"fx_contact_shade", offsetof(WorldSettings, fx_contact_shade), 0, 1},
+    {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -95,11 +87,12 @@ static int bounded_string(const char *text, size_t size, int identifier)
 
 static void all_enhancements_on(WorldSettings *settings)
 {
-    settings->fx_caustics = settings->fx_rays = settings->fx_lights = 1;
+    settings->fx_rays = settings->fx_lights = 1;
     settings->fx_depth = settings->fx_snow = settings->fx_vivid = 1;
-    settings->fx_normals = settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
-    settings->fx_shadows = settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
-    settings->fx_shake = settings->fx_surface = settings->fx_smooth = settings->fx_interp = 1;
+    settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
+    settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
+    settings->fx_shake = settings->fx_surface = settings->fx_smooth = 1;
+    settings->fx_interp = 0;
     settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
     settings->fx_sparks = settings->fx_impact_motes = 1;
     settings->fx_pressure = 1;
@@ -108,7 +101,8 @@ static void all_enhancements_on(WorldSettings *settings)
     settings->fx_ocean_depth = 1;
     settings->fx_aftermath = 1;
     settings->fx_materials = 1;
-    settings->fx_dof = settings->fx_trails = 1;
+    settings->fx_bubble_light = settings->fx_contact_shade = settings->fx_blast_reflect = 1;
+    settings->fx_trails = 1;
 }
 
 void world_settings_activate_enhancements(WorldSettings *settings)
@@ -124,7 +118,6 @@ void world_settings_defaults(WorldSettings *settings)
     if (!settings) return;
     memset(settings, 0, sizeof *settings);
     settings->timing_mode = WORLD_TIMING_ARCADE;
-    settings->border_brightness = 100;
     settings->volume = 100;
     settings->window_scale = 3;
     settings->achievement_popups = 1;
@@ -136,7 +129,6 @@ void world_settings_defaults(WorldSettings *settings)
     settings->dip_demo_sound = 1;
     all_enhancements_on(settings);
     strcpy(settings->shader, "pixels");
-    strcpy(settings->border, "black");
     world_input_bindings_defaults(&settings->bindings);
 }
 
@@ -150,8 +142,6 @@ int world_settings_valid(const WorldSettings *settings)
         if (value < numbers[i].minimum || value > numbers[i].maximum) return 0;
     }
     return bounded_string(settings->shader, sizeof settings->shader, 1) &&
-           bounded_string(settings->border, sizeof settings->border, 1) &&
-           bounded_string(settings->border_image, sizeof settings->border_image, 0) &&
            world_input_bindings_valid(&settings->bindings);
 }
 
@@ -202,8 +192,6 @@ static int apply_setting(WorldSettings *settings, const char *key, const char *v
     char *target = NULL;
     size_t capacity = 0;
     if (!strcmp(key, "shader")) { target = settings->shader; capacity = sizeof settings->shader; }
-    else if (!strcmp(key, "border")) { target = settings->border; capacity = sizeof settings->border; }
-    else if (!strcmp(key, "border_image")) { target = settings->border_image; capacity = sizeof settings->border_image; }
     if (target) {
         size_t length = strlen(value);
         if (length >= capacity) return -1;
@@ -287,7 +275,7 @@ static int write_settings(FILE *file, const WorldSettings *settings)
         memcpy(&value, (const char *)settings + numbers[i].offset, sizeof value);
         fprintf(file, "%s=%u\n", numbers[i].key, value);
     }
-    fprintf(file, "shader=%s\nborder=%s\nborder_image=%s\n", settings->shader, settings->border, settings->border_image);
+    fprintf(file, "shader=%s\n", settings->shader);
     for (unsigned player = 0; player < 2; ++player)
         for (unsigned device = 0; device < 2; ++device)
             for (unsigned action = 0; action < 8; ++action) {

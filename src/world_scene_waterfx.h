@@ -163,7 +163,7 @@ static void wf_crossing(float x, const WorldSceneFx *fx)
 
 static void waterfx_motion(const WorldSceneFx *fx)
 {
-    if ((!fx->wakes && !fx->splashes && !fx->debris && !fx->silt && !fx->sparks && !fx->impact_motes) || (cur.video_control & 0x80)) return;
+    if ((!fx->wakes && !fx->bubble_light && !fx->splashes && !fx->debris && !fx->silt && !fx->sparks && !fx->impact_motes) || (cur.video_control & 0x80)) return;
     Sprite now[MAX_SPRITES], old[MAX_SPRITES];
     int n = parse_sprites(cur.sprites, now), m = parse_sprites(prev.sprites, old);
     int cx = (int16_t)(cur.layers[1].scroll_x - prev.layers[1].scroll_x);
@@ -208,7 +208,7 @@ static void waterfx_motion(const WorldSceneFx *fx)
          * sprites also qualify as torpedoes; other moving scenery does not. */
         int sub = (bank == 1 || bank == 2) && height >= 32;
         int torpedo = width <= 32 && height <= 16 && fabsf(dx) >= 3 && fabsf(dy) <= 2;
-        if (!fx->wakes || (!sub && !torpedo) || (wf_frame & 1) || fabsf(dx) + fabsf(dy) < 0.5f ||
+        if ((!fx->wakes && !fx->bubble_light) || (!sub && !torpedo) || (wf_frame & 1) || fabsf(dx) + fabsf(dy) < 0.5f ||
             (g.waterline >= 0 && y < g.waterline + 3)) continue;
         float direction = dx < 0 ? -1.0f : 1.0f;
         /* The real sub is three adjacent 16x32 sprite pieces. Emit only
@@ -262,9 +262,40 @@ static void wf_pixel(uint32_t *out, int x, int y, int r, int gr, int b, int a, i
         }
 }
 
+/* Light on the sun-facing rim of bubbles, sampled once per native stamp. */
+static void bubble_rim(uint32_t *out,int x,int y,int alpha)
+{
+    if ((unsigned)x>=W || (unsigned)y>=H) return;
+    const PixelLight *l=&pixel_light[y*W+x];
+    int r=clamp255((int)(80+95*l->sun+120*l->r));
+    int gr=clamp255((int)(126+88*l->sun+62*l->g));
+    int b=clamp255((int)(150+78*l->sun+40*l->b));
+    wf_pixel(out,x,y,r,gr,b,alpha,1);
+}
+
+static void draw_blast_reflections(uint32_t *out)
+{
+    int wl=g.waterline;
+    if (wl<0 || wl>=H) return;
+    for(int i=0;i<CINEMA_EVENTS;++i) {
+        const CinemaEvent *e=&cinema_events[i];
+        float depth=e->y-wl;
+        if(e->life<=0 || e->age>=0.5f || depth<0 || depth>=88) continue;
+        float energy=e->power*(1-2*e->age)*(1-depth/88);
+        int cx=(int)e->x, radius=12+(int)(depth*.28f);
+        for(int d=0;d<6 && wl+d<H;++d) for(int dx=-radius;dx<=radius;++dx) {
+            int x=cx+dx;
+            int crest=S((x+g.scroll_x[1])*49+d*173+g.T*5);
+            if(crest<0) continue;
+            int a=(int)(energy*(1-(float)(dx*dx)/(radius*radius))*(6-d)*crest/10);
+            wf_pixel(out,x,wl+d,230-(int)depth,149,84+(int)(depth*.4f),a,1);
+        }
+    }
+}
+
 static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
 {
-    const unsigned enabled[WF_TYPES] = {fx->wakes, fx->debris, fx->silt, fx->splashes, fx->sparks, fx->impact_motes};
+    const unsigned enabled[WF_TYPES] = {fx->wakes || fx->bubble_light, fx->debris, fx->silt, fx->splashes, fx->sparks, fx->impact_motes};
     wf_samples = 0;
     for (int kind = 0; kind < WF_TYPES; ++kind) {
         /* Each type has its own work allowance, so dense silt cannot starve a splash. */
@@ -331,7 +362,8 @@ static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
                     if (fabsf(p->vx)+fabsf(p->vy)>25)
                         wf_pixel(out,(int)(p->x-p->vx*0.018f),(int)(p->y-p->vy*0.018f),190,125,70,alpha/3,1);
                 } else {
-                    wf_pixel(out,(int)p->x,(int)p->y,p->light?155:125,p->light?215:156,p->light?230:165,(int)(fade*185),1);
+                    if (p->light && fx->bubble_light) bubble_rim(out,(int)p->x,(int)p->y,(int)(fade*185));
+                    else wf_pixel(out,(int)p->x,(int)p->y,p->light?155:125,p->light?215:156,p->light?230:165,(int)(fade*185),1);
                 }
                 budget-=2;
             } else if (kind == WF_DEBRIS) {
@@ -354,7 +386,10 @@ static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
                             wf_pixel(out, (int)p->x + dx, (int)p->y + dy / 2, 100, 112, 104, a, 1);
                         } else {
                             /* Pale crescent highlight rather than solid white dots. */
-                            wf_pixel(out, (int)p->x + dx, (int)p->y + dy, 100, 190, 210, a, 1);
+                            if (fx->bubble_light && dx-dy>=radius-1)
+                                bubble_rim(out,(int)p->x+dx,(int)p->y+dy,a);
+                            else if (fx->wakes)
+                                wf_pixel(out,(int)p->x+dx,(int)p->y+dy,100,190,210,a,1);
                         }
                     }
             }

@@ -177,7 +177,7 @@ int main(void){
     for(int k=1;k<=MAXK;++k){
         fx=(WorldSceneFx){0};world_scene_render(picture,k,1,&fx,32000);
         for(int y=0;y<H*k;++y)for(int x=0;x<W*k;++x)assert(picture[y*W*k+x]==plain[(y/k)*W+x/k]);
-        fx=(WorldSceneFx){.depth=1,.vivid=1,.caustics=1,.trails=1,.snow=1};
+        fx=(WorldSceneFx){.depth=1,.vivid=1,.trails=1,.snow=1};
         world_scene_render(picture,k,1,&fx,32133);
         world_scene_render(picture,k,1,&fx,32266);
         for(int y=224*k;y<H*k;++y){
@@ -194,16 +194,104 @@ int main(void){
     /* Upgrade a disabled legacy preset, then keep the player's overrides. */
     const char *preset_file="build/light-colour-20261113/settings.ini";
     FILE *legacy=fopen(preset_file,"wb"); assert(legacy);
-    fputs("version=1\nfx_enable=0\nfx_vignette=1\nfx_dof=0\nfx_trails=0\n",legacy); fclose(legacy);
+    fputs("version=1\nfx_enable=0\nfx_vignette=1\nfx_depth=0\nfx_trails=0\n",legacy); fclose(legacy);
     assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
     loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
-    assert(loaded.fx_dof && loaded.fx_trails && loaded.fx_shake && loaded.fx_vivid);
-    loaded.fx_dof=0; loaded.fx_enable=0;
+    assert(loaded.fx_depth && loaded.fx_trails && loaded.fx_shake && loaded.fx_vivid);
+    loaded.fx_depth=0; loaded.fx_enable=0;
     assert(world_settings_save(preset_file,&loaded)==WORLD_SETTINGS_OK);
     assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
     loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
-    assert(!loaded.fx_dof && loaded.fx_trails);
+    assert(!loaded.fx_depth && loaded.fx_trails);
     puts("PASS: first-enable upgrade and saved custom enhancement selection");
+    /* Pan an ice overhang one native pixel across each probe-grid phase. */
+    static float shadow_reference[W*H];
+    layer_on[0]=layer_on[1]=layer_on[2]=1; g.waterline=-1;
+    cur.colors[1]=0xffa0c0d0;
+    for(int pan=0;pan<5;++pan){
+        memset(layer_idx,0xff,sizeof layer_idx);
+        for(int y=24;y<45;++y)for(int x=90;x<165;++x){
+            int layer=pan ? (x/8+y/8)%3 : 1;
+            layer_idx[layer][(y+MARGIN)*LW+MARGIN+x-pan]=1;
+        }
+        colour_rows(0,LH);
+        build_sunlight();
+        if(!pan)memcpy(shadow_reference,sunlight,sizeof sunlight);
+        for(int y=50;y<120;++y)for(int x=30;x<190;++x)
+            assert(fabsf(sunlight[y*W+x]-shadow_reference[y*W+x+pan])<0.00001f);
+    }
+    assert(shadow_reference[70*W+100]<0.01f && shadow_reference[70*W+170]>0.99f);
+    for(int x=40;x<180;++x)assert(fabsf(shadow_reference[70*W+x+1]-shadow_reference[70*W+x])<0.15f);
+    puts("PASS: fractional shadow edge and exact one-pixel pan across four probe-grid phases");
+    /* An overhang above the viewport shades row zero. Open sky beside it
+       still admits full sunlight, even when the entire screen is submerged. */
+    memset(layer_idx,0xff,sizeof layer_idx);
+    for(int by=0;by<MARGIN;++by)
+        for(int x=64;x<192;++x) layer_idx[1][by*LW+MARGIN+x]=1;
+    colour_rows(0,LH);
+    build_sunlight();
+    assert(sunlight[100]<0.01f && sunlight[240]>0.99f);
+    /* Same facade, same lighting, even when its tiles change drawing priority. */
+    fx=(WorldSceneFx){.lights=1,.glow=1,.depth=1,.haze=1,.ocean_depth=1,
+        .water_volume=1,.sunshadow=1,.contact_shade=1};
+    g.fx=&fx; transport_valid=1;
+    cur.colors[2]=0xff33403a;
+    uint32_t facade[64*64];
+    for(int split=0;split<=1;++split){
+        memset(layer_idx,0xff,sizeof layer_idx);
+        for(int y=32;y<96;++y)for(int x=64;x<128;++x){
+            int layer=split?(x/8+y/8)%3:1;
+            layer_idx[layer][(y+MARGIN)*LW+x+MARGIN]=1+(x+y)%2;
+        }
+        colour_rows(0,LH); build_sunlight();
+        for(int i=0;i<N;++i)pixel_light[i]=(PixelLight){.r=.18f,.g=.21f,.b=.13f,.sun=sunlight[i]};
+        layer_rows_fx(0,LH);
+        for(int y=32;y<96;++y)for(int x=64;x<128;++x){
+            int layer=split?(x/8+y/8)%3:1, i=(y+MARGIN)*LW+x+MARGIN;
+            uint32_t c=cinema_background(layer_col[layer][i],layer,x,y);
+            int j=(y-32)*64+x-64;
+            if(split)assert(facade[j]==c);else facade[j]=c;
+        }
+    }
+    puts("PASS: identical final lighting on every facade pixel across all three tile planes");
+    /* A changing rotor and a reordered descriptor list still form one hull.
+       The old nearest-neighbour matcher chose the rotor's new position
+       occupied by an unrelated same-palette descriptor in the old list. */
+    Sprite old_parts[]={{100,25,1,1,20,4},{116,25,1,1,21,4},{104,25,1,1,99,4}};
+    Sprite parts[]={{120,25,1,1,21,4},{104,25,1,1,22,4}};
+    SpriteMotion motions[2];
+    sprite_motions(parts,2,old_parts,3,motions);
+    int root=motion_root(motions,0);
+    assert(root==motion_root(motions,1) && motions[root].votes==1 && motions[root].dx==4);
+    old_parts[2].code=22; /* conflicting movement: present the current pose intact */
+    sprite_motions(parts,2,old_parts,3,motions);
+    assert(motions[motion_root(motions,1)].votes<0);
+
+    /* A world sprite straddling the HUD moves by the same shake on both rows. */
+    fixture(); fx=(WorldSceneFx){0}; world_scene_render(picture,1,1,&fx,8000);
+    for(int i=0;i<N;++i)sprite_px[i]=NONE;
+    g.shake_x=3; g.shake_y=0; g.out=picture;
+    for(int y=HUD-1;y<=HUD;++y)sprite_px[y*W+80]=1;
+    sprite_px[HUD*W+100]=0x4002;
+    compose_rows(HUD-1,HUD+1);
+    assert(picture[(HUD-1)*W+77]==cur.colors[1] && picture[HUD*W+77]==cur.colors[1]);
+    assert(picture[HUD*W+100]==cur.colors[2] && picture[HUD*W+97]!=cur.colors[2]);
+    puts("PASS: multipart animation and reordered sprites share one motion; shake crosses HUD without slicing vehicles");
+    /* Half a tick after a two-pixel pan, the camera advances one pixel.
+       Player coverage must be the current pose on every refresh. */
+    fixture(); fx=(WorldSceneFx){.smooth=1};
+    frame.layers[1].scroll_x+=2; put16(test_sprites+6,96+102); world_scene_submit(&frame);
+    world_scene_render(picture,2,1,&fx,8100);
+    static uint16_t latest[4*N]; memcpy(latest,sprite_px,sizeof latest);
+    world_scene_render(picture,2,1.5,&fx,8150);
+    assert(g.off_x[1]==MARGIN*2+2 && !memcmp(latest,sprite_px,sizeof latest));
+    world_scene_submit(&frame); world_scene_render(picture,2,1.5,&fx,8200);
+    assert(g.off_x[1]==MARGIN*2);
+    frame.layers[1].scroll_x-=2; world_scene_submit(&frame);
+    world_scene_render(picture,2,1.5,&fx,8250); assert(g.off_x[1]==MARGIN*2-2);
+    frame.layers[1].scroll_x+=100; world_scene_submit(&frame);
+    world_scene_render(picture,2,2,&fx,8300); assert(g.off_x[1]==MARGIN*2);
+    puts("PASS: immediate sprite pose and camera-only prediction on pans, stops, reversals and cuts");
     /* Off-screen tile memory can contain different artwork. Shaking toward
        the top must keep sampling the first displayed row at every scale. */
     fixture();
@@ -224,5 +312,18 @@ int main(void){
     shake=2.5f;
     world_scene_render(picture,4,1,&fx,17*8);
     assert(g.shake_x==5);
+    /* A one-row invocation cannot reuse a previous output scanline. Compare
+       it against the normal compositor on the exact same renderer inputs. */
+    fx=(WorldSceneFx){.smooth=1,.materials=1,.sunshadow=1,.water_volume=1,
+        .contact_shade=1,.vivid=1,.ocean_depth=1};
+    for(int scale=2;scale<=MAXK;++scale){
+        world_scene_render(picture,scale,1.5,&fx,8500);
+        g.shake_x=1; g.shake_y=-1; g.out=picture;
+        compose_rows(0,g.oh);
+        static uint32_t expected[MAXK*MAXK*N]; memcpy(expected,picture,g.ow*g.oh*4);
+        for(int y=0;y<g.oh;++y) compose_rows(y,y+1);
+        assert(!memcmp(expected,picture,g.ow*g.oh*4));
+    }
+    puts("PASS: reused scaled rows match independent scanlines, including shake and HUD");
     return 0;
 }

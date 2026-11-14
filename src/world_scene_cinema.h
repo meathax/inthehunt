@@ -3,15 +3,14 @@
 enum { CINEMA_EVENTS=24, VW=W/4, VH=H/4 };
 typedef struct {float x,y,age,life,power; int seabed;} CinemaEvent;
 static CinemaEvent cinema_events[CINEMA_EVENTS];
-static uint32_t water_volume[VW*VH];
+static uint32_t volume_probes[VW*VH], water_volume[N];
 static unsigned cinema_emitted,cinema_samples;
 static int cinema_volume_dirty=1;
 typedef struct {float hx,hy,hz,r,g,b,energy;} MaterialLight;
 static MaterialLight material_light[N];
-static void material_prepare(void)
+static void material_rows(int from,int to)
 {
-    if(!g.fx->materials)return;
-    for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+    for(int y=from;y<to;++y)for(int x=0;x<W;++x){
         PixelLight *p=&pixel_light[y*W+x];MaterialLight *l=&material_light[y*W+x];
         float energy=transport_valid && g.fx->lights ? p->r+p->g+p->b : 0;
         float blend=energy/(1+energy);
@@ -22,22 +21,37 @@ static void material_prepare(void)
         l->r=energy>0?p->r:0;l->g=energy>0?p->g:0;l->b=energy>0?p->b:0;l->energy=energy;
     }
 }
+static void material_prepare(void)
+{
+    if(g.fx->materials && !gpu_light) parallel(material_rows,H);
+}
 static uint32_t material_shade(uint32_t c,uint32_t surface,int x,int y)
 {
     unsigned kind=surface&255;if(kind==0 || kind>=MAT_COUNT)return c;
-    const Material *m=&materials[kind];const MaterialLight *l=&material_light[y*W+x];
+    int wet=g.waterline<0 || y>=g.waterline;
+    if (wet && g.fx->contact_shade) {
+        int r=(c>>16)&255, gr=(c>>8)&255, b=c&255;
+        int keep=256-3*((surface>>24)&15);
+        r=r*keep>>8; gr=gr*keep>>8; b=b*keep>>8;
+        c=light_rgb(r,gr,b);
+    }
+    if (!g.fx->materials) return c;
+    const Material *m=&materials[kind];
+    /* GPU transport applies position-dependent radiance after compositing.
+       The unlit sprite pass only needs the fixed incident half-vector. */
+    static const MaterialLight ambient={.24f/.99599197f,-.40f/.99599197f,.88f/.99599197f,0,0,0,0};
+    const MaterialLight *l=gpu_light?&ambient:&material_light[y*W+x];
     float nx=(int8_t)(surface>>8)/96.0f*m->relief,ny=(int8_t)(surface>>16)/96.0f*m->relief;
     float nz=1-.45f*(nx*nx+ny*ny);
     float h=nx*l->hx+ny*l->hy+nz*l->hz;if(h<0)h=0;if(h>1)h=1;
     float h2=h*h,h4=h2*h2,h8=h4*h4,h16=h8*h8;
     float spec=m->rough>.6f?h4*.35f:m->rough>.2f?h8:h16*h16;
-    float grain=((surface>>24)&255)/255.0f;
+    float grain=((surface>>28)&15)/15.0f;
     /* Stable machining marks / corrosion, tied to ROM texels, never screen noise. */
     float finish=kind==MAT_RUST?.65f+grain*.3f:.86f+grain*.14f;
     float highlight=spec*m->spec*finish;
     float peak=fmaxf(l->r,fmaxf(l->g,l->b));
     float dynamic=peak>0?fminf(l->energy,2)*28/peak:0;
-    int wet=g.waterline<0 || y>=g.waterline;
     float sunlight = wet && g.fx->sunshadow && transport_valid ? pixel_light[y*W+x].sun : 1.0f;
     float hr=highlight*((wet?13:18)*sunlight+l->r*dynamic);
     float hg=highlight*((wet?17:18)*sunlight+l->g*dynamic);
@@ -63,7 +77,7 @@ static void cinema_scroll(int dx,int dy)
 }
 static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
 {
-    if (!(fx->pressure || fx->sediment_light || fx->water_volume || fx->aftermath) ||
+    if (!(fx->pressure || fx->sediment_light || fx->water_volume || fx->aftermath || fx->blast_reflect) ||
         y<0 || y>=H || (g.waterline>=0 && y<g.waterline)) return;
     int slot=-1;
     for(int i=0;i<CINEMA_EVENTS;++i){
@@ -78,6 +92,26 @@ static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
     ++cinema_emitted;
 }
 
+static void volume_rows(int from,int to)
+{
+    /* Reconstruct at native pixel centres once, shared by every output scale. */
+    for(int y=from;y<to;++y){
+        int py=clampi(y-2,0,(VH-1)*4), fy=py%4;
+        const uint32_t *top=volume_probes+(py/4)*VW;
+        const uint32_t *bottom=py/4<VH-1?top+VW:top;
+        for(int x=0;x<W;++x){
+            int px=clampi(x-2,0,(VW-1)*4), a=px/4, b=clampi(a+1,0,VW-1), fx=px%4;
+            unsigned out=0;
+            for(int shift=0;shift<=16;shift+=8){
+                int u=((top[a]>>shift)&255)*(4-fx)+((top[b]>>shift)&255)*fx;
+                int v=((bottom[a]>>shift)&255)*(4-fx)+((bottom[b]>>shift)&255)*fx;
+                out|=((u*(4-fy)+v*fy+8)/16)<<shift;
+            }
+            water_volume[y*W+x]=out;
+        }
+    }
+}
+
 static void cinema_update(float dt)
 {
     const WorldSceneFx *fx=g.fx;
@@ -87,7 +121,7 @@ static void cinema_update(float dt)
         p->age+=dt;
         if(p->age>=p->life || p->x<-80 || p->x>W+80 || p->y>H+40)p->life=0;
     }
-    if(!fx->pressure && !fx->sediment_light && !fx->water_volume && !fx->aftermath)
+    if(!fx->pressure && !fx->sediment_light && !fx->water_volume && !fx->aftermath && !fx->blast_reflect)
         memset(cinema_events,0,sizeof cinema_events);
     if(fx->pressure){
         if(!field_on){memset(field_x,0,sizeof field_x);memset(field_y,0,sizeof field_y);}
@@ -117,7 +151,7 @@ static void cinema_update(float dt)
     for(int i=0;i<CINEMA_EVENTS;++i)if(cinema_events[i].life>0 && cinema_events[i].age<=.65f)flashes[flash_count++]=i;
     for(int yy=0;yy<VH;++yy)for(int xx=0;xx<VW;++xx){
         int x=xx*4+2,y=yy*4+2,at=yy*VW+xx;
-        if(g.waterline>=0 && y<g.waterline){water_volume[at]=0;continue;}
+        if(g.waterline>=0 && y<g.waterline){volume_probes[at]=0;continue;}
         float sun=transport_valid?pixel_light[y*W+x].sun:1;
         if(!transport_valid){ /* cheap occlusion even with tracing disabled */
             for(int j=1;j<=4;++j){int sx=clampi(x+j*5,0,W-1),sy=y-j*10;
@@ -136,16 +170,17 @@ static void cinema_update(float dt)
             int wet=submerged_path(y,p->y,sqrtf(d));
             r+=f*18*light_absorb[0][wet];gr+=f*10*light_absorb[1][wet];b+=f*3*light_absorb[2][wet];
         }
-        water_volume[at]=clamp255((int)r)<<16|clamp255((int)gr)<<8|clamp255((int)b);
+        volume_probes[at]=clamp255((int)r)<<16|clamp255((int)gr)<<8|clamp255((int)b);
     }
+    parallel(volume_rows,H);
 }
 
 static uint32_t cinema_background(uint32_t c,int layer,int x,int y)
 {
-    if(layer<1 || layer>2 || y>=H || (g.waterline>=0 && y<g.waterline))return c;
+    if(layer<0 || layer>2 || (layer==0 && y>=HUD) || y>=H || (g.waterline>=0 && y<g.waterline))return c;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
-    if(g.fx->ocean_depth){int f=layer==2?(g.fx->haze?8:24):3;r+=(5-r)*f/256;gr+=(28-gr)*f/256;b+=(52-b)*f/256;}
-    if(g.fx->water_volume){unsigned v=water_volume[(y/4)*VW+x/4];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
+    if(g.fx->ocean_depth){int f=3 + water_amount(c)*(g.fx->haze?5:21)/255;r+=(5-r)*f/256;gr+=(28-gr)*f/256;b+=(52-b)*f/256;}
+    if(g.fx->water_volume){unsigned v=water_volume[y*W+x];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
     return light_rgb(r,gr,b);
 }
 

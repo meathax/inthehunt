@@ -1,6 +1,7 @@
 #ifndef WORLD_SCENE_H
 #define WORLD_SCENE_H
 #include <stdint.h>
+#include "world_gpu_light.h"
 #include "world_video.h"
 
 /* Layered scene renderer for the optional enhancements.
@@ -13,13 +14,10 @@
  * only: nothing feeds back into the game. */
 
 typedef struct {
-    unsigned caustics, rays, depth, snow, vivid, trails;
+    unsigned rays, depth, snow, vivid, trails;
     unsigned lights;     /* path-traced light from fire: soft shadows and bounce light */
-    unsigned shadows;    /* sprites cast soft shadows on the scenery behind them */
-    unsigned dof;        /* far layer slightly out of focus */
     unsigned haze;       /* far layer fades toward water blue */
-    unsigned normals;    /* per-pixel lighting from normals derived from the pixel art */
-    unsigned sunshadow;  /* rock blocks the sunlight: shafts, caustics and shading */
+    unsigned sunshadow;  /* rock blocks the sunlight: shafts and shading */
     unsigned glow;       /* light scattered by the water around lights */
     unsigned reflect;    /* the surface mirrors what is above it */
     unsigned shock;      /* refraction rings from explosions */
@@ -34,6 +32,7 @@ typedef struct {
     unsigned splashes;
     unsigned sparks, impact_motes;
     unsigned pressure, sediment_light, water_volume, ocean_depth, aftermath, materials;
+    unsigned bubble_light, contact_shade, blast_reflect;
 } WorldSceneFx;
 
 typedef struct {
@@ -55,7 +54,7 @@ void world_scene_submit(const WorldSceneFrame *frame);
 /* Largest supported K. */
 enum { WORLD_SCENE_MAX_K = 4 };
 /* Render the scene into out (320*K x 240*K ARGB). alpha is the position
- * between the previous game frame (0) and the current one (1); clock is in
+ * between the previous game frame (0) and the current one (1). Values from 1 to 2 predict camera motion only. Clock is in
  * 1/8 ms and animates the effects. Returns 0 until a frame was submitted. */
 int world_scene_render(uint32_t *out, unsigned k, double alpha, const WorldSceneFx *fx, uint32_t clock);
 /* Rumble requested by explosions since the last call, 0..65535. */
@@ -63,6 +62,7 @@ unsigned world_scene_take_rumble(void);
 /* Screen row where water effects began in the last render, for tests. */
 int world_scene_waterline(void);
 void world_scene_reset(void);
+void world_scene_light_target(WorldLightScene *target);
 /* Test view of the light transport (320x240): rock in its own colour,
    open water grey by sun visibility, plus the traced light. */
 void world_scene_debug(uint32_t *out);

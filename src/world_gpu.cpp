@@ -1,6 +1,7 @@
 // Direct3D 12 presenter for the CRT shaders; see world_gpu.h.
 #include <windows.h>
 #include <d3d12.h>
+#include <d3dcompiler.h>
 #include <dxgi1_6.h>
 
 #include "world_gpu.h"
@@ -100,7 +101,7 @@ HRESULT texture(ID3D12Device *device, UINT w, UINT h, D3D12_RESOURCE_FLAGS flags
 // Copies a tightly packed ARGB image into an upload buffer laid out for
 // CopyTextureRegion, then records the copy into `dst` (in COPY_DEST).
 void upload(ID3D12Device *device, ID3D12GraphicsCommandList *cmd, ID3D12Resource *staging, ID3D12Resource *dst,
-            const uint32_t *pixels, UINT w, UINT h)
+            const uint32_t *pixels, UINT w, UINT h, bool copy = true)
 {
     D3D12_RESOURCE_DESC desc = dst->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp;
@@ -108,8 +109,15 @@ void upload(ID3D12Device *device, ID3D12GraphicsCommandList *cmd, ID3D12Resource
     uint8_t *map = nullptr;
     D3D12_RANGE none = {0, 0};
     if (FAILED(staging->Map(0, &none, reinterpret_cast<void **>(&map)))) return;
-    for (UINT y = 0; y < h; ++y) memcpy(map + fp.Offset + (size_t)y * fp.Footprint.RowPitch, pixels + (size_t)y * w, (size_t)w * 4);
+    size_t row_bytes = (size_t)w * sizeof *pixels;
+    if (row_bytes == fp.Footprint.RowPitch) {
+        memcpy(map + fp.Offset, pixels, row_bytes * h);
+    } else {
+        for (UINT y = 0; y < h; ++y)
+            memcpy(map + fp.Offset + (size_t)y * fp.Footprint.RowPitch, pixels + (size_t)y * w, row_bytes);
+    }
     staging->Unmap(0, nullptr);
+    if (!copy) return;
     D3D12_TEXTURE_COPY_LOCATION from = {}, to = {};
     from.pResource = staging;
     from.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -146,8 +154,12 @@ void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
 
 // ---- the window presenter ------------------------------------------------
 
+#include "world_gpu_transport.h"
+
 struct Presenter {
-    HWND parent = nullptr, child = nullptr;
+    GpuTransport transport;
+    const WorldLightScene *light_frame=nullptr;
+    HWND parent = nullptr;
     Com<IDXGIFactory4> factory;
     Com<ID3D12Device> device;
     Com<ID3D12CommandQueue> queue;
@@ -163,10 +175,6 @@ struct Presenter {
     UINT64 fence_value = 0, frame_fence[FRAMES] = {};
     UINT frame_index = 0;
     Com<ID3D12Resource> picture, picture_upload[FRAMES];
-    Com<ID3D12Resource> bg, bg_upload;
-    bool bg_dirty = false, has_bg = false;
-    std::unique_ptr<uint32_t[]> bg_pixels;
-    UINT bg_w = 0, bg_h = 0;
     UINT width = 0, height = 0;
     bool tearing = false;
     int scaling = 0, beam = 0, vsync = 1;
@@ -225,7 +233,6 @@ struct Presenter {
         width = w;
         height = h;
         buffers();
-        bg_dirty = true;
         if (chain) apply(*chain, scaling, beam, width, height);
     }
 };
@@ -265,17 +272,6 @@ DWORD WINAPI compile_preset(void *context)
     }
 }
 
-LRESULT CALLBACK child_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
-{
-    switch (message) {
-    case WM_NCHITTEST: return HTTRANSPARENT;              // clicks belong to the game window
-    case WM_SETFOCUS: SetFocus(GetParent(hwnd)); return 0;
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(hwnd, &ps); EndPaint(hwnd, &ps); return 0; }
-    default: return DefWindowProcW(hwnd, message, wp, lp);
-    }
-}
-
 bool create_device(Com<IDXGIFactory4> &factory, Com<ID3D12Device> &device, Com<ID3D12CommandQueue> &queue,
                    char *error, size_t size)
 {
@@ -286,7 +282,13 @@ bool create_device(Com<IDXGIFactory4> &factory, Com<ID3D12Device> &device, Com<I
     }
     D3D12_COMMAND_QUEUE_DESC q = {};
     q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    if (FAILED(device->CreateCommandQueue(&q, IID_PPV_ARGS(queue.put())))) { say(error, size, "No command queue."); return false; }
+    q.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
+    if (FAILED(device->CreateCommandQueue(&q, IID_PPV_ARGS(queue.put())))) {
+        q.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+        if (FAILED(device->CreateCommandQueue(&q, IID_PPV_ARGS(queue.put())))) {
+            say(error, size, "No command queue."); return false;
+        }
+    }
     return true;
 }
 
@@ -329,23 +331,10 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
         SUCCEEDED(f5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow, sizeof allow)))
         p->tearing = allow != FALSE;
 
-    static bool registered;
-    if (!registered) {
-        WNDCLASSW wc = {};
-        wc.lpfnWndProc = child_proc;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"InTheHuntGpuView";
-        RegisterClassW(&wc);
-        registered = true;
-    }
     RECT rc;
     GetClientRect(p->parent, &rc);
     p->width = rc.right > 0 ? (UINT)rc.right : 1;
     p->height = rc.bottom > 0 ? (UINT)rc.bottom : 1;
-    p->child = CreateWindowExW(0, L"InTheHuntGpuView", L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0,
-                               (int)p->width, (int)p->height, p->parent, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (!p->child) { say(error, error_size, "Could not create the shader view."); return 0; }
-
     DXGI_SWAP_CHAIN_DESC1 sd = {};
     sd.Width = p->width;
     sd.Height = p->height;
@@ -356,13 +345,21 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     sd.Flags = (p->tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0) | DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     Com<IDXGISwapChain1> swap1;
-    if (FAILED(p->factory->CreateSwapChainForHwnd(p->queue.get(), p->child, &sd, nullptr, nullptr, swap1.put())) ||
+    if (FAILED(p->factory->CreateSwapChainForHwnd(p->queue.get(), p->parent, &sd, nullptr, nullptr, swap1.put())) ||
         FAILED(swap1->QueryInterface(IID_PPV_ARGS(p->swap.put())))) {
-        DestroyWindow(p->child);
         say(error, error_size, "Could not create the swap chain.");
         return 0;
     }
-    p->factory->MakeWindowAssociation(p->child, DXGI_MWA_NO_ALT_ENTER);
+    p->factory->MakeWindowAssociation(p->parent, DXGI_MWA_NO_ALT_ENTER);
+    if (getenv("WORLD_PACING_LOG")) {
+        Com<IDXGIOutput> output;
+        Com<IDXGIOutput6> output6;
+        UINT flags=0;
+        if (SUCCEEDED(p->swap->GetContainingOutput(output.put())) &&
+            SUCCEEDED(output->QueryInterface(IID_PPV_ARGS(output6.put()))) &&
+            SUCCEEDED(output6->CheckHardwareCompositionSupport(&flags)))
+            fprintf(stderr,"DXGI fullscreen hardware composition flags %u\n",flags);
+    }
     p->swap->SetMaximumFrameLatency(1);
     p->frame_wait = p->swap->GetFrameLatencyWaitableObject();
     D3D12_DESCRIPTOR_HEAP_DESC hd = {};
@@ -372,7 +369,6 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     p->rtv_step = p->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     for (auto &a : p->alloc)
         if (FAILED(p->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(a.put())))) {
-            DestroyWindow(p->child);
             say(error, error_size, "Could not create command allocators.");
             return 0;
         }
@@ -382,7 +378,6 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     p->event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!p->rtv_heap || !p->cmd || !p->fence || !p->event || !p->buffers() ||
         FAILED(texture(p->device.get(), W, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, p->picture.put()))) {
-        DestroyWindow(p->child);
         say(error, error_size, "Could not create the presentation resources.");
         return 0;
     }
@@ -392,11 +387,12 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     try {
         p->chain = std::make_unique<PostChain>(p->device.get(), p->queue.get());
     } catch (const std::exception &e) {
-        DestroyWindow(p->child);
         say(error, error_size, e.what());
         return 0;
     }
     apply(*p->chain, p->scaling, p->beam, p->width, p->height);
+    if (!p->transport.init(p->device.get())) fprintf(stderr,"GPU transport unavailable; using CPU lighting.\n");
+    else if(getenv("WORLD_PACING_LOG")) fprintf(stderr,"GPU path transport ready.\n");
     gpu = p.release();
     return 1;
 }
@@ -412,12 +408,10 @@ extern "C" void world_gpu_close(void)
     gpu->built.reset();
     gpu->wait_all();
     gpu->chain.reset();
-    HWND child = gpu->child;
     if (gpu->event) CloseHandle(gpu->event);
     if (gpu->frame_wait) CloseHandle(gpu->frame_wait);
     delete gpu;
     gpu = nullptr;
-    if (child) DestroyWindow(child);
 }
 
 extern "C" int world_gpu_active(void) { return gpu != nullptr; }
@@ -426,8 +420,10 @@ extern "C" void world_gpu_show(int show)
 {
     if (!gpu || gpu->shown == (show != 0)) return;
     gpu->shown = show != 0;
-    ShowWindow(gpu->child, show ? SW_SHOWNA : SW_HIDE);
 }
+
+extern "C" int world_gpu_transport_available(void) { return gpu && gpu->shown && gpu->transport.ready; }
+extern "C" void world_gpu_light_frame(const WorldLightScene *frame) { if(gpu) gpu->light_frame=frame; }
 
 extern "C" int world_gpu_visible(void) { return gpu && gpu->shown; }
 
@@ -480,18 +476,6 @@ extern "C" void world_gpu_set_options(int scaling, int beam, int vsync)
     apply(*gpu->chain, scaling, beam, gpu->width, gpu->height);
 }
 
-extern "C" void world_gpu_set_background(const uint32_t *pixels, unsigned width, unsigned height)
-{
-    if (!gpu) return;
-    gpu->has_bg = pixels && width && height;
-    if (gpu->has_bg) {
-        gpu->bg_pixels.reset(new uint32_t[(size_t)width * height]);
-        memcpy(gpu->bg_pixels.get(), pixels, (size_t)width * height * 4);
-        gpu->bg_w = width;
-        gpu->bg_h = height;
-    }
-    gpu->bg_dirty = true;
-}
 
 extern "C" double world_gpu_refresh_hz(void) { return gpu ? gpu->refresh_hz : 0.0; }
 
@@ -508,10 +492,19 @@ extern "C" int world_gpu_frame_statistics(unsigned *present_count, unsigned *pre
     return 1;
 }
 
+extern "C" int world_gpu_sync_sample(int64_t *qpc, unsigned *refresh)
+{
+    DXGI_FRAME_STATISTICS st={};
+    if (!gpu || FAILED(gpu->swap->GetFrameStatistics(&st)) || !st.SyncQPCTime.QuadPart) return 0;
+    *qpc=st.SyncQPCTime.QuadPart;
+    *refresh=st.SyncRefreshCount;
+    return 1;
+}
+
 extern "C" void world_gpu_wait_frame(void)
 {
     if (gpu && gpu->frame_wait) {
-        DWORD r = WaitForSingleObjectEx(gpu->frame_wait, 100, TRUE);
+        DWORD r = WaitForSingleObject(gpu->frame_wait, 100);
         if (r != WAIT_OBJECT_0 && getenv("WORLD_PACING_LOG")) fprintf(stderr, "frame wait %lu%c", (unsigned long)r, 10);
     }
 }
@@ -550,7 +543,6 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     GetClientRect(p->parent, &rc);
     if (rc.right <= 0 || rc.bottom <= 0) return;
     if ((UINT)rc.right != p->width || (UINT)rc.bottom != p->height) {
-        MoveWindow(p->child, 0, 0, rc.right, rc.bottom, FALSE);
         p->resize((UINT)rc.right, (UINT)rc.bottom);
     }
     UINT f = p->frame_index;
@@ -569,42 +561,20 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = p->rtv_heap->GetCPUDescriptorHandleForHeapStart();
     rtv.ptr += (SIZE_T)b * p->rtv_step;
 
-    // Background: the border art at client size, or black.
-    if (p->bg_dirty) {
-        /* Frames still on the GPU copy from the old background: let them
-           finish before releasing it. */
-        p->wait_all();
-        p->bg.reset();
-        p->bg_upload.reset();
-        if (p->has_bg && p->bg_w == p->width && p->bg_h == p->height &&
-            SUCCEEDED(texture(p->device.get(), p->width, p->height, D3D12_RESOURCE_FLAG_NONE,
-                              D3D12_RESOURCE_STATE_COPY_DEST, p->bg.put())) &&
-            SUCCEEDED(buffer(p->device.get(), D3D12_HEAP_TYPE_UPLOAD, upload_size(p->device.get(), p->bg.get()),
-                             D3D12_RESOURCE_STATE_GENERIC_READ, p->bg_upload.put()))) {
-            upload(p->device.get(), cmd, p->bg_upload.get(), p->bg.get(), p->bg_pixels.get(), p->width, p->height);
-            D3D12_RESOURCE_BARRIER t = barrier(p->bg.get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
-            cmd->ResourceBarrier(1, &t);
-        } else
-            p->bg.reset();
-        p->bg_dirty = false;
-    }
-    if (p->bg) {
-        D3D12_RESOURCE_BARRIER t = barrier(target, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
-        cmd->ResourceBarrier(1, &t);
-        cmd->CopyResource(target, p->bg.get());
-        t = barrier(target, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        cmd->ResourceBarrier(1, &t);
-    } else {
-        D3D12_RESOURCE_BARRIER t = barrier(target, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        cmd->ResourceBarrier(1, &t);
-        const float black[4] = {0, 0, 0, 1};
-        cmd->ClearRenderTargetView(rtv, black, 0, nullptr);
-    }
+    D3D12_RESOURCE_BARRIER begin_render = barrier(target, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    cmd->ResourceBarrier(1, &begin_render);
+    const float black[4] = {0, 0, 0, 1};
+    cmd->ClearRenderTargetView(rtv, black, 0, nullptr);
 
     ID3D12Resource *fresh = nullptr;
     if (frame) {
         upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame, (UINT)(W * p->picture_k),
-               (UINT)(H * p->picture_k));
+               (UINT)(H * p->picture_k), !p->light_frame);
+        if(p->light_frame && p->transport.ready)
+            if (!p->transport.record(cmd,f,k,*p->light_frame,p->picture_upload[f].get(),p->picture.get())) {
+                p->transport.ready=false;
+                upload(p->device.get(),cmd,p->picture_upload[f].get(),p->picture.get(),frame,W*k,H*k);
+            }
         D3D12_RESOURCE_BARRIER t = barrier(p->picture.get(), D3D12_RESOURCE_STATE_COPY_DEST,
                                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cmd->ResourceBarrier(1, &t);
@@ -622,7 +592,10 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     p->last_source_time = source_time;
     timing.source_time = source_time;
     timing.span = span;
-    p->chain->frame(cmd, fresh, out, timing);
+    if (fresh && !p->beam && p->chain->preset_path().empty())
+        p->chain->present_pixels(cmd,fresh,W*k,H*k,out);
+    else
+        p->chain->frame(cmd, fresh, out, timing);
     D3D12_RESOURCE_BARRIER t = barrier(target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     cmd->ResourceBarrier(1, &t);
     if (fresh) {
@@ -653,7 +626,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     p->last_present = now;
 }
 
-extern "C" int world_gpu_render_offscreen(const uint32_t *frame, const char *preset, int scaling, unsigned width,
+static int render_offscreen(const WorldLightScene *lighting, const uint32_t *frame, const char *preset, int scaling, unsigned width,
                                           unsigned height, uint32_t *out_pixels, char *error, size_t error_size)
 {
     Com<IDXGIFactory4> factory;
@@ -696,6 +669,12 @@ extern "C" int world_gpu_render_offscreen(const uint32_t *frame, const char *pre
     apply(*chain, scaling, 0, width, height);
     chain->settings().keep_background = false;
     upload(device.get(), cmd.get(), picture_upload.get(), picture.get(), frame, W, H);
+    GpuTransport transport;
+    if (lighting && (!transport.init(device.get()) ||
+        !transport.record(cmd.get(),0,1,*lighting,picture_upload.get(),picture.get()))) {
+        say(error,error_size,"GPU lighting test dispatch failed");
+        return 0;
+    }
     D3D12_RESOURCE_BARRIER t = barrier(picture.get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     cmd->ResourceBarrier(1, &t);
     gdl::post::Output out;
@@ -738,4 +717,16 @@ extern "C" int world_gpu_render_offscreen(const uint32_t *frame, const char *pre
     D3D12_RANGE none = {0, 0};
     readback->Unmap(0, &none);
     return 1;
+}
+
+extern "C" int world_gpu_render_offscreen(const uint32_t *frame,const char *preset,int scaling,
+                                          unsigned width,unsigned height,uint32_t *out,char *error,size_t size)
+{
+    return render_offscreen(nullptr,frame,preset,scaling,width,height,out,error,size);
+}
+
+extern "C" int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
+                                         char *error,size_t size)
+{
+    return render_offscreen(scene,pixels,"",0,W,H,out,error,size);
 }

@@ -15,7 +15,6 @@
 #include "world_surface.h"
 #include "world_gpu.h"
 #include "world_slowdown_table.h"
-#include "world_border.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
 #include "world_ga20.h"
@@ -28,6 +27,7 @@
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
 static uint8_t oam[2048], palette[2048];
+extern double world_scene_stage_ms[6];
 static uint32_t pixels[320*240];
 /* Title entry at 0:1D52 programs all three playfield controls. */
 static const uint16_t title_master_controls[3] = {0, 0x41, 2};
@@ -47,42 +47,10 @@ static unsigned elapsed_board_frames = 1;
 static char settings_path[4096];
 static WorldMenu menu;
 
-/* Optional player-supplied border in .local/art-sources. */
-static void menu_borders(const char *dir)
-{
-    static char paths[2][4096];
-    static const char *const files[1] = {"world-fan-background.jpg"};
-    static const char *const labels[1] = {"UNDERSEA"};
-    const char *names[3], *list[3];
-    unsigned count = 0;
-    names[count] = "BLACK";
-    list[count++] = "";
-    for (unsigned i = 0; i < 1; ++i) {
-        snprintf(paths[i], sizeof paths[i], "%s/../art-sources/%s", dir, files[i]);
-        if (GetFileAttributesA(paths[i]) == INVALID_FILE_ATTRIBUTES) continue;
-        names[count] = labels[i];
-        list[count++] = paths[i];
-    }
-    int known = 0;
-    for (unsigned i = 1; i < count; ++i) known |= !strcmp(list[i], settings.border_image);
-    if (settings.border_image[0] && !known &&
-        GetFileAttributesA(settings.border_image) == INVALID_FILE_ATTRIBUTES) {
-        /* A saved border whose file is gone (for example a retired preset) reverts to black. */
-        strcpy(settings.border, "black");
-        settings.border_image[0] = 0;
-    }
-    if (settings.border_image[0] && !known) {
-        snprintf(paths[1], sizeof paths[1], "%s", settings.border_image);
-        names[count] = "CUSTOM";
-        list[count++] = paths[1];
-    }
-    world_menu_set_borders(&menu, count, names, list, &settings);
-}
-
 /* The frame as presented: enhancements and overlays, shown_k times 320x240. */
 static uint32_t shown[320 * 240 * WORLD_SCENE_MAX_K * WORLD_SCENE_MAX_K];
 static int shown_k = 1;
-static double scene_alpha = 1.0;       /* between the previous game frame (0) and this one (1) */
+static double scene_alpha = 1.0;       /* current pose plus fractional camera advance */
 /* What draw() last drew, for the scene renderer. */
 static WorldVideoLayer drawn_layers[3];
 static uint8_t drawn_sprites[2048];
@@ -118,7 +86,7 @@ static void show_notice(const char *text)
 static void apply_view(void)
 {
     /* 2 = locked to the display: the loop waits for VBlank itself. */
-    world_window_set_view((int)settings.scaling, settings.pacing == 2 ? (int)settings.vsync : 2);
+    world_window_set_view((int)settings.scaling, 2);
     char preset[1200] = "", error[256] = "", folder[1024];
     if (settings.crt_shader) {
         if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
@@ -130,12 +98,12 @@ static void apply_view(void)
     /* Smooth and Exact pacing present through a DXGI flip-model swap chain:
        it waits for each refresh precisely and shows every frame on the
        refresh it was meant for. */
-    int flip = settings.pacing != 2;
+    int flip = 1;
     if (!world_window_set_crt(preset, 0, flip, error, sizeof error)) {
         fprintf(stderr, "CRT view unavailable: %s\n", error);
         if (preset[0]) show_notice("CRT SHADER UNAVAILABLE");
         settings.crt_shader = 0;
-                world_window_set_crt("", 0, 0, NULL, 0);
+                world_window_set_crt("", 0, 1, NULL, 0);
     }
 }
 
@@ -163,27 +131,15 @@ static void scene_submit(void)
     world_scene_submit(&frame);
 }
 
-/* The default arcade picture does not consume decoded enhancement layers. */
-static int scene_live_active;
-static void scene_submit_live(void)
-{
-    if (!settings.fx_enable) { scene_live_active = 0; return; }
-    if (!scene_live_active) {
-        world_scene_reset(); /* No interpolation or stale particles across disabled frames. */
-        scene_live_active = 1;
-    }
-    scene_submit();
-}
-
 static WorldSceneFx scene_effects(void)
 {
     WorldSceneFx fx = {0};
-    fx.caustics = settings.fx_caustics; fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
+    fx.rays = settings.fx_rays; fx.lights = settings.fx_lights;
     fx.sunshadow = settings.fx_sunshadow; fx.glow = settings.fx_glow; fx.reflect = settings.fx_reflect;
     fx.depth = settings.fx_depth;
     fx.snow = settings.fx_snow; fx.vivid = settings.fx_vivid;
-    fx.trails = settings.fx_trails; fx.shadows = settings.fx_shadows; fx.dof = settings.fx_dof;
-    fx.haze = settings.fx_haze; fx.normals = settings.fx_normals;
+    fx.trails = settings.fx_trails;
+    fx.haze = settings.fx_haze;
     fx.shock = settings.fx_shock; fx.particles = settings.fx_particles; fx.shake = settings.fx_shake;
     fx.surface = settings.fx_surface; fx.smooth = settings.fx_smooth; fx.interp = settings.fx_interp;
     fx.wakes = settings.fx_wakes; fx.debris = settings.fx_debris;
@@ -195,6 +151,9 @@ static WorldSceneFx scene_effects(void)
     fx.ocean_depth = settings.fx_ocean_depth;
     fx.aftermath = settings.fx_aftermath;
     fx.materials = settings.fx_materials;
+    fx.bubble_light = settings.fx_bubble_light;
+    fx.contact_shade = settings.fx_contact_shade;
+    fx.blast_reflect = settings.fx_blast_reflect;
     return fx;
 }
 
@@ -204,8 +163,13 @@ static WorldSceneFx scene_effects(void)
  * 240-line picture. */
 static int scene_scale(void)
 {
-    if (!(settings.fx_smooth || settings.fx_interp) || settings.crt_shader) return 1;
+    if (settings.crt_shader) return 1;
     int scale = world_window_scale();
+    /* Two subpixel phases per arcade pixel match the two refreshes per
+       board tick on 120 Hz displays. Avoid rasterizing a 4x picture when
+       2x tiles divide the output exactly. Odd scales stay pixel-aligned. */
+    double hz = world_window_refresh_hz();
+    if (scale>=2 && scale%2==0 && hz>0 && hz<=121.0) return 2;
     for (int k = WORLD_SCENE_MAX_K; k > 1; --k)
         if (scale % k == 0) return k;
     return 1;
@@ -214,13 +178,13 @@ static int scene_scale(void)
 /* Render the enhanced picture, or copy the plain one. Returns K. */
 static int enhance(const uint32_t *source, uint32_t *target, uint32_t time, int k, double alpha)
 {
-    if (settings.fx_enable) {
-        WorldSceneFx fx = scene_effects();
-        if (world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
-            unsigned strength = world_scene_take_rumble();
-            if (strength && settings.fx_shake) world_window_rumble(strength, 160);
-            return k;
-        }
+    WorldSceneFx fx = settings.fx_enable ? scene_effects() : (WorldSceneFx){0};
+    fx.smooth = 1;
+    fx.interp = 0;
+    if (world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
+        unsigned strength = world_scene_take_rumble();
+        if (strength && settings.fx_shake) world_window_rumble(strength, 160);
+        return k;
     }
     memcpy(target, source, sizeof(uint32_t) * 320 * 240);
     return 1;
@@ -252,20 +216,16 @@ static void overlay_notices(uint32_t *frame, int k)
  * displayed refresh (by 1/k when locked to the display, by elapsed time
  * otherwise), in play and in the pause menu alike, and never goes back. */
 static double beam_time;
-static unsigned pacing_k;
 static LONGLONG beam_last;
 
-static void beam_step(int new_frame)
+static void beam_step(void)
 {
     LARGE_INTEGER now, rate;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&rate);
-    if (pacing_k) {
-        /* A new game frame starts on a whole emulated refresh. */
-        if (new_frame) beam_time = ceil(beam_time - 1e-6);
-        else beam_time += 1.0 / pacing_k;
-    } else if (beam_last)
-        beam_time += (double)(now.QuadPart - beam_last) * 6666666.0 / ((double)rate.QuadPart * 424.0 * 262.0);
+    if (beam_last)
+        beam_time += (double)(now.QuadPart - beam_last) * WORLD_CLOCK_PIXEL_HZ /
+                     ((double)rate.QuadPart * WORLD_CLOCK_FRAME_PIXELS);
     beam_last = now.QuadPart;
     world_window_set_source_time(beam_time);
 }
@@ -273,7 +233,11 @@ static void beam_step(int new_frame)
 static void present_game(const uint32_t *source)
 {
     /* The title menu sits over the running attract sequence, at 1x. */
-    int title = menu.open && menu.title && !menu.peek;
+    int title = menu.open && menu.title && !menu.title_hidden && !menu.peek;
+    static WorldLightScene lights;
+    int trace=!title && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow)
+        && world_gpu_transport_available();
+    world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
     if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
     overlay_notices(shown, k);
@@ -284,17 +248,11 @@ static void present_game(const uint32_t *source)
         world_menu_draw_text(shown, 320u * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
         world_menu_draw_text(shown, 320u * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
     }
+    world_gpu_light_frame(trace && lights.scale==k ? &lights : NULL);
     world_window_present(shown, k);
+    world_gpu_light_frame(NULL);
 }
 
-static void apply_border(void)
-{
-    world_window_set_border(strcmp(settings.border, "black") ? settings.border_image : "", settings.border_brightness);
-}
-
-/* Runs the open menu for one frame: the pause menu on the paused picture,
- * the title menu (drawn by present_game over the live game). Returns the
- * world_menu_update result bits. */
 static unsigned launch_fullscreen_override, desktop_fullscreen;
 static WorldSettingsStatus save_runtime_settings(void)
 {
@@ -316,10 +274,9 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         launch_fullscreen_override = 0; /* An explicit player choice supersedes launch mode. */
         world_window_set_display(settings.fullscreen, settings.window_scale);
     }
-    if (result & WORLD_MENU_BORDER) apply_border();
     if (result & WORLD_MENU_VIEW) {
         apply_view();
-        scene_submit_live(); /* Refresh immediately for a paused-menu preview. */
+        scene_submit(); /* Refresh immediately for a paused-menu preview. */
     }
     if (result & WORLD_MENU_TIMING) world_clock_request_mode(&board_clock, settings.timing_mode);
     if ((result & WORLD_MENU_SAVE) && save_runtime_settings() != WORLD_SETTINGS_OK)
@@ -333,7 +290,7 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         memcpy(pixels, paused, sizeof pixels);
         world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
         overlay_notices(pixels, 1);
-        beam_step(0);
+        beam_step();
         world_window_present(pixels, 1);
     }
     return result;
@@ -456,7 +413,7 @@ static void sound_frame(void)
     }
 }
 
-static void draw(void)
+static void capture_video(void)
 {
     WorldVideoLayer layers[3];
     for (unsigned i = 0; i < 3; ++i) {
@@ -474,11 +431,21 @@ static void draw(void)
     uint32_t *colors = drawn_colors;
     for (unsigned i = 0; i < 1024; ++i) colors[i] = world_video_rgb(word(palette + 2*i));
     memcpy(drawn_layers, layers, sizeof drawn_layers);
+}
+
+static void draw_captured_pixels(void)
+{
     for (unsigned y = 0; y < 240; ++y) {
         uint16_t line[320];
-        world_video_scanline(line, y, tiles, gfx1, gfx2, sprites, layers, word(ram + 0x8b28));
-        for (unsigned x = 0; x < 320; ++x) pixels[y*320+x] = colors[line[x] & 1023];
+        world_video_scanline(line, y, tiles, gfx1, gfx2, drawn_sprites, drawn_layers, word(ram + 0x8b28));
+        for (unsigned x = 0; x < 320; ++x) pixels[y*320+x] = drawn_colors[line[x] & 1023];
     }
+}
+
+static void draw(void)
+{
+    capture_video();
+    draw_captured_pixels();
 }
 
 /* ---- slowdown model ------------------------------------------------------
@@ -625,8 +592,8 @@ static int tick(uint16_t pads, uint16_t system)
     world_clock_note_unrecovered(&board_clock);
     for (unsigned i = 0; i < 3; ++i)
         if (ram[0x29a] & (1u << i)) layer_master[i] = word(ram + 0x29c + 2*i);
-    if (master == 0xa0e) layer_master[1] = 1;
-    if (master == 0x24e2 || master == 0x344d || master == 0x333d)       /* OUT 98/9A/9C = 0, 1, 2 */
+    if (master == 0xa0e || master == 0x24e2 || master == 0x344d || master == 0x333d ||
+        master == 0xc466 || master == 0xc66e || (master == 0xc3e && word(ram + 0x86) == 1))       /* OUT 98/9A/9C = 0, 1, 2 */
         for (unsigned i = 0; i < 3; ++i) layer_master[i] = (uint16_t)i;
     if (master == 0xa09 || master == 0x1d52)
         memcpy(layer_master, title_master_controls, sizeof layer_master);
@@ -855,7 +822,6 @@ static void headless_run(const char *dir, const char *script_path)
             menu_shot_done = 1;
             static uint32_t still[320*240];
             memcpy(still, pixels, sizeof still);
-            menu_borders(dir);
             static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0},
                                                 {1,0,6,0},{1,2,3,0},{1,3,1,0},{1,3,9,0}};
             for (unsigned i = 0; i < sizeof pages / sizeof pages[0]; ++i) {
@@ -890,13 +856,11 @@ static void headless_run(const char *dir, const char *script_path)
         if (fx_shot && !fx_shot_done && ticks >= strtoul(fx_shot, NULL, 10)) {
             fx_shot_done = 1;
             static const struct { const char *name; size_t offset; } effects[] = {
-                {"caustics", offsetof(WorldSettings, fx_caustics)}, {"rays", offsetof(WorldSettings, fx_rays)},
+                {"rays", offsetof(WorldSettings, fx_rays)},
                 {"lights", offsetof(WorldSettings, fx_lights)},
                 {"depth", offsetof(WorldSettings, fx_depth)},
                 {"snow", offsetof(WorldSettings, fx_snow)}, {"vivid", offsetof(WorldSettings, fx_vivid)},
-                {"shadows", offsetof(WorldSettings, fx_shadows)},
-                {"dof", offsetof(WorldSettings, fx_dof)}, {"haze", offsetof(WorldSettings, fx_haze)},
-                {"normals", offsetof(WorldSettings, fx_normals)},
+                {"haze", offsetof(WorldSettings, fx_haze)},
                 {"shock", offsetof(WorldSettings, fx_shock)}, {"particles", offsetof(WorldSettings, fx_particles)},
                 {"surface", offsetof(WorldSettings, fx_surface)}, {"sunshadow", offsetof(WorldSettings, fx_sunshadow)},
                 {"glow", offsetof(WorldSettings, fx_glow)}, {"reflect", offsetof(WorldSettings, fx_reflect)},
@@ -912,6 +876,9 @@ static void headless_run(const char *dir, const char *script_path)
                 {"ocean_depth", offsetof(WorldSettings, fx_ocean_depth)},
                 {"aftermath", offsetof(WorldSettings, fx_aftermath)},
                 {"materials", offsetof(WorldSettings, fx_materials)},
+                {"bubble_light", offsetof(WorldSettings, fx_bubble_light)},
+                {"contact_shade", offsetof(WorldSettings, fx_contact_shade)},
+                {"blast_reflect", offsetof(WorldSettings, fx_blast_reflect)},
 
             };
             enum { EFFECTS = sizeof effects / sizeof effects[0] };
@@ -991,41 +958,16 @@ static void headless_run(const char *dir, const char *script_path)
                 fprintf(stderr, "CRT preset %u (%s) rendered in %lu ms%c", i, i ? world_gpu_preset_name[i - 1] : "OFF", (unsigned long)(GetTickCount() - started), 10);
             }
         }
-        /* WORLD_BORDER_SHOT=frame composes that frame with every border
-           preset at 1920x1080 (and 1280x1024) through the window painter. */
-        static int border_shot_done;
-        const char *border_shot = getenv("WORLD_BORDER_SHOT");
-        if (border_shot && !border_shot_done && ticks >= strtoul(border_shot, NULL, 10)) {
-            border_shot_done = 1;
-            int border_failed = 0;
-            menu_borders(dir);
-            static const int sizes[2][2] = {{1920, 1080}, {1280, 1024}};
-            for (unsigned i = 0; i < menu.border_count; ++i) {
-                world_border_set(menu.border_path[i], 100);
-                for (unsigned s = 0; s < 2; ++s) {
-                    char path[4096];
-                    snprintf(path, sizeof path, "%s/headless-border%u-%dx%d.bmp", dir, i,
-                             sizes[s][0], sizes[s][1]);
-                    if (!world_window_compose_bmp(pixels, sizes[s][0], sizes[s][1], path)) {
-                        snprintf(failure, sizeof failure, "Border composition failed: %s", menu.border_name[i]);
-                        border_failed = 1;
-                    }
-                }
-            }
-            world_border_set("", 100);
-            /* The three scaling modes on a black border. */
-            static const char *const views[3] = {"integer", "fit", "stretch"};
-            for (int v = 0; v < 3 && !border_failed; ++v) {
-                char path[4096];
-                world_window_set_view(v, 0);
-                snprintf(path, sizeof path, "%s/headless-view-%s.bmp", dir, views[v]);
-                if (!world_window_compose_bmp(pixels, 1920, 1080, path)) {
-                    snprintf(failure, sizeof failure, "View composition failed: %s", views[v]);
-                    border_failed = 1;
-                }
-            }
+        static int view_shot_done;
+        const char *view_shot = getenv("WORLD_VIEW_SHOT");
+        if (view_shot && !view_shot_done && ticks >= strtoul(view_shot, NULL, 10)) {
+            view_shot_done = 1;
+            char path[4096];
+            snprintf(path, sizeof path, "%s/headless-view-fit.bmp", dir);
+            world_window_set_view(1, 0);
+            int ok = world_window_compose_bmp(pixels, 1920, 1080, path);
             world_window_set_view(0, 0);
-            if (border_failed) break;
+            if (!ok) { snprintf(failure, sizeof failure, "View composition failed"); break; }
         }
         if (save_path && ticks >= save_at) {
             FILE *f = world_fopen(save_path, "wb");
@@ -1094,7 +1036,6 @@ static void headless_run(const char *dir, const char *script_path)
             world_settings_defaults(&settings);
             settings.bindings = keep.bindings;
             settings.fx_enable = 1;
-            if (getenv("WORLD_SCENE_ALL")) settings.fx_dof = 1;
             /* Diagnostic A/B override: all other enhancements stay identical. */
             const char *reactive = getenv("WORLD_SCENE_REACTIVE");
             if (reactive) settings.fx_wakes = settings.fx_debris = settings.fx_silt = settings.fx_splashes = atoi(reactive) != 0;
@@ -1146,7 +1087,7 @@ static void headless_run(const char *dir, const char *script_path)
                 fprintf(stderr, "scene K=%d: mean %.2f ms, worst %.2f ms over %lu renders%c", scene_run,
                         scene_ms / (double)scene_count, scene_worst, scene_count, 10);
             if (ticks % 2000 < elapsed_board_frames) {
-                extern double world_scene_stage_ms[6];
+
                 double n = world_scene_stage_ms[5];
                 extern unsigned world_scene_explosions;
                 extern unsigned world_scene_waterfx_emitted[6];
@@ -1279,6 +1220,36 @@ static int play_tick(uint16_t pads, uint16_t system)
     return tick(pads, system);
 }
 
+/* Camera samples belong to display refreshes. CPU wake-up jitter must
+ * not change their spacing. Only predict the display time, never inputs
+ * or the simulation. Discard stale statistics after a pause/mode change. */
+static double camera_display_time(LONGLONG now,LONGLONG frequency)
+{
+    static int64_t anchor, last_sync;
+    static unsigned anchor_refresh;
+    static double period;
+    int64_t sync;
+    unsigned refresh;
+    if (!world_gpu_sync_sample(&sync,&refresh) || sync>now || now-sync>frequency/4) {
+        anchor=last_sync=0; period=0;
+        return (double)now;
+    }
+    if (!anchor || sync<last_sync) {
+        anchor=sync; anchor_refresh=refresh; period=0;
+    }
+    unsigned elapsed=refresh-anchor_refresh;
+    if (elapsed>=8 && sync>anchor) {
+        double sample=(double)(sync-anchor)/elapsed;
+        if (sample>=frequency/1000.0 && sample<=frequency/20.0) period=sample;
+        anchor=sync; anchor_refresh=refresh;
+    }
+    last_sync=sync;
+    if (!period) return (double)now;
+    /* Associate the wake with its nearest scan boundary. Leading by a whole
+       refresh would saturate the one-tick prediction on 120 Hz displays. */
+    return sync+floor((now-sync)/period+.5)*period;
+}
+
 static int run_game(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : world_default_directory();
@@ -1300,6 +1271,10 @@ static int run_game(int argc, char **argv)
             return 1;
         }
         timing_override = 1;
+    }
+    if (!headless) {
+        settings.timing_mode = WORLD_TIMING_ARCADE;
+        settings.crt_shader = 0;
     }
     const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
     if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) {
@@ -1354,43 +1329,28 @@ load_game_data:
         return 1;
     }
     world_window_set_display(settings.fullscreen, settings.window_scale);
-    menu_borders(dir);
-    apply_border();
     apply_view();
     timeBeginPeriod(1);                 /* Sleep(1) must mean one millisecond for even pacing */
     LARGE_INTEGER rate, now;
     QueryPerformanceFrequency(&rate);
     QueryPerformanceCounter(&now);
     double deadline = (double)now.QuadPart;
-    const double arcade_period = (double)rate.QuadPart * (424 * 262) / 6666666;
+    const double arcade_period = (double)rate.QuadPart * WORLD_CLOCK_FRAME_PIXELS / WORLD_CLOCK_PIXEL_HZ;
     uint16_t pads, system;
     static uint32_t paused_frame[320*240];
     unsigned previous_toggle = 0, hold_input = 0, counted = 0, presented = 0;
-    int was_focused = 0, fresh = 0;
+    int was_focused = 0;
     LONGLONG counted_from = now.QuadPart;
-    double present_deadline = (double)now.QuadPart;
-    /* Display lock (Smooth and Exact pacing): when the display refresh is a
-       whole multiple k of the board's 60.01 Hz (within 0.6 %), the loop runs
-       on the display's VBlank. It presents on every refresh and runs a game
-       frame every k refreshes, so each game frame is shown for exactly k
-       refreshes and scrolling is perfectly even. A pass that overran keeps
-       its frame up for k refreshes per board frame. Smooth runs the game at
-       the display's pace (60.000 Hz on a 60/120 Hz display, 0.02 % slower than
-       the board); Exact keeps the board's 60.0125 Hz by running one extra
-       frame whenever the display falls a whole frame behind (about every 80 s
-       at 60/120 Hz). Timer pacing, or a display that is not a whole multiple,
-       uses the board clock and the timer loop below. */
-    unsigned lock_k = 0, lock_wait = 0, lock_phase = 0, lock_span = 1;
-    double lock_hz = 0.0, lock_origin = 0.0;
-    unsigned long lock_ticks = 0, live_ticks = 0;
-    unsigned lock_ready = 0, lock_next_span = 1;
-    static uint32_t live[320 * 240];          /* the game frame on show while locked */
-    LONGLONG lock_checked = 0;
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    double last_tick = deadline;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     world_menu_open_title(&menu, 0, 0, GetTickCount());
+    menu.title_hidden = 1;
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
     FILE *pacing_log = getenv("WORLD_PACING_LOG") ? world_fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
+    /* Keep diagnostic file writes off the presentation deadline. */
+    static char pacing_buffer[4*1024*1024];
+    if (pacing_log) setvbuf(pacing_log,pacing_buffer,_IOFBF,sizeof pacing_buffer);
     double run_seconds = getenv("WORLD_RUN_SECONDS") ? atof(getenv("WORLD_RUN_SECONDS")) : 0.0;
     LONGLONG run_start = now.QuadPart;
     while (world_window_poll(&pads, &system)) {
@@ -1407,50 +1367,11 @@ load_game_data:
         was_focused = focused;
         QueryPerformanceCounter(&now);
         if (run_seconds > 0.0 && (double)(now.QuadPart - run_start) > run_seconds * (double)rate.QuadPart) break;
-        /* Re-check the display twice a second (mode changes, moving monitors). */
-        if (now.QuadPart - lock_checked > rate.QuadPart / 2) {
-            lock_checked = now.QuadPart;
-            unsigned k = 0;
-            double hz = settings.pacing != 2 ? world_window_refresh_hz() : 0.0;
-            if (hz > 20.0) {
-                k = (unsigned)(hz / 60.0125 + 0.5);
-                if (k < 1 || k > 8 || fabs(hz / k - 60.0125) / 60.0125 > 0.006) k = 0;
-            }
-            if (k != lock_k || fabs(hz - lock_hz) > 0.01) {
-                if (pacing_log) fprintf(pacing_log, "lock %.4f %u%c", hz, k, 10);
-                lock_k = k;
-                lock_hz = hz;
-                lock_wait = lock_phase = lock_ready = 0;
-                lock_origin = (double)now.QuadPart;
-                lock_ticks = 0;
-                deadline = (double)now.QuadPart;
-            }
-        }
-        pacing_k = lock_k;
-        /* Test hooks: WORLD_TEST_CRT_CYCLE=n switches to the next CRT preset
-           (beam simulator on) every n refreshes; WORLD_TEST_MENU=1 holds the
-           pause menu open on the Video tab. */
         static unsigned long test_refreshes;
         ++test_refreshes;
-        if (getenv("WORLD_TEST_CRT_CYCLE")) {
-            unsigned long every = strtoul(getenv("WORLD_TEST_CRT_CYCLE"), NULL, 10);
-            if (every && test_refreshes % every == 0) {
-                settings.crt_shader = settings.crt_shader % WORLD_GPU_PRESETS + 1;
-                                apply_view();
-                if (pacing_log) fprintf(pacing_log, "switch %u%c", settings.crt_shader, 10);
-            }
-        }
-        if (getenv("WORLD_TEST_PACING_CYCLE")) {
-            unsigned long every = strtoul(getenv("WORLD_TEST_PACING_CYCLE"), NULL, 10);
-            if (every && test_refreshes % every == 0) {
-                settings.pacing = (settings.pacing + 1) % 3;
-                apply_view();
-                if (pacing_log) fprintf(pacing_log, "pacing %u%c", settings.pacing, 10);
-                fprintf(stderr, "pacing switched to %u at refresh %lu%c", settings.pacing, test_refreshes, 10);
-            }
-        }
         if (getenv("WORLD_TEST_MENU") && !menu.open && test_refreshes == 180) {
-            memcpy(paused_frame, lock_k ? live : pixels, sizeof paused_frame);
+            draw_captured_pixels();
+            memcpy(paused_frame, pixels, sizeof paused_frame);
             world_menu_open(&menu, 0, 0, GetTickCount());
             menu.page = 1;
         }
@@ -1476,10 +1397,9 @@ load_game_data:
                 ++phase;
             } else if (phase == 3 && ticks >= 900) break;
         }
-        unsigned limit = world_menu_fps[settings.fps_limit];
-        double period = arcade_period;
-        double display_period = !limit || limit == 0xffffffffu ? 0.0 : (double)rate.QuadPart / limit;
         if (menu.open && menu.title) {
+            unsigned title_held = menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0);
+            world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
             if (result & WORLD_MENU_START) {
@@ -1502,12 +1422,9 @@ load_game_data:
                 previous_toggle = toggle;
                 QueryPerformanceCounter(&now);
                 deadline = (double)now.QuadPart;
-                lock_wait = lock_phase = lock_ready = 0;
-                lock_origin = (double)now.QuadPart;
-                lock_ticks = 0;
+                last_tick = deadline;
             }
-            if (lock_k) world_window_wait_vblank();
-            else Sleep(15);
+            world_window_wait_vblank();
             if (pacing_log) {
                 QueryPerformanceCounter(&now);
                 fprintf(pacing_log, "%.4f menu %.3f%c", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart, beam_time, 10);
@@ -1515,120 +1432,60 @@ load_game_data:
             continue;
         }
         if (rising && !menu.open) {
-            memcpy(paused_frame, lock_k ? live : pixels, sizeof paused_frame);
+            draw_captured_pixels();
+            memcpy(paused_frame, pixels, sizeof paused_frame);
             world_menu_open(&menu, menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0), gamepad, GetTickCount());
             menu_frame(paused_frame, menu_held, toggle, 0, gamepad);
             continue;
         }
-        /* Keys used to leave the menu are not passed to the game until released. */
-        if (hold_input) {
-            if ((uint16_t)~pads || ((uint16_t)~system & 0xf) || menu_held) pads = system = 0xffff;
-            else hold_input = 0;
+        /* Board deadlines advance only by elapsed arcade vblanks. Display
+           refreshes may repeat a state, but never stage the next input frame. */
+        QueryPerformanceCounter(&now);
+        int advanced = 0;
+        while ((double)now.QuadPart >= deadline) {
+            if (!world_window_poll(&pads, &system)) goto end_loop;
+            if (hold_input) {
+                if (pads != 0xffff || ((uint16_t)~system & 15) || menu_held) pads = system = 0xffff;
+                else hold_input = 0;
+            }
+            if (!play_tick(pads, system)) goto end_loop;
+            last_tick = deadline;
+            deadline += arcade_period * elapsed_board_frames;
+            ticks += elapsed_board_frames;
+            counted += elapsed_board_frames;
+            advanced = 1;
         }
-
-        if (lock_k) {
-            /* The next game frame is computed during the last refresh of the
-               current one (all of it when k is 1), so the refresh where it
-               goes live only has to present it. */
-            if (!lock_ready && (lock_wait <= 1 || lock_k == 1)) {
-                unsigned runs = 1;
-                if (settings.pacing == 1) {
-                    /* Exact: keep the game frame count on the board clock. */
-                    double owed = ((double)now.QuadPart - lock_origin) / period - (double)lock_ticks;
-                    if (owed > 1.5) runs = 2;
-                    else if (owed < -1.5) runs = 0;
-                    if (runs != 1 && pacing_log) fprintf(pacing_log, "correct %u owed %.3f%c", runs, owed, 10);
-                }
-                /* The hold is set by the first pass alone: an overrun keeps
-                   its frame up for every board frame it took, while an Exact
-                   catch-up pass only advances the game. */
-                unsigned span = 0;
-                for (unsigned r = 0; r < runs; ++r) {
-                    if (!play_tick(pads, system)) { runs = 99; break; }
-                    ticks += elapsed_board_frames;
-                    lock_ticks += elapsed_board_frames;
-                    counted += elapsed_board_frames;
-                    if (!r) span = elapsed_board_frames;
-                }
-                if (runs == 99) break;
-                if (runs) draw();
-                lock_next_span = span ? span : 1;
-                lock_ready = 1;
-            }
-            if (!lock_wait) {
-                memcpy(live, pixels, sizeof live);
-                scene_submit_live();
-                live_ticks = ticks;
-                lock_span = lock_next_span;
-                lock_wait = lock_k * lock_span;
-                lock_phase = 0;
-                lock_ready = 0;
-            }
-            beam_step(lock_phase == 0);
-            /* In-between frames: this refresh's place between the last game
-               frame and the one on show; the final refresh shows it exactly. */
-            scene_alpha = (double)(lock_phase + 1) / (double)(lock_k * lock_span);
-            present_game(live);
-            ++presented;
-            fresh = 0;
-            --lock_wait;
-            ++lock_phase;
-            world_window_wait_vblank();
-            if (pacing_log) {
-                QueryPerformanceCounter(&now);
-                fprintf(pacing_log, "%.4f %lu %u %u %u\n", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart,
-                        live_ticks, lock_phase, lock_k, word(ram + 0xb70a));
-                unsigned shown_present = 0, shown_refresh = 0, made = 0;
-                if (world_gpu_frame_statistics(&shown_present, &shown_refresh, &made))
-                    fprintf(pacing_log, "dxgi %u %u %u%c", shown_present, shown_refresh, made, 10);
-            }
-        } else {
-            if (now.QuadPart >= deadline) {
-                if (now.QuadPart - deadline > rate.QuadPart / 4) deadline = (double)now.QuadPart;
-                if (!play_tick(pads, system)) break;
-                double present_at = deadline + period * (elapsed_board_frames - 1);
-                int window_open = 1;
-                QueryPerformanceCounter(&now);
-                while (now.QuadPart < present_at && window_open) {
-                    window_open = world_window_poll(&pads, &system);
-                    if (window_open) Sleep(1);
-                    QueryPerformanceCounter(&now);
-                }
-                if (!window_open) break;
-                deadline += period * elapsed_board_frames;
-                ticks += elapsed_board_frames;
-                draw();
-                scene_submit_live();
-                scene_alpha = 1.0;
-                counted += elapsed_board_frames;
-                fresh = 1;
-            }
-            /* Arcade redraws once per game frame; a limit redraws on its own
-               clock; uncapped redraws every pass (v-sync, if on, paces it). */
-            int show = 0;
-            QueryPerformanceCounter(&now);
-            if (!limit) show = fresh;
-            else if (limit == 0xffffffffu) show = 1;
-            else if (now.QuadPart >= present_deadline) {
-                show = 1;
-                present_deadline += display_period;
-                if (now.QuadPart - present_deadline > rate.QuadPart / 4) present_deadline = (double)now.QuadPart;
-            }
-            if (show) {
-                beam_step(0);
-                present_game(pixels);
-                ++presented;
-                fresh = 0;
-                if (pacing_log)
-                    fprintf(pacing_log, "%.4f %lu 0 0 %u%c", (double)now.QuadPart * 1000.0 / (double)rate.QuadPart,
-                            ticks, word(ram + 0xb70a), 10);
-            } else {
-                double next = deadline;
-                if (limit && limit != 0xffffffffu && present_deadline < next) next = present_deadline;
-                if (next - (double)now.QuadPart > (double)rate.QuadPart / 1000.0) Sleep(1);
-            }
+        LARGE_INTEGER after_tick, after_submit, after_present;
+        if (pacing_log) QueryPerformanceCounter(&after_tick);
+        if (advanced) {
+            capture_video();
+            scene_submit();
+        }
+        /* Hold original multi-vblank slowdown frames. On extra display
+           refreshes only the camera can advance beyond the newest pose. */
+        double phase = (camera_display_time(now.QuadPart,rate.QuadPart) - last_tick) / arcade_period;
+        scene_alpha = 1.0 + (elapsed_board_frames == 1 ? fmin(1.0,fmax(0.0,phase)) : 0.0);
+        if (pacing_log) QueryPerformanceCounter(&after_submit);
+        beam_step();
+        present_game(pixels);
+        ++presented;
+        if (pacing_log) {
+            QueryPerformanceCounter(&after_present);
+            fprintf(pacing_log,"cost %d %.3f %.3f %.3f",advanced,
+                    (after_tick.QuadPart-now.QuadPart)*1000.0/rate.QuadPart,
+                    (after_submit.QuadPart-after_tick.QuadPart)*1000.0/rate.QuadPart,
+                    (after_present.QuadPart-after_submit.QuadPart)*1000.0/rate.QuadPart);
+            for(int j=0;j<5;++j) fprintf(pacing_log," %.3f",world_scene_stage_ms[j]);
+            memset(world_scene_stage_ms,0,sizeof(double)*6);
+            fputc(10,pacing_log);
+            fprintf(pacing_log, "%.4f %lu %.5f %u\n",
+                    (double)now.QuadPart * 1000.0 / rate.QuadPart,ticks,scene_alpha,word(ram + 0xb70a));
+            unsigned shown_present, shown_refresh, made;
+            if (world_gpu_frame_statistics(&shown_present,&shown_refresh,&made))
+                fprintf(pacing_log,"dxgi %u %u %u\n",shown_present,shown_refresh,made);
         }
         world_audio_output_pump();
+        world_window_wait_vblank();
         QueryPerformanceCounter(&now);
         if (now.QuadPart - counted_from >= rate.QuadPart / 2) {
             double seconds = (double)(now.QuadPart - counted_from) / (double)rate.QuadPart;
@@ -1638,6 +1495,7 @@ load_game_data:
             counted_from = now.QuadPart;
         }
     }
+end_loop:
     if (pacing_log) fclose(pacing_log);
     timeEndPeriod(1);
     world_window_close();

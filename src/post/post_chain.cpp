@@ -139,6 +139,11 @@ float3 sharpen(float2 uv, float3 e) {
     return saturate((e + (b + d + f + h) * w) / (1.0 + 4.0 * w));
 }
 
+float4 ps_pixels(float4 pos : SV_Position) : SV_Target {
+    float2 uv = (pos.xy - dst_rect.xy) / (dst_rect.zw - dst_rect.xy);
+    return float4(tex.SampleLevel(s_point, uv, 0).rgb, 1);
+}
+
 float4 ps(float4 pos : SV_Position) : SV_Target {
     float2 size = dst_rect.zw - dst_rect.xy;
     float2 q = (pos.xy - dst_rect.xy) / size * 2.0 - 1.0;      // -1..1 over the picture
@@ -290,7 +295,7 @@ struct PostChain::Impl {
     bool params_dirty = true;
 
     Com<ID3D12RootSignature> root;
-    Com<ID3DBlob> vs_blob, ps_blob, ps_beam_blob;
+    Com<ID3DBlob> vs_blob, ps_blob, ps_beam_blob, ps_pixels_blob;
     std::unordered_map<uint32_t, Com<ID3D12PipelineState>> psos;
     Com<ID3D12DescriptorHeap> rtv_heap, srv_heap;
     uint32_t rtv_size = 0, srv_size = 0, srv_next = 0;
@@ -368,6 +373,7 @@ struct PostChain::Impl {
             }
         };
         compile("vs", "vs_5_0", vs_blob);
+        compile("ps_pixels", "ps_5_0", ps_pixels_blob);
         compile("ps", "ps_5_0", ps_blob);
         compile("ps_beam", "ps_5_0", ps_beam_blob);
 
@@ -403,11 +409,11 @@ struct PostChain::Impl {
         fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     }
 
-    ID3D12PipelineState* pso_for(DXGI_FORMAT fmt, bool beam) {
-        const uint32_t key = static_cast<uint32_t>(fmt) | (beam ? 0x10000u : 0u);
+    ID3D12PipelineState* pso_for(DXGI_FORMAT fmt, bool beam, bool pixels) {
+        const uint32_t key = static_cast<uint32_t>(fmt) | (beam ? 0x10000u : 0u) | (pixels ? 0x20000u : 0u);
         auto it = psos.find(key);
         if (it != psos.end()) return it->second.get();
-        ID3DBlob* pixel = beam ? ps_beam_blob.get() : ps_blob.get();
+        ID3DBlob* pixel = pixels ? ps_pixels_blob.get() : beam ? ps_beam_blob.get() : ps_blob.get();
         D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
         d.pRootSignature = root.get();
         d.VS = {vs_blob->GetBufferPointer(), vs_blob->GetBufferSize()};
@@ -525,6 +531,7 @@ struct PostChain::Impl {
         Filter filter = kNearest;
         Encode encode = kCopy;
         Encode background = kSdr;
+        bool pixels = false;
         bool final_pass = false;            // adjustments, curvature and bezel apply
         bool beam = false;
         float beam_pos = 0, beam_fph = 1;
@@ -581,11 +588,13 @@ struct PostChain::Impl {
         ID3D12DescriptorHeap* heaps[] = {srv_heap.get()};
         cmd->SetDescriptorHeaps(1, heaps);
         cmd->SetGraphicsRootSignature(root.get());
-        cmd->SetPipelineState(pso_for(fmt, a.beam));
+        cmd->SetPipelineState(pso_for(fmt, a.beam, a.pixels));
         cmd->SetGraphicsRoot32BitConstants(0, sizeof(Constants) / 4, &c, 0);
         cmd->SetGraphicsRootDescriptorTable(1, gpu);
         const D3D12_VIEWPORT vp{0, 0, static_cast<float>(tw), static_cast<float>(th), 0, 1};
-        const D3D12_RECT sc{0, 0, static_cast<LONG>(tw), static_cast<LONG>(th)};
+        const D3D12_RECT sc=a.pixels
+            ? D3D12_RECT{(LONG)a.rect.x0,(LONG)a.rect.y0,(LONG)a.rect.x1,(LONG)a.rect.y1}
+            : D3D12_RECT{0,0,(LONG)tw,(LONG)th};
         cmd->RSSetViewports(1, &vp);
         cmd->RSSetScissorRects(1, &sc);
         cmd->OMSetRenderTargets(1, &target, FALSE, nullptr);
@@ -1065,6 +1074,23 @@ void PostChain::process(ID3D12GraphicsCommandList* cmd, ID3D12Resource* input, u
     m.chain_dirty = true;
     ++m.frame_count;
     ++m.stats.source_frames;
+}
+
+void PostChain::present_pixels(ID3D12GraphicsCommandList* cmd, ID3D12Resource* src,
+                               uint32_t width, uint32_t height, const Output& out) {
+    Impl& m=*impl_;
+    m.collect_retired();
+    Impl::DrawArgs a;
+    a.src=src; a.sw=width; a.sh=height;
+    a.rect=m.placement(out.width,out.height);
+    a.final_pass=true;
+    a.filter=width>(a.rect.x1-a.rect.x0)*1.5f || height>(a.rect.y1-a.rect.y0)*1.5f ? kBox : kNearest;
+    a.pixels=a.filter==kNearest;
+    a.background=kSdr;
+    a.encode=kSdr;
+    m.draw(cmd,a,out.rtv,out.format,out.width,out.height);
+    ++m.stats.source_frames;
+    ++m.stats.presents;
 }
 
 void PostChain::present(ID3D12GraphicsCommandList* cmd, const Output& out, uint32_t subframe, uint32_t total) {

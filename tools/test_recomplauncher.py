@@ -49,10 +49,10 @@ def main():
                     if '=' in line and not line.startswith('#'))
     defaults = read_config()
     baseline = {'timing_mode': 'arcade', 'fullscreen': '0', 'scaling': '0',
-                'window_scale': '3', 'pacing': '0', 'crt_shader': '0',
+                'window_scale': '3',
                 'fx_enable': '0', 'pause_unfocused': '1', 'autofire': '0',
                 'dip_lives': '1', 'dip_difficulty': '2', 'dip_demo_sound': '1',
-                'border': 'black', 'shader': 'pixels'}
+                'shader': 'pixels'}
     for key, value in baseline.items():
         assert defaults[key] == value, (key, defaults[key], value)
     exposed = {key for setting in profile['settings'] for key in setting['defaults']}

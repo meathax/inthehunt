@@ -51,8 +51,10 @@ int main(void) {
     waterfx_begin_frame();waterfx_motion(&fx);assert(!active(WF_SPLASH)); /* camera-only crossing */
     setup(1);fx=(WorldSceneFx){0};fx.silt=1;
     waterfx_begin_frame();waterfx_impact(120,130);assert(!active(WF_SILT));
-    layer_on[1]=1;memset(layer_col[1],0,sizeof layer_col[1]);
-    for(int y=145;y<HUD;y++)for(int x=80;x<200;x++)layer_col[1][(y+MARGIN)*LW+x+MARGIN]=0xff507070;
+    layer_on[1]=1;memset(layer_idx[1],0xff,sizeof layer_idx[1]);
+    cur.colors[1]=0xff507070;
+    for(int y=145;y<HUD;y++)for(int x=80;x<200;x++)layer_idx[1][(y+MARGIN)*LW+x+MARGIN]=1;
+    colour_rows(0,LH);
     transport(&fx);assert(!transport_valid && wf_rock(120,150)); /* independent of tracing */
     waterfx_impact(120,135);assert(active(WF_SILT)==1);
     waterfx_impact(121,135);assert(active(WF_SILT)==1);
@@ -158,6 +160,8 @@ int main(void) {
     /* Cached lighting is the same bilinear lookup, including image borders. */
     for(int i=0;i<PN;++i){total[0][i]=(i%19)*0.03f;total[1][i]=(i%23)*0.02f;
         total[2][i]=(i%29)*0.01f;light_dx[i]=(i%7)-3;light_dy[i]=(i%11)-5;sun_vis[i]=(i%5)*0.25f;}
+    WorldSceneFx probe_fx={0};
+    transport_fx=&probe_fx;
     cache_transport();
     for(int y=0;y<H;++y)for(int x=0;x<W;++x){
         PixelLight *p=&pixel_light[y*W+x];float dx=probe_sample(light_dx,x,y),dy=probe_sample(light_dy,x,y);
@@ -171,5 +175,21 @@ int main(void) {
     puts("PASS: cached lighting matches exact bilinear samples over all native pixels");
     puts("PASS: micro sparks/motes emission, dedup, budgets, drag, buoyancy, settling, surface, expiry, occlusion, settings");
     puts("PASS: independent emission, tracing-off terrain, camera crossing, caps, occlusion, HUD/sky, expiry, settling, reset, settings round trip");
+    setup(1); fx=(WorldSceneFx){.blast_reflect=1}; g.fx=&fx;
+    waterfx_blast(100,70,160,&fx); cinema_update(.02f); draw_blast_reflections(picture);
+    assert(memcmp(picture+60*W,clean+60*W,6*W*4));
+    assert(!memcmp(picture,clean,60*W*4) && !memcmp(picture+66*W,clean+66*W,(H-66)*W*4));
+    cinema_reset(); memcpy(picture,clean,N*4);
+    waterfx_blast(100,170,160,&fx); draw_blast_reflections(picture);
+    assert(!memcmp(picture,clean,N*4));
+    fx=(WorldSceneFx){.bubble_light=1};
+    waterfx_begin_frame(); p=wf_spawn(WF_WAKE,100,100,1); assert(p); p->size=2;
+    pixel_light[100*W+101]=(PixelLight){.r=1,.sun=1};
+    waterfx_draw(picture,&fx,0); assert(memcmp(picture,clean,N*4));
+    fx=(WorldSceneFx){.contact_shade=1};
+    uint32_t base=0xff808080, cavity=MAT_STEEL|(15u<<24);
+    assert(material_shade(base,cavity,100,100)!=base);
+    assert(material_shade(base,MAT_STEEL,100,100)==base);
+    puts("PASS: contact cavities, lit-only wake and depth-limited blast reflection");
     return 0;
 }

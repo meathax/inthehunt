@@ -173,123 +173,6 @@
       }
     },
     {
-      "id": "pacing",
-      "label": "Frame pacing",
-      "group": "Video",
-      "choices": [
-        {
-          "label": "Smooth",
-          "set": {
-            "pacing": "0"
-          }
-        },
-        {
-          "label": "Exact 60.01",
-          "set": {
-            "pacing": "1"
-          }
-        },
-        {
-          "label": "Timer",
-          "set": {
-            "pacing": "2"
-          }
-        }
-      ],
-      "defaults": {
-        "pacing": "0"
-      },
-      "help": "Smooth follows the display; Exact preserves arcade speed; Timer is free-running."
-    },
-    {
-      "id": "crt_shader",
-      "label": "CRT shader",
-      "group": "Video",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "crt_shader": "0"
-          }
-        },
-        {
-          "label": "CRT-Royale",
-          "set": {
-            "crt_shader": "1"
-          }
-        },
-        {
-          "label": "Royale PVM",
-          "set": {
-            "crt_shader": "2"
-          }
-        },
-        {
-          "label": "Guest Advanced",
-          "set": {
-            "crt_shader": "3"
-          }
-        },
-        {
-          "label": "Guest NTSC",
-          "set": {
-            "crt_shader": "4"
-          }
-        },
-        {
-          "label": "CRT-Geom",
-          "set": {
-            "crt_shader": "5"
-          }
-        },
-        {
-          "label": "CRT-Lottes",
-          "set": {
-            "crt_shader": "6"
-          }
-        },
-        {
-          "label": "CRT-Hyllian",
-          "set": {
-            "crt_shader": "7"
-          }
-        },
-        {
-          "label": "Easymode",
-          "set": {
-            "crt_shader": "8"
-          }
-        },
-        {
-          "label": "Aperture",
-          "set": {
-            "crt_shader": "9"
-          }
-        },
-        {
-          "label": "Consumer TV",
-          "set": {
-            "crt_shader": "10"
-          }
-        },
-        {
-          "label": "Caligari",
-          "set": {
-            "crt_shader": "11"
-          }
-        },
-        {
-          "label": "Zfast",
-          "set": {
-            "crt_shader": "12"
-          }
-        }
-      ],
-      "defaults": {
-        "crt_shader": "0"
-      }
-    },
-    {
       "id": "show_fps",
       "label": "Show FPS",
       "group": "Video",
@@ -354,28 +237,6 @@
       },
       "defaults": {
         "pcm_volume": "100"
-      }
-    },
-    {
-      "id": "timing_mode",
-      "label": "Slowdown",
-      "group": "Game",
-      "choices": [
-        {
-          "label": "Arcade",
-          "set": {
-            "timing_mode": "arcade"
-          }
-        },
-        {
-          "label": "Remove slowdown",
-          "set": {
-            "timing_mode": "remove-slowdown"
-          }
-        }
-      ],
-      "defaults": {
-        "timing_mode": "arcade"
       }
     },
     {
@@ -444,31 +305,6 @@
         "fx_enable": "0"
       },
       "help": "Optional visual effects; off preserves the original picture."
-    },
-    {
-      "id": "fx_caustics",
-      "label": "Caustics",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_caustics": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_caustics": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_caustics": "1"
-      },
-      "when": {
-        "fx_enable": "1"
-      }
     },
     {
       "id": "fx_rays",
@@ -821,6 +657,84 @@
       }
     },
     {
+      "id": "fx_bubble_light",
+      "label": "Bubble Lighting",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_bubble_light": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_bubble_light": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_bubble_light": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      },
+      "help": "Sunlit wakes and blast-lit bubbles."
+    },
+    {
+      "id": "fx_contact_shade",
+      "label": "Contact Shadows",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_contact_shade": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_contact_shade": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_contact_shade": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      },
+      "help": "Soft shading in underwater seams."
+    },
+    {
+      "id": "fx_blast_reflect",
+      "label": "Blast Reflections",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_blast_reflect": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_blast_reflect": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_blast_reflect": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      },
+      "help": "Explosion light on wave crests."
+    },
+    {
       "id": "fx_depth",
       "label": "Absorption",
       "group": "Enhance",
@@ -925,58 +839,6 @@
       "help": "Phosphor-style persistence."
     },
     {
-      "id": "fx_shadows",
-      "label": "Drop shadows",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_shadows": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_shadows": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_shadows": "1"
-      },
-      "when": {
-        "fx_enable": "1"
-      },
-      "help": "Sprites shade the scenery."
-    },
-    {
-      "id": "fx_dof",
-      "label": "Depth of field",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_dof": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_dof": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_dof": "1"
-      },
-      "when": {
-        "fx_enable": "1"
-      },
-      "help": "Softens distant scenery."
-    },
-    {
       "id": "fx_haze",
       "label": "Depth haze",
       "group": "Enhance",
@@ -1001,32 +863,6 @@
         "fx_enable": "1"
       },
       "help": "Distant scenery fades to blue."
-    },
-    {
-      "id": "fx_normals",
-      "label": "Normal maps",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_normals": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_normals": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_normals": "1"
-      },
-      "when": {
-        "fx_enable": "1"
-      },
-      "help": "Per-pixel lighting on rock and ice."
     },
     {
       "id": "fx_sunshadow",
@@ -1209,60 +1045,6 @@
         "fx_enable": "1"
       },
       "help": "Ripples and glints at the waterline."
-    },
-    {
-      "id": "fx_smooth",
-      "label": "Smooth scrolling",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_smooth": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_smooth": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_smooth": "1"
-      },
-      "when": {
-        "fx_enable": "1",
-        "crt_shader": "0"
-      },
-      "help": "Subpixel camera motion; unavailable with a CRT shader."
-    },
-    {
-      "id": "fx_interp",
-      "label": "Motion interpolation",
-      "group": "Enhance",
-      "choices": [
-        {
-          "label": "Off",
-          "set": {
-            "fx_interp": "0"
-          }
-        },
-        {
-          "label": "On",
-          "set": {
-            "fx_interp": "1"
-          }
-        }
-      ],
-      "defaults": {
-        "fx_interp": "1"
-      },
-      "when": {
-        "fx_enable": "1",
-        "crt_shader": "0"
-      },
-      "help": "Intermediate frames on 120 Hz or faster displays; unavailable with a CRT shader."
     },
     {
       "id": "dip_lives",

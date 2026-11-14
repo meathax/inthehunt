@@ -2,15 +2,12 @@
 #define WORLD_GPU_H
 #include <stddef.h>
 #include <stdint.h>
+#include "world_gpu_light.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Direct3D 12 presentation for the CRT shaders: the finished 320x240 frame
- * goes through the post chain (librashader .slangp presets and the Blur
- * Busters beam simulator) into a swap chain on a child window that covers
- * the game window. Used only while a CRT shader or the beam simulator is
- * selected; the GDI presenter remains the default. */
+/* The Direct3D 12 flip-model swap chain presents to the game window. */
 
 enum { WORLD_GPU_PRESETS = 12 };
 /* Menu name and path inside the shader folder (tools/make_shaders.py). */
@@ -25,6 +22,8 @@ int world_gpu_find_shaders(const char *data_dir, char *out, size_t size);
 int world_gpu_open(void *parent, char *error, size_t error_size);
 void world_gpu_close(void);
 int world_gpu_active(void);
+int world_gpu_transport_available(void);
+void world_gpu_light_frame(const WorldLightScene *frame);
 /* Hide or show the view; while hidden the window draws itself with GDI. */
 void world_gpu_show(int show);
 int world_gpu_visible(void);
@@ -35,14 +34,14 @@ int world_gpu_set_preset(const char *path, char *error, size_t error_size);
 int world_gpu_preset_status(char *message, size_t size);
 /* scaling: 0 integer, 1 fit 4:3, 2 stretch. */
 void world_gpu_set_options(int scaling, int beam, int vsync);
-/* Client-area sized ARGB border art (or NULL for black), shown outside the picture. */
-void world_gpu_set_background(const uint32_t *pixels, unsigned width, unsigned height);
 /* One display refresh. frame is the ARGB picture, k times 320x240, when it
  * changed since the last call (else NULL). source_time counts emulated refreshes
  * (game frames plus the fraction elapsed), for the beam simulator. */
 void world_gpu_present(const uint32_t *frame, int k, double source_time);
 /* Measured display refresh rate (0 until known). */
 double world_gpu_refresh_hz(void);
+/* QPC timestamp of a display sync and its refresh counter. */
+int world_gpu_sync_sample(int64_t *qpc, unsigned *refresh);
 /* Wait until the swap chain can take another frame (one per refresh with v-sync). */
 void world_gpu_wait_frame(void);
 /* DXGI statistics: the latest present shown and the refresh it appeared on,
@@ -51,6 +50,7 @@ int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refres
 
 /* Headless: render frame through preset (path or "") at width x height into
  * out (ARGB). Creates and releases its own device. */
+int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,char *error,size_t size);
 int world_gpu_render_offscreen(const uint32_t *frame, const char *preset, int scaling,
                                unsigned width, unsigned height, uint32_t *out,
                                char *error, size_t error_size);

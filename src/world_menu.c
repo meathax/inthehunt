@@ -13,45 +13,39 @@ enum { PAGE_MAIN, PAGE_OPTIONS, PAGE_CONTROLS, PAGE_QUIT };
 enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_ENHANCE, TAB_COUNT };
 enum {
     ITEM_RESUME, ITEM_OPTIONS, ITEM_CONTROLS, ITEM_QUIT,
-    ITEM_DISPLAY, ITEM_SCALE, ITEM_BORDER, ITEM_LIGHT,
-    ITEM_VOLUME, ITEM_SLOWDOWN, ITEM_DEFAULTS, ITEM_BACK,
+    ITEM_DISPLAY, ITEM_SCALE,
+    ITEM_VOLUME, ITEM_DEFAULTS, ITEM_BACK,
     ITEM_NO, ITEM_YES, ITEM_TABS,
-    ITEM_SCALING, ITEM_VSYNC, ITEM_FPS, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
+    ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
-    ITEM_FX, ITEM_FX_CAUSTICS, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
+    ITEM_FX, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
-    ITEM_CRT, ITEM_BEAM, ITEM_PACING,
-    ITEM_FX_SHADOWS, ITEM_FX_DOF, ITEM_FX_HAZE, ITEM_FX_RELIEF, ITEM_FX_SHOCK,
-    ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE, ITEM_FX_SMOOTH, ITEM_FX_INTERP,
+    ITEM_FX_HAZE, ITEM_FX_SHOCK,
+    ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE,
     ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
+    ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
     ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
 };
 enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
-const unsigned world_menu_fps[WORLD_MENU_FPS_CHOICES] = {0, 90, 120, 180, 240, 0xffffffffu};
 
 /* The on/off switch behind an item, or NULL. */
 static unsigned *toggle_field(WorldSettings *s, unsigned id)
 {
     switch (id) {
-    case ITEM_VSYNC: return &s->vsync;
     case ITEM_SHOWFPS: return &s->show_fps;
     case ITEM_FOCUS: return &s->pause_unfocused;
     case ITEM_AUTOFIRE: return &s->autofire;
     case ITEM_DEMOSOUND: return &s->dip_demo_sound;
     case ITEM_FX: return &s->fx_enable;
-    case ITEM_FX_CAUSTICS: return &s->fx_caustics;
     case ITEM_FX_RAYS: return &s->fx_rays;
     case ITEM_FX_LIGHTS: return &s->fx_lights;
     case ITEM_FX_DEPTH: return &s->fx_depth;
     case ITEM_FX_SNOW: return &s->fx_snow;
     case ITEM_FX_VIVID: return &s->fx_vivid;
     case ITEM_FX_TRAILS: return &s->fx_trails;
-    case ITEM_FX_SHADOWS: return &s->fx_shadows;
-    case ITEM_FX_DOF: return &s->fx_dof;
     case ITEM_FX_HAZE: return &s->fx_haze;
-    case ITEM_FX_RELIEF: return &s->fx_normals;
     case ITEM_FX_SUNSHADOW: return &s->fx_sunshadow;
     case ITEM_FX_GLOW: return &s->fx_glow;
     case ITEM_FX_REFLECT: return &s->fx_reflect;
@@ -70,10 +64,11 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_WATER_VOLUME: return &s->fx_water_volume;
     case ITEM_FX_OCEAN_DEPTH: return &s->fx_ocean_depth;
     case ITEM_FX_AFTERMATH: return &s->fx_aftermath;
+    case ITEM_FX_BUBBLE_LIGHT: return &s->fx_bubble_light;
+    case ITEM_FX_CONTACT_SHADE: return &s->fx_contact_shade;
+    case ITEM_FX_BLAST_REFLECT: return &s->fx_blast_reflect;
     case ITEM_FX_MATERIALS: return &s->fx_materials;
 
-    case ITEM_FX_SMOOTH: return &s->fx_smooth;
-    case ITEM_FX_INTERP: return &s->fx_interp;
     default: return NULL;
     }
 }
@@ -243,19 +238,12 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
-            ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION. GPU");
-            ADD(ITEM_PACING, "FRAME PACING", "SMOOTH LOCKS FRAMES TO THE DISPLAY");
-            ADD(ITEM_VSYNC, "V-SYNC", "TIMER PACING ONLY");
-            ADD(ITEM_FPS, "FPS LIMIT", "TIMER PACING ONLY. REDRAW RATE");
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
-            ADD(ITEM_BORDER, "BORDER ART", "ARTWORK AROUND THE PICTURE");
-            ADD(ITEM_LIGHT, "BORDER LIGHT", "BRIGHTNESS OF THE BORDER ART");
         } else if (m->tab == TAB_SOUND) {
             ADD(ITEM_VOLUME, "VOLUME", "MASTER VOLUME. 0 IS MUTE");
             ADD(ITEM_FM, "FM SYNTH", "YM2151 MUSIC LEVEL");
             ADD(ITEM_PCM, "PCM SAMPLES", "GA20 SAMPLE LEVEL");
         } else if (m->tab == TAB_GAME) {
-            ADD(ITEM_SLOWDOWN, "SLOWDOWN", "ARCADE KEEPS ORIGINAL SLOWDOWN");
             ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_DEMOSOUND, "DEMO SOUND", "CABINET SWITCH. NEXT NEW GAME");
@@ -264,39 +252,36 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
         } else {
-            ADD(ITEM_FX, "ENHANCEMENTS", "MASTER SWITCH. OFF IS PURE ARCADE");
-            ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING LIGHT IN OPEN WATER");
-            ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS FROM THE SURFACE");
-            ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK BLOCKS THE SUNLIGHT");
-            ADD(ITEM_FX_LIGHTS, "PATH TRACING", "FIRE LIGHT: SOFT SHADOWS, BOUNCES");
-            ADD(ITEM_FX_GLOW, "WATER GLOW", "LIGHT SCATTERS AROUND BLASTS");
-            ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED FADES FIRST WITH DEPTH");
-            ADD(ITEM_FX_SNOW, "MARINE SNOW", "DRIFTING PARTICLES IN THE WATER");
-            ADD(ITEM_FX_VIVID, "VIVID COLOR", "RICHER COLOUR AND CONTRAST");
-            ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "PHOSPHOR STYLE PERSISTENCE");
-            ADD(ITEM_FX_SMOOTH, "SMOOTH SCROLL", "SUBPIXEL CAMERA. NO CRT SHADER");
-            ADD(ITEM_FX_INTERP, "MOTION X2", "IN-BETWEEN FRAMES AT 120 HZ+");
-            ADD(ITEM_FX_SHADOWS, "DROP SHADOWS", "SPRITES SHADE THE SCENERY");
-            ADD(ITEM_FX_HAZE, "DEPTH HAZE", "FAR SCENERY FADES TO BLUE");
-            ADD(ITEM_FX_DOF, "DEPTH OF FIELD", "SOFT FAR BACKGROUND");
-            ADD(ITEM_FX_RELIEF, "NORMAL MAPS", "PER-PIXEL LIGHT ON ROCK AND ICE");
-            ADD(ITEM_FX_SURFACE, "LIVE SURFACE", "RIPPLING, GLINTING WATERLINE");
-            ADD(ITEM_FX_REFLECT, "REFLECTIONS", "THE SURFACE MIRRORS THE SKY");
-            ADD(ITEM_FX_SHOCK, "SHOCKWAVES", "BLASTS BEND THE WATER");
-            ADD(ITEM_FX_PARTICLES, "PARTICLES", "EMBERS AND BUBBLES FROM BLASTS");
+            ADD(ITEM_FX, "ENHANCEMENTS", "TOGGLES YOUR SAVED EFFECTS");
+            ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS SHINE THROUGH WATER");
+            ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK AND ICE BLOCK SUNLIGHT");
+            ADD(ITEM_FX_LIGHTS, "PATH TRACING", "FIRELIGHT BOUNCES OFF ROCK");
+            ADD(ITEM_FX_GLOW, "WATER GLOW", "WATER GLOWS NEAR EXPLOSIONS");
+            ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED LIGHT FADES WITH DEPTH");
+            ADD(ITEM_FX_SNOW, "MARINE SNOW", "FINE SPECKS DRIFT IN WATER");
+            ADD(ITEM_FX_VIVID, "VIVID COLOR", "BOOSTS COLOR SATURATION");
+            ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "MOVING OBJECTS LEAVE TRAILS");
+            ADD(ITEM_FX_HAZE, "DEPTH HAZE", "OPEN WATER TAKES ON A BLUE HAZE");
+            ADD(ITEM_FX_SURFACE, "LIVE SURFACE", "RIPPLES AT THE WATERLINE");
+            ADD(ITEM_FX_REFLECT, "REFLECTIONS", "SKY REFLECTS ON THE SURFACE");
+            ADD(ITEM_FX_SHOCK, "SHOCKWAVES", "BLASTS DISTORT THE WATER");
+            ADD(ITEM_FX_PARTICLES, "PARTICLES", "BLASTS SCATTER EMBERS");
             ADD(ITEM_FX_SHAKE, "SHAKE + RUMBLE", "BLASTS SHAKE SCREEN AND PAD");
-            ADD(ITEM_FX_WAKES, "WAKES + TURBULENCE", "CURLING SUB AND TORPEDO TRAILS");
-            ADD(ITEM_FX_DEBRIS, "DESTRUCTION DEBRIS", "TUMBLING WRECKAGE THAT SETTLES");
-            ADD(ITEM_FX_SILT, "IMPACT SILT", "SEDIMENT LIFTS FROM NEARBY ROCK");
-            ADD(ITEM_FX_SPLASHES, "SURFACE SPLASHES", "CROSSINGS MAKE SPRAY AND RIPPLES");
-            ADD(ITEM_FX_SPARKS, "UNDERWATER SPARKS", "TINY HOT FLECKS QUICKLY QUENCH");
-            ADD(ITEM_FX_MOTES, "IMPACT PARTICLES", "FINE DEBRIS SINKS, BUBBLES RISE");
-            ADD(ITEM_FX_PRESSURE, "PRESSURE WAVES", "BACKGROUND REFRACTION AND BUBBLE RINGS");
-            ADD(ITEM_FX_SEDIMENT_LIGHT, "LIT SEDIMENT", "CURLING CLOUDS CATCH EXPLOSION LIGHT");
-            ADD(ITEM_FX_WATER_VOLUME, "VOLUMETRIC WATER", "OCCLUDED BEAMS AND LIGHT IN THE WATER");
-            ADD(ITEM_FX_OCEAN_DEPTH, "OCEAN DEPTH", "DISTANT SCENERY FADES INTO THE OCEAN");
-            ADD(ITEM_FX_AFTERMATH, "BATTLE AFTERMATH", "COOLING FLECKS AND LINGERING BUBBLES");
-            ADD(ITEM_FX_MATERIALS, "SPRITE MATERIALS", "PAINT, METALS, RUST AND GLASS RELIEF");
+            ADD(ITEM_FX_WAKES, "WAKES + TURBULENCE", "SUBS AND TORPEDOES LEAVE WAKES");
+            ADD(ITEM_FX_DEBRIS, "DESTRUCTION DEBRIS", "WRECKAGE TUMBLES AND SETTLES");
+            ADD(ITEM_FX_SILT, "IMPACT SILT", "IMPACTS STIR UP SILT");
+            ADD(ITEM_FX_SPLASHES, "SURFACE SPLASHES", "SURFACE CROSSINGS KICK UP SPRAY");
+            ADD(ITEM_FX_SPARKS, "UNDERWATER SPARKS", "HOT SPARKS FADE UNDERWATER");
+            ADD(ITEM_FX_MOTES, "IMPACT PARTICLES", "DEBRIS SINKS AND BUBBLES RISE");
+            ADD(ITEM_FX_PRESSURE, "PRESSURE WAVES", "BLASTS SEND OUT PRESSURE RINGS");
+            ADD(ITEM_FX_SEDIMENT_LIGHT, "LIT SEDIMENT", "BLASTS LIGHT UP SILT CLOUDS");
+            ADD(ITEM_FX_WATER_VOLUME, "VOLUMETRIC WATER", "LIGHT SCATTERS THROUGH WATER");
+            ADD(ITEM_FX_OCEAN_DEPTH, "OCEAN DEPTH", "DISTANT COLORS BLEND INTO WATER");
+            ADD(ITEM_FX_AFTERMATH, "BATTLE AFTERMATH", "BUBBLES LINGER AFTER BLASTS");
+            ADD(ITEM_FX_BUBBLE_LIGHT, "BUBBLE LIGHTING", "WAKES AND BUBBLES CATCH LIGHT");
+            ADD(ITEM_FX_CONTACT_SHADE, "CONTACT SHADOWS", "SHADOWS DEEPEN IN CREVICES");
+            ADD(ITEM_FX_BLAST_REFLECT, "BLAST REFLECTIONS", "BLAST LIGHT GLINTS ON WAVES");
+            ADD(ITEM_FX_MATERIALS, "SPRITE MATERIALS", "METAL AND GLASS CATCH LIGHT");
         }
         ADD(ITEM_BACK, "BACK", m->title ? "RETURN TO THE TITLE MENU" : "RETURN TO THE PAUSE MENU");
         break;
@@ -312,40 +297,24 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     return n;
 }
 
-static int item_disabled(const WorldMenu *m, const WorldSettings *s, unsigned id)
+static int item_disabled(const WorldSettings *s, unsigned id)
 {
     if (id == ITEM_SCALE) return s->fullscreen != 0;
-    if (id == ITEM_LIGHT) return m->border_index == 0;
-    if (id == ITEM_VSYNC || id == ITEM_FPS) return s->pacing != 2;
-    if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_SHADOWS && id <= ITEM_FX_INTERP))
+    if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_HAZE && id <= ITEM_FX_SURFACE))
         return !s->fx_enable;
-    if (id >= ITEM_FX_WAKES && id <= ITEM_FX_MATERIALS) return !s->fx_enable;
+    if (id >= ITEM_FX_WAKES && id <= ITEM_FX_BLAST_REFLECT) return !s->fx_enable;
     if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT) return !s->fx_enable;
     return 0;
 }
 
-static void item_value(const WorldMenu *m, const WorldSettings *s, unsigned id, char out[32])
+static void item_value(const WorldSettings *s, unsigned id, char out[32])
 {
     out[0] = 0;
     switch (id) {
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
-    case ITEM_BORDER:
-        snprintf(out, 32, "%s", m->border_index < m->border_count ? m->border_name[m->border_index] : "BLACK");
-        break;
-    case ITEM_SLOWDOWN: strcpy(out, s->timing_mode == WORLD_TIMING_ARCADE ? "ARCADE" : "OFF"); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
-    case ITEM_PACING: strcpy(out, s->pacing == 0 ? "SMOOTH" : s->pacing == 1 ? "EXACT 60.01" : "TIMER"); break;
-    case ITEM_FPS:
-        if (!s->fps_limit) strcpy(out, "ARCADE");
-        else if (s->fps_limit == WORLD_MENU_FPS_CHOICES - 1) strcpy(out, "UNCAPPED");
-        else snprintf(out, 32, "%u", world_menu_fps[s->fps_limit]);
-        break;
     case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
-    case ITEM_CRT:
-        snprintf(out, 32, "%s", s->crt_shader && s->crt_shader <= WORLD_GPU_PRESETS
-                                ? world_gpu_preset_name[s->crt_shader - 1] : "OFF");
-        break;
     case ITEM_DIFFICULTY: {
         static const char *const names[4] = {"VERY EASY", "EASY", "NORMAL", "HARD"};
         strcpy(out, names[s->dip_difficulty & 3]);
@@ -362,24 +331,9 @@ static void item_value(const WorldMenu *m, const WorldSettings *s, unsigned id, 
 static int slider(unsigned id, const WorldSettings *s)
 {
     if (id == ITEM_VOLUME) return (int)s->volume;
-    if (id == ITEM_LIGHT) return (int)s->border_brightness;
     if (id == ITEM_FM) return (int)s->fm_volume;
     if (id == ITEM_PCM) return (int)s->pcm_volume;
     return -1;
-}
-
-void world_menu_set_borders(WorldMenu *m, unsigned count, const char *const names[],
-                            const char *const paths[], const WorldSettings *settings)
-{
-    if (count > WORLD_MENU_BORDER_LIMIT) count = WORLD_MENU_BORDER_LIMIT;
-    m->border_count = count;
-    m->border_index = 0;
-    for (unsigned i = 0; i < count; ++i) {
-        snprintf(m->border_name[i], sizeof m->border_name[i], "%s", names[i]);
-        snprintf(m->border_path[i], sizeof m->border_path[i], "%s", paths[i] ? paths[i] : "");
-        if (i && strcmp(settings->border, "black") && !strcmp(paths[i], settings->border_image))
-            m->border_index = i;
-    }
 }
 
 void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
@@ -393,13 +347,14 @@ void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
     m->dirty = 0;
     m->peek = 0;
     m->opened_at = now_ms;
-    m->title = 0;
+    m->title = m->title_hidden = m->wake_held = 0;
 }
 
 void world_menu_open_title(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
 {
     world_menu_open(m, held, gamepad, now_ms);
     m->title = 1;
+    m->last_title_input = now_ms;
 }
 
 /* The row of the CONTROLS entry on the options GAME tab. */
@@ -411,7 +366,7 @@ static unsigned step_percent(unsigned value, int direction)
     return value <= 5 ? 0 : value - 5;
 }
 
-static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
+static unsigned adjust(WorldSettings *s, unsigned id, int d)
 {
     switch (id) {
     case ITEM_DISPLAY: s->fullscreen = !s->fullscreen; return WORLD_MENU_DISPLAY;
@@ -421,32 +376,12 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
         s->window_scale = scale;
         return WORLD_MENU_DISPLAY;
     }
-    case ITEM_BORDER: {
-        if (m->border_count < 2) return 0;
-        m->border_index = (m->border_index + m->border_count + (d > 0 ? 1 : -1)) % m->border_count;
-        if (!m->border_index) strcpy(s->border, "black");
-        else {
-            strcpy(s->border, "custom");
-            snprintf(s->border_image, sizeof s->border_image, "%s", m->border_path[m->border_index]);
-        }
-        return WORLD_MENU_BORDER;
-    }
-    case ITEM_LIGHT: {
-        if (!m->border_index) return 0;
-        unsigned v = step_percent(s->border_brightness, d);
-        if (v == s->border_brightness) return 0;
-        s->border_brightness = v;
-        return WORLD_MENU_BORDER;
-    }
     case ITEM_VOLUME: {
         unsigned v = step_percent(s->volume, d);
         if (v == s->volume) return 0;
         s->volume = v;
         return WORLD_MENU_VOLUME;
     }
-    case ITEM_SLOWDOWN:
-        s->timing_mode = s->timing_mode == WORLD_TIMING_ARCADE ? WORLD_TIMING_REMOVE_SLOWDOWN : WORLD_TIMING_ARCADE;
-        return WORLD_MENU_TIMING;
     case ITEM_FM: case ITEM_PCM: {
         unsigned *level = id == ITEM_FM ? &s->fm_volume : &s->pcm_volume;
         unsigned v = step_percent(*level, d);
@@ -455,19 +390,11 @@ static unsigned adjust(WorldMenu *m, WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VOLUME;
     }
     case ITEM_SCALING: s->scaling = (s->scaling + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
-    case ITEM_PACING: s->pacing = (s->pacing + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
-    case ITEM_FPS:
-        if (s->pacing != 2) return 0;
-        s->fps_limit = (s->fps_limit + WORLD_MENU_FPS_CHOICES + (d > 0 ? 1 : -1)) % WORLD_MENU_FPS_CHOICES;
-        return WORLD_MENU_VIEW;
     case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
-    case ITEM_CRT:
-        s->crt_shader = (s->crt_shader + WORLD_GPU_PRESETS + 1 + (d > 0 ? 1 : -1)) % (WORLD_GPU_PRESETS + 1);
-        return WORLD_MENU_VIEW;
     case ITEM_DIFFICULTY: s->dip_difficulty = (s->dip_difficulty + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
     default: {
         unsigned *field = toggle_field(s, id);
-        if (!field || item_disabled(m, s, id)) return 0;
+        if (!field || item_disabled(s, id)) return 0;
         *field = !*field;
         if (id == ITEM_FX) world_settings_activate_enhancements(s);
         return WORLD_MENU_VIEW;
@@ -482,9 +409,27 @@ static void go(WorldMenu *m, unsigned page, unsigned row)
     m->row = row;
 }
 
+void world_menu_title_activity(WorldMenu *m, unsigned held, int activity, int gamepad, uint32_t now_ms)
+{
+    if (!m->open || !m->title) return;
+    if (activity || held || m->page != PAGE_MAIN) {
+        m->last_title_input = now_ms;
+        if (m->title_hidden) {
+            m->title_hidden = 0;
+            m->wake_held = held;
+            m->gamepad = !!gamepad;
+        }
+    } else if (now_ms - m->last_title_input >= 5000u) {
+        m->title_hidden = 1;
+        m->row = 0;
+    }
+}
+
 unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int gamepad, uint32_t now_ms)
 {
-    if (!m->open) return 0;
+    if (!m->open || m->title_hidden) return 0;
+    m->wake_held &= held;
+    held &= ~m->wake_held;
     unsigned pressed = held & ~m->previous;
     if (pressed) m->gamepad = !!gamepad;
     unsigned moving = held & (WORLD_MENU_UP | WORLD_MENU_DOWN | WORLD_MENU_LEFT | WORLD_MENU_RIGHT);
@@ -520,11 +465,11 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
     }
     if (pressed & WORLD_MENU_UP) {
         do m->row = m->row ? m->row - 1 : count - 1;
-        while (item_disabled(m, s, items[m->row].id) && count > 1);
+        while (item_disabled(s, items[m->row].id) && count > 1);
     }
     if (pressed & WORLD_MENU_DOWN) {
         do m->row = (m->row + 1) % count;
-        while (item_disabled(m, s, items[m->row].id) && count > 1);
+        while (item_disabled(s, items[m->row].id) && count > 1);
     }
     unsigned id = items[m->row].id;
     int horizontal = (pressed & WORLD_MENU_RIGHT) ? 1 : (pressed & WORLD_MENU_LEFT) ? -1 : 0;
@@ -534,7 +479,7 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             return 0;
         }
         if (m->page == PAGE_QUIT) { m->row ^= 1; return 0; }
-        result = adjust(m, s, id, horizontal);
+        result = adjust(s, id, horizontal);
     } else if (pressed & WORLD_MENU_ACCEPT) {
         switch (id) {
         case ITEM_RESUME: m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
@@ -557,12 +502,11 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             world_settings_defaults(&fresh);
             fresh.bindings = s->bindings;
             *s = fresh;
-            m->border_index = 0;
-            result = WORLD_MENU_VOLUME | WORLD_MENU_DISPLAY | WORLD_MENU_BORDER | WORLD_MENU_TIMING | WORLD_MENU_VIEW;
+            result = WORLD_MENU_VOLUME | WORLD_MENU_DISPLAY | WORLD_MENU_TIMING | WORLD_MENU_VIEW;
             break;
         }
         default:
-            if (slider(id, s) < 0) result = adjust(m, s, id, 1);
+            if (slider(id, s) < 0) result = adjust(s, id, 1);
             break;
         }
     }
@@ -693,7 +637,7 @@ static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, u
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
                        const uint8_t *gfx1, uint32_t now_ms)
 {
-    if (!m->open || m->peek || !c || !gfx1) return;
+    if (!m->open || m->title_hidden || m->peek || !c || !gfx1) return;
     if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);
@@ -748,7 +692,7 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
             if (i - 1 == first + VISIBLE_ROWS - 1 && first + VISIBLE_ROWS < listed)
                 arrow_down(c, W - 34, y + 11, 0xffd8a848);
         }
-        int disabled = item_disabled(m, s, id);
+        int disabled = item_disabled(s, id);
         if (m->page == PAGE_QUIT) {
             int x = i ? 176 : 112;
             if (here) {
@@ -768,7 +712,7 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
         text(c, gfx1, label_x, y, items[i].label, disabled ? &faint : here ? &picked : &normal);
         int percent = slider(id, s);
         char shown[32];
-        item_value(m, s, id, shown);
+        item_value(s, id, shown);
         if (percent >= 0) {
             bar(c, 172, y, percent, !disabled);
             char digits[8];

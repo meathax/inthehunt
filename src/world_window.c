@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "world_window.h"
-#include "world_border.h"
 #include "world_gpu.h"
 
 enum { WIDTH = 320, HEIGHT = 240 };
@@ -24,9 +23,12 @@ static HMODULE controller_library;
 typedef DWORD (WINAPI *ControllerState)(DWORD, XINPUT_STATE *);
 static ControllerState controller_state;
 static DWORD retry_at[2];
+static volatile LONG discovered[2];
+static HANDLE discovery_stop, discovery_thread;
 static WORD pad_buttons[2];
 static SHORT pad_lx[2], pad_ly[2];
 static int last_device_pad;
+static int button_activity;
 static int fullscreen;
 static RECT windowed_rect;
 
@@ -57,7 +59,7 @@ static void paint_area(HDC dc, RECT rect)
         h = rect.bottom;
     }
     int x = (rect.right - w) / 2, y = (rect.bottom - h) / 2;
-    world_border_paint(dc, rect.right, rect.bottom);
+    PatBlt(dc, 0, 0, rect.right, rect.bottom, BLACKNESS);
     SetStretchBltMode(dc, COLORONCOLOR);
     {
         BITMAPINFO info = bitmap;
@@ -92,7 +94,6 @@ static void paint(HWND hwnd, HDC dc)
 static char crt_preset[1024];
 static int crt_beam;
 static double source_time;
-static int gpu_bg_w, gpu_bg_h, gpu_bg_stale = 1;
 
 /* A CRT preset (full .slangp path, "" for none) and the beam simulator use
  * the Direct3D 12 view; with neither, the window paints itself with GDI.
@@ -124,7 +125,6 @@ int world_window_set_crt(const char *preset, int beam, int flip, char *error, si
     }
     crt_beam = beam;
     world_gpu_set_options(view_scaling, beam, view_vsync != 0);
-    gpu_bg_stale = 1;
     return 1;
 }
 
@@ -179,22 +179,24 @@ static void load_dwm(void)
 }
 
 /* The display refresh in Hz, or 0 when it is unknown or the window is hidden. */
+static double cached_refresh_hz;
 double world_window_refresh_hz(void)
 {
     if (!window || IsIconic(window)) return 0.0;
+    if (cached_refresh_hz > 0) return cached_refresh_hz;
     load_dwm();
     if (dwm_timing) {
         DwmTiming t;
         memset(&t, 0, sizeof t);
         t.cbSize = sizeof t;
         if (SUCCEEDED(dwm_timing(NULL, &t)) && t.rateRefresh.uiDenominator && t.rateRefresh.uiNumerator)
-            return (double)t.rateRefresh.uiNumerator / (double)t.rateRefresh.uiDenominator;
+            return cached_refresh_hz = (double)t.rateRefresh.uiNumerator / (double)t.rateRefresh.uiDenominator;
     }
     DEVMODEW mode;
     memset(&mode, 0, sizeof mode);
     mode.dmSize = sizeof mode;
     if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
-        return (double)mode.dmDisplayFrequency;
+        return cached_refresh_hz = (double)mode.dmDisplayFrequency;
     return 0.0;
 }
 
@@ -257,10 +259,14 @@ int world_window_compose_bmp(const uint32_t *pixels, int width, int height, cons
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
 {
     switch (message) {
+    case WM_DISPLAYCHANGE:
+    case WM_MOVE:
+        cached_refresh_hz = 0;
+        return DefWindowProcW(hwnd, message, wp, lp);
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(hwnd, &ps);
-        paint(hwnd, dc);
+        if (!world_gpu_visible()) paint(hwnd, dc);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -280,8 +286,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
         info->ptMinTrackSize.y = minimum.bottom - minimum.top;
         return 0;
     }
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: case WM_XBUTTONDOWN:
+        button_activity = 1;
+        return DefWindowProcW(hwnd, message, wp, lp);
     case WM_KEYDOWN:
     case WM_KEYUP:
+        if (message == WM_KEYDOWN) button_activity = 1;
         if (wp < sizeof keys) {
             if (message == WM_KEYDOWN && !keys[wp]) last_device_pad = 0;
             keys[wp] = message == WM_KEYDOWN;
@@ -289,6 +299,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
         return 0;
     case WM_SYSKEYDOWN:
     case WM_SYSKEYUP:
+        if (message == WM_SYSKEYDOWN) button_activity = 1;
         /* F10 and Alt arrive as system keys; keep them out of the menu bar. */
         if (wp == VK_F10 && wp < sizeof keys) { keys[wp] = message == WM_SYSKEYDOWN; return 0; }
         return DefWindowProcW(hwnd, message, wp, lp);
@@ -311,6 +322,22 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
     }
 }
 
+/* Probing an empty XInput slot may enter device enumeration. Keep discovery
+ * off the display thread. Connected pads are still sampled at the board tick. */
+static DWORD WINAPI discover_controllers(void *unused)
+{
+    (void)unused;
+    do {
+        for (unsigned i=0;i<2;++i) {
+            if (InterlockedCompareExchange(&discovered[i],0,0)) continue;
+            XINPUT_STATE state;
+            if (controller_state(i,&state)==ERROR_SUCCESS)
+                InterlockedExchange(&discovered[i],1);
+        }
+    } while (WaitForSingleObject(discovery_stop,750)==WAIT_TIMEOUT);
+    return 0;
+}
+
 static void open_controllers(void)
 {
     static const wchar_t *const names[] = { L"\\xinput1_4.dll", L"\\xinput9_1_0.dll" };
@@ -322,7 +349,18 @@ static void open_controllers(void)
         controller_library = LoadLibraryW(path);
         if (!controller_library) continue;
         controller_state = (ControllerState)(void *)GetProcAddress(controller_library, "XInputGetState");
-        if (controller_state) return;
+        if (controller_state) {
+            /* Prime once during startup, so already-connected controllers
+             * work on the very first interactive frame. */
+            for (unsigned player=0;player<2;++player) {
+                XINPUT_STATE state;
+                discovered[player]=controller_state(player,&state)==ERROR_SUCCESS;
+            }
+            discovery_stop=CreateEventW(NULL,TRUE,FALSE,NULL);
+            if (discovery_stop)
+                discovery_thread=CreateThread(NULL,0,discover_controllers,NULL,0,NULL);
+            return;
+        }
         FreeLibrary(controller_library);
         controller_library = NULL;
     }
@@ -380,19 +418,23 @@ int world_window_open(void)
 static void poll_controller(unsigned player, uint16_t *held, uint16_t *buttons)
 {
     if (!controller_state) return;
+    if (discovery_thread && !InterlockedCompareExchange(&discovered[player],0,0)) return;
     DWORD now = GetTickCount();
-    if (retry_at[player] && (LONG)(now - retry_at[player]) < 0) return;
+    if (!discovery_thread && retry_at[player] && (LONG)(now - retry_at[player]) < 0) return;
     XINPUT_STATE state;
     if (controller_state(player, &state) != ERROR_SUCCESS) {
         /* Menu navigation also consumes these cached levels. Do not leave a
            held direction or Start behind when the controller disconnects. */
         pad_buttons[player] = 0;
         pad_lx[player] = pad_ly[player] = 0;
+        InterlockedExchange(&discovered[player],0);
         retry_at[player] = now + 1000;
         return;
     }
     retry_at[player] = 0;
     XINPUT_GAMEPAD *pad = &state.Gamepad;
+    if (pad->wButtons || pad->bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ||
+        pad->bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD) button_activity = 1;
     WORD pressed = pad->wButtons;
     if ((pressed & ~pad_buttons[player]) || (pad->sThumbLX > 12000 && pad_lx[player] <= 12000) ||
         (pad->sThumbLX < -12000 && pad_lx[player] >= -12000) ||
@@ -415,8 +457,14 @@ static void poll_controller(unsigned player, uint16_t *held, uint16_t *buttons)
     if (pressed & XINPUT_GAMEPAD_BACK) *buttons |= (uint16_t)(4 << player);
 }
 
+int world_window_button_activity(void)
+{
+    return button_activity;
+}
+
 int world_window_poll(uint16_t *pads, uint16_t *system)
 {
+    button_activity = 0;
     *pads = *system = 0xffff;
     if (!window) return 0;
     MSG msg;
@@ -473,14 +521,6 @@ void world_window_present(const uint32_t *pixels, int k)
     if (rumble_until && (LONG)(GetTickCount() - rumble_until) >= 0) world_window_rumble(0, 0);
     if (world_gpu_visible()) {
         if (IsIconic(window)) return;
-        RECT rect;
-        GetClientRect(window, &rect);
-        if (gpu_bg_stale || rect.right != gpu_bg_w || rect.bottom != gpu_bg_h) {
-            world_gpu_set_background(world_border_scaled(rect.right, rect.bottom), (unsigned)rect.right, (unsigned)rect.bottom);
-            gpu_bg_w = rect.right;
-            gpu_bg_h = rect.bottom;
-            gpu_bg_stale = 0;
-        }
         world_gpu_present(pixels, k, source_time);
         return;
     }
@@ -497,18 +537,17 @@ void world_window_present(const uint32_t *pixels, int k)
     }
 }
 
-int world_window_set_border(const char *path, unsigned brightness)
-{
-    if (!world_border_set(path, brightness)) return 0;
-    gpu_bg_stale = 1;
-    if (window) InvalidateRect(window, NULL, FALSE);
-    return 1;
-}
-
 void world_window_close(void)
 {
     world_gpu_close();
     if (window) DestroyWindow(window);
+    if (discovery_thread) {
+        SetEvent(discovery_stop);
+        WaitForSingleObject(discovery_thread,INFINITE);
+        CloseHandle(discovery_thread);
+        discovery_thread=NULL;
+    }
+    if (discovery_stop) { CloseHandle(discovery_stop); discovery_stop=NULL; }
     if (controller_library) FreeLibrary(controller_library);
     controller_state = NULL;
     controller_library = NULL;
@@ -516,7 +555,6 @@ void world_window_close(void)
     if (back_bitmap) { SelectObject(back_dc, back_previous); DeleteObject(back_bitmap); back_bitmap = NULL; }
     if (back_dc) { DeleteDC(back_dc); back_dc = NULL; }
     back_width = back_height = 0;
-    world_border_close();
 }
 
 /* Menu navigation from either keyboard or any pad, as held levels:
