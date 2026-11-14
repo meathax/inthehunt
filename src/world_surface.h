@@ -14,6 +14,12 @@ static inline unsigned world_surface_word(const uint8_t *ram, unsigned at)
  * Negative means the whole visible picture is underwater. */
 static inline int world_surface_row(const uint8_t *ram)
 {
+    /* The title uses the middle playfield's wave table starting at FA40,
+       raster row 288. Its sky is above water even after the demo returns. */
+    switch (world_surface_word(ram, 0x80)) {
+    case 0x1de6: case 0x1e6c: case 0x1ea5: case 0x1f19: case 0x1f52: case 0x1f85:
+        return 288 - 136 - (int16_t)world_surface_word(ram, 0xb70c);
+    }
     if (!(ram[0x292] & 4)) return -1;
     int row;
     switch (ram[0x298] & 14) {

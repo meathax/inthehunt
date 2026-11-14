@@ -29,7 +29,8 @@
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
 static uint8_t oam[2048], palette[2048];
 static uint32_t pixels[320*240];
-/* Cold boot programs 98/9A/9C, then the title disables the middle plane. */
+/* Title entry at 0:1D52 programs all three playfield controls. */
+static const uint16_t title_master_controls[3] = {0, 0x41, 2};
 static uint16_t layer_master[3] = {0, 0x41, 2};
 static char failure[256];
 static unsigned long ticks;
@@ -574,7 +575,8 @@ static int tick(uint16_t pads, uint16_t system)
     if (master == 0xa0e) layer_master[1] = 1;
     if (master == 0x24e2 || master == 0x344d || master == 0x333d)       /* OUT 98/9A/9C = 0, 1, 2 */
         for (unsigned i = 0; i < 3; ++i) layer_master[i] = (uint16_t)i;
-    if (master == 0xa09 || master == 0x1d52) layer_master[1] = 0x41;
+    if (master == 0xa09 || master == 0x1d52)
+        memcpy(layer_master, title_master_controls, sizeof layer_master);
     int busy_system = -1;
     if (board_clock.pass_mode == WORLD_TIMING_ARCADE && (master == 0xa0e || master == 0x24e2))
         busy_system = system;
@@ -1194,8 +1196,7 @@ static void machine_reset(void)
     set_cabinet_switches();
     world_dispatch_reset();
     world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
-    static const uint16_t power_on_master[3] = {0, 0x41, 2};
-    memcpy(layer_master, power_on_master, sizeof layer_master);
+    memcpy(layer_master, title_master_controls, sizeof layer_master);
     ticks = 0;
     world_clock_reset(&board_clock, settings.timing_mode);
     world_ga20_reset(&pcm, samples, sizeof samples);

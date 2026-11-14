@@ -186,5 +186,25 @@ int main(void){
     loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
     assert(!loaded.fx_dof && loaded.fx_trails);
     puts("PASS: first-enable upgrade and saved custom enhancement selection");
+    /* Off-screen tile memory can contain different artwork. Shaking toward
+       the top must keep sampling the first displayed row at every scale. */
+    fixture();
+    fx=(WorldSceneFx){0};
+    for(int scale=1;scale<=MAXK;++scale){
+        world_scene_render(picture,scale,1,&fx,8400);
+        uint32_t first=picture[g.ow/2];
+        g.shake_y=-2*scale;
+        compose_rows(0,3*scale);
+        for(int y=0;y<3*scale;++y) assert(picture[y*g.ow+g.ow/2]==first);
+    }
+    /* At maximum intensity, 4x scale represents the half-amplitude peak
+       exactly: 2.5 native pixels used to move ten subpixels, now five. */
+    fx=(WorldSceneFx){.shake=1};
+    shake=2.5f;
+    world_scene_render(picture,4,1,&fx,0);
+    assert(g.shake_x==0 && g.shake_y==5);
+    shake=2.5f;
+    world_scene_render(picture,4,1,&fx,17*8);
+    assert(g.shake_x==5);
     return 0;
 }

@@ -1038,7 +1038,10 @@ static void compose_rows(int from, int to)
         int y1 = Y / k;
         uint32_t *o = g.out + (size_t)Y * ow;
 
-        int row_dx = g.row_dx[y1]+g.shake_x, row_dy = g.shake_y;
+        /* Keep displaced samples on the displayed playfield. The tilemap
+           outside it can contain unrelated palette rows and unused art. */
+        int shaken_y = clampi(Y + g.shake_y, 0, oh - 1);
+        int row_dx = g.row_dx[y1]+g.shake_x, row_dy = shaken_y-Y;
         int glint = fx->surface && g.waterline >= 0 && y1 >= g.waterline - 3 && y1 <= g.waterline + 1;
         int block_row = Y % k == 0;
         for (int X = 0; X < ow; ++X) {
@@ -1050,9 +1053,9 @@ static void compose_rows(int from, int to)
             }
             /* Nearest layer first: the first opaque one is the pixel. Offsets
                stay inside the margin, so no clamping is needed. */
-            int U = X + dx, V = Y + dy;
+            int U = clampi(X + dx, 0, ow-1), V = clampi(Y + dy, 0, oh-1);
             int protect=fx->pressure || fx->shock || fx->surface;
-            int base_u=protect?X+g.shake_x:U,base_v=protect?Y+g.shake_y:V;
+            int base_u=protect?clampi(X+g.shake_x,0,ow-1):U,base_v=protect?shaken_y:V;
             uint32_t c = backdrop;
             int id = -1, wet = 0, at[3] = {-1, -1, -1};
             for (int layer = 0; layer < 3; ++layer) {
@@ -1484,8 +1487,9 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         g.row_dx[y] = shift;
     }
     if (fx->shake && shake > 0.05f) {
-        g.shake_x = (int)(shake * k * sinf(time_ms * 0.09f));
-        g.shake_y = (int)(shake * k * cosf(time_ms * 0.07f));
+        float amplitude = 0.5f * shake * k;
+        g.shake_x = (int)lroundf(amplitude * sinf(time_ms * 0.09f));
+        g.shake_y = (int)lroundf(amplitude * cosf(time_ms * 0.07f));
         shake *= expf(-dt * 7.0f);
     } else {
         g.shake_x = g.shake_y = 0;
