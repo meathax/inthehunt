@@ -540,8 +540,58 @@ static uint32_t slowdown_palette(void)
     return cycles;
 }
 
+/* Observe the same successful actor pass that submitted the arcade sprites.
+   Hold muzzle pulses at their launch point as the camera moves. Rebuild
+   moving sources every pass so destroyed rounds leave no light behind. */
+static WeaponEmitter weapon_lights[MAX_WEAPON_EMITTERS];
+static unsigned weapon_lights_count, weapon_scene;
+static int weapon_scroll_x,weapon_scroll_y;
+static void begin_weapon_pass(void)
+{
+    unsigned scene=word(ram+0x80) | ((unsigned)word(ram+0x84)<<16);
+    int x=word(ram+0xb70a),y=word(ram+0xb70c);
+    int dx=(int16_t)(x-weapon_scroll_x),dy=(int16_t)(y-weapon_scroll_y);
+    unsigned keep=0;
+    if(scene==weapon_scene && abs(dx)<=32 && abs(dy)<=32){
+        for(unsigned i=0;i<weapon_lights_count;++i){
+            WeaponEmitter e=weapon_lights[i];
+            if(e.kind>=ROCKET_PLUME || ++e.age>=5)continue;
+            e.x-=dx;e.y-=dy;
+            weapon_lights[keep++]=e;
+        }
+    }
+    weapon_lights_count=keep;weapon_scene=scene;weapon_scroll_x=x;weapon_scroll_y=y;
+}
+
+static void observe_weapon(unsigned entry,unsigned actor)
+{
+    unsigned next=(word(ram+actor)+16u*word(ram+actor+2))&0xfffff;
+    if(next==0x1b4c)return;
+    WeaponEmission kind=weapon_launch(entry,next);
+    if(!kind)kind=weapon_flight(entry);
+    if(!kind || weapon_lights_count==MAX_WEAPON_EMITTERS)return;
+    int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
+    if(x<0 || x>=320 || y<0 || y>=240)return;
+    int vx=(int16_t)word(ram+actor+0x38),vy=-(int16_t)word(ram+actor+0x3a);
+    if(!vx && !vy){
+        if(kind==RACK_PULSE)vy=1;
+        else if(entry==0x9fa1 || entry==0x9e73 || entry==0xbb40 || entry==0x1d0be)vy=-1;
+        else vx=(ram[actor+0x29]&1)?-1:1;
+    }
+    float mag=fmaxf(abs(vx),abs(vy));
+    int dx=(int)lroundf(64*vx/mag),dy=(int)lroundf(64*vy/mag);
+    if(kind==ROCKET_PLUME){x-=dx*4/64;y-=dy*4/64;}
+    /* A spread leaving one barrel illuminates one gas cloud. */
+    if(kind<ROCKET_PLUME)for(unsigned i=0;i<weapon_lights_count;++i){
+        WeaponEmitter e=weapon_lights[i];
+        if(!e.age && e.kind==kind && abs(e.x-x)<=2 && abs(e.y-y)<=2)return;
+    }
+    weapon_lights[weapon_lights_count++]=(WeaponEmitter){x,y,dx,dy,kind,0};
+}
+
 static int tick(uint16_t pads, uint16_t system)
 {
+    begin_weapon_pass();
     unsigned board_tick_before = word(ram + 0x276);
     world_clock_begin_pass(&board_clock);
     if (ram[0x262] & 1) {
@@ -557,14 +607,17 @@ static int tick(uint16_t pads, uint16_t system)
                 snprintf(failure, sizeof failure, "Actor list did not terminate at master %04X.", word(ram + 0x80));
                 return 0;
             }
+            uint16_t rendered_actor=pass.actor;
             if (!world_dispatch_native_video(&pass, ram, rom, tiles)) {
                 snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.%s%s",
                          (unsigned long)addr, pass.actor, word(ram + 0x80),
                          *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
             }
+            observe_weapon(addr,rendered_actor);
         }
     }
+    world_scene_weapons(weapon_lights,weapon_lights_count);
     slowdown_estimate += slowdown_palette();
     world_palette_step(ram, palette, rom);
     int sound, master_sound;
@@ -1197,6 +1250,7 @@ static void machine_reset(void)
     world_dispatch_reset();
     world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
     memcpy(layer_master, title_master_controls, sizeof layer_master);
+    weapon_lights_count=0;
     ticks = 0;
     world_clock_reset(&board_clock, settings.timing_mode);
     world_ga20_reset(&pcm, samples, sizeof samples);

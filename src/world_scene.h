@@ -47,6 +47,8 @@ typedef struct {
     unsigned scene_id;           /* changes on a scene cut (no in-between frames across it) */
 } WorldSceneFrame;
 
+#include "world_weapon_light.h"
+void world_scene_weapons(const WeaponEmitter *emitters, unsigned count);
 void world_scene_init(const uint8_t *gfx1, const uint8_t *gfx2);
 /* A new game frame went on show. */
 void world_scene_submit(const WorldSceneFrame *frame);

@@ -31,6 +31,24 @@ static void fixture(void){
 static int count_events(void){int n=0;for(int i=0;i<CINEMA_EVENTS;++i)n+=cinema_events[i].life>0;return n;}
 int main(void){
     SetPriorityClass(GetCurrentProcess(),ABOVE_NORMAL_PRIORITY_CLASS);
+    /* A cold torpedo gets one tube pulse, while a missile on its rack waits
+       for ignition. Its plume is weaker than its launch and follows flight. */
+    assert(weapon_launch(0x9be7,0x9c33)==TUBE_PULSE && !weapon_flight(0x9c33));
+    assert(weapon_launch(0xa06b,0xa0a9)==RACK_PULSE && !weapon_flight(0xa0a9));
+    assert(!weapon_launch(0xb3c64,0xb3c64));
+    assert(weapon_launch(0xb3c64,0xb3d2a)==ROCKET_IGNITION);
+    assert(weapon_flight(0xb3d2a)==ROCKET_PLUME && weapon_flight(0x1d2ea)==BURNING_FUEL);
+    assert(!weapon_launch(0x1b4c,0) && !weapon_flight(0x1b4c));
+    WeaponEmitter burst={100,75,64,0,GUN_FLASH,0};
+    world_scene_weapons(&burst,1);
+    light_count=0;gather_weapon_lights();
+    Light peak=lights[0];
+    assert(light_count==1 && peak.x==50 && peak.y==37.5f && peak.r>peak.g && peak.g>peak.b);
+    burst.age=4;world_scene_weapons(&burst,1);
+    light_count=0;gather_weapon_lights();
+    assert(lights[0].r<peak.r*.05f);
+    world_scene_reset();
+    light_count=0;gather_weapon_lights();assert(light_count==0);
     fixture();WorldSceneFx fx={0};
     for(int y=0;y<H;++y){uint16_t indices[W];world_video_scanline(indices,y,test_tiles,test_gfx1,test_gfx2,test_sprites,frame.layers,frame.video_control);
         for(int x=0;x<W;++x)plain[y*W+x]=test_colors[indices[x]&1023];}

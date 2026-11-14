@@ -36,6 +36,14 @@ typedef struct { float x, y, vx, vy, age, life; int kind; } Particle;
 
 static const uint8_t *gfx1, *gfx2;
 static Snapshot cur, prev;
+static WeaponEmitter weapon_emitters[MAX_WEAPON_EMITTERS];
+static unsigned weapon_count;
+void world_scene_weapons(const WeaponEmitter *emitters, unsigned count)
+{
+    weapon_count=count > MAX_WEAPON_EMITTERS ? MAX_WEAPON_EMITTERS : count;
+    if (weapon_count) memcpy(weapon_emitters,emitters,weapon_count*sizeof *emitters);
+}
+
 static int new_frame;
 static int scene_cache_valid, cached_scale;
 static uint32_t layer_clock;
@@ -226,6 +234,7 @@ void world_scene_init(const uint8_t *tiles_rom, const uint8_t *sprites_rom)
 
 void world_scene_reset(void)
 {
+    weapon_count=0;
     cur.valid = prev.valid = 0;
     transport_valid = 0;
     have_history = 0;
@@ -622,9 +631,64 @@ static void gather_tile_glow(void)
         }
 }
 
+/* Linear RGB and reach in half-resolution light probes. Tube and rack
+   discharges scatter a little blue-green light in water. Powder is warm;
+   rocket exhaust has a pale hot core and a shorter amber flight plume. */
+typedef struct { float r,g,b,range; } WeaponSpectrum;
+static const WeaponSpectrum spectra[]={
+    [TUBE_PULSE]={.48f,.93f,1.08f,29}, [HEAVY_TUBE]={.95f,1.44f,1.55f,38},
+    [RACK_PULSE]={.12f,.28f,.30f,15}, [GUN_FLASH]={2.75f,1.52f,.58f,48},
+    [MORTAR_FLASH]={3.65f,1.58f,.43f,64}, [ROCKET_IGNITION]={2.9f,1.63f,.76f,52},
+    [ARC_FLASH]={.65f,1.68f,2.7f,44}, [ROCKET_PLUME]={.88f,.38f,.09f,23},
+    [BURNING_FUEL]={1.65f,.52f,.08f,36}, [ARC_GLOW]={.24f,.70f,1.2f,32}
+};
+static const float flash_decay[]={1,.64f,.31f,.13f,.045f};
+static void gather_weapon_lights(void)
+{
+    for(unsigned i=0;i<weapon_count && light_count<MAX_LIGHTS;++i){
+        WeaponEmitter e=weapon_emitters[i];
+        WeaponSpectrum s=spectra[e.kind];
+        float power=flash_decay[e.age];
+        lights[light_count++]=(Light){.x=e.x*.5f,.y=e.y*.5f,.r=s.r*power,
+            .g=s.g*power,.b=s.b*power,.range=s.range};
+    }
+}
+
+/* Taper the gas jet along the bore. Its short white core lights the actual
+   receiver through transport; only the visible gas itself is composited. */
+static void draw_weapon_flashes(uint32_t *out)
+{
+    for(unsigned i=0;i<weapon_count;++i){
+        WeaponEmitter e=weapon_emitters[i];
+        if(e.kind>=ROCKET_PLUME) continue;
+        WeaponSpectrum s=spectra[e.kind];
+        int wet=g.waterline<0 || e.y>=g.waterline;
+        float length=(e.kind==RACK_PULSE?4:e.kind==MORTAR_FLASH?14:10)*(wet?.72f:1);
+        float inv=1/sqrtf((float)(e.dx*e.dx+e.dy*e.dy));
+        for(int y=-15;y<=15;++y)for(int x=-15;x<=15;++x){
+            int sx=e.x+x-g.shake_x/g.k,sy=e.y+y-g.shake_y/g.k;
+            if(sx<0 || sx>=W || sy<0 || sy>=H)continue;
+            float along=(x*e.dx+y*e.dy)*inv,side=fabsf((y*e.dx-x*e.dy)*inv);
+            if(along < -1 || along>=length)continue;
+            float taper=1-fmaxf(0,along)/length;
+            float alpha=flash_decay[e.age]*taper*(1-side/(.65f+2.2f*taper));
+            if(alpha<=0)continue;
+            int cell=(sy+MARGIN)*LW+sx+MARGIN;
+            if(layer_on[0] && layer_pri[0][cell])continue;
+            for(int row=0;row<g.k;++row)for(int col=0;col<g.k;++col){
+                uint32_t *p=out+(size_t)(sy*g.k+row)*g.ow+sx*g.k+col;
+                unsigned c=*p;
+                *p=light_rgb(((c>>16)&255)+(int)(145*s.r*alpha),
+                    ((c>>8)&255)+(int)(145*s.g*alpha),(c&255)+(int)(145*s.b*alpha));
+            }
+        }
+    }
+}
+
 static void gather_lights(void)
 {
     light_count = 0;
+    gather_weapon_lights();
     gather_tile_glow();
     for (int cell = 0; cell < GW * (H / 8) && light_count < MAX_LIGHTS; ++cell) {
         int n = hot_count[cell];
@@ -1525,6 +1589,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     parallel(compose_rows, g.oh);
     double t4 = stamp();
 
+    if (fx->lights) draw_weapon_flashes(out);
     if (fx->reflect) reflect_surface(out);
     double waterfx_start = stamp();
     waterfx_draw(out, fx, dt);
