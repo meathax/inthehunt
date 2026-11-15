@@ -1,12 +1,18 @@
 # In the Hunt
 
-**0.9.5 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.6 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
 [Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![A submarine shines its bow lamp across an undersea minefield as sunlight casts long pixel shadows beneath the ice.](artwork/screenshots/side-view-lighting.png)
 
-## New in 0.9.5
+## New in 0.9.6
+
+Each dynamic light casts its own pixel shadows. A hull blocking a warm weapon flash can still catch cool light from the opposite side. Light now escapes its emitting hull or tile, and explosion sprites let their own light reach nearby objects.
+
+![The same submarine lit by a warm source, a cool source and both together. The two sources cast shadows in opposite directions.](artwork/screenshots/dynamic-shadow-comparison.png)
+
+## Lighting and performance
 
 - The D3D12 lighting engine casts sharp sun shadows to the edge of the screen. Gunfire and explosions light the facing edges of hulls and wreckage.
 - Switch on **Sub Headlights** to project a beam from each player’s bow. Terrain and sprites cast shadows through the beam.

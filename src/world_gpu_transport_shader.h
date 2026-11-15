@@ -39,16 +39,33 @@ uint caster(int2 pixel){
     uint bits=cell(pixel/2)>>(24+((pixel.y&1)*2+(pixel.x&1)));
     return (bits&16)?2:bits&1;
 }
-float pixelShadow(float2 p,float2 dir,float reach){
-    int2 start=int2(p);
-    uint receiver=caster(start);
-    float stepSize=1/max(max(abs(dir.x),abs(dir.y)),.001);
-    [loop] for(float t=stepSize;t<reach;t+=stepSize){
-        int2 q=int2(floor(p+dir*t));
-        if(any(q<0)||any(q>=size*2))break;
-        uint obstacle=caster(q);
-        if(obstacle && obstacle!=receiver)return 0;
-        if(!obstacle)receiver=0;
+// Trace the open segment between receiver and emitter on the artwork grid.
+// A lamp can be embedded in a hull or glowing tile. Permit the contiguous
+// material at each endpoint, but any intervening silhouette blocks this lamp.
+float pointVisibility(float2 receiver,float2 emitter){
+    int2 q=int2(floor(receiver)),end=int2(floor(emitter));
+    uint nearMaterial=caster(q),farMaterial=caster(end);
+    float2 delta=emitter-receiver;
+    int2 stepDir=int2(delta.x<0?-1:1,delta.y<0?-1:1);
+    float2 stride=1/max(abs(delta),.000001);
+    float2 next=(stepDir*(float2(q)-receiver)+float2(stepDir.x>0,stepDir.y>0))*stride;
+    bool inEmitter=false;
+    [loop]while(any(q!=end)){
+        float crossing=min(next.x,next.y);
+        if(crossing>=1)break;
+        bool2 advance=next<=crossing;
+        q+=int2(advance)*stepDir;
+        next+=float2(advance)*stride;
+        if(all(q==end))break;
+        uint material=caster(q);
+        if(nearMaterial && material==nearMaterial)continue;
+        nearMaterial=0;
+        if(!material){
+            if(inEmitter)return 0;
+        }else{
+            if(material!=farMaterial)return 0;
+            inEmitter=true;
+        }
     }
     return 1;
 }
@@ -92,10 +109,10 @@ void directPass(uint3 id:SV_DispatchThreadID){
             float d=length(delta);
             if(d>=e.z)continue;
             float2 dir=delta/max(.001,d);
-            float fall=cone(e.w,dir)*pow(saturate(1-d/e.z),2)/(1+d*d*(e.w==0?.012:.00045));
+            float fall=cone(e.w,dir)*pow(saturate(1-d/e.z),2)/(1+d*d*(e.w==0?.0032:.00045));
             float3 emission=asfloat(scene.Load3(32+32*i));
             if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
-            float vis=pixelShadow(origin,dir,max(0,2*d-2));
+            float vis=pointVisibility(origin,2*e.xy);
             energy+=emission*fall*vis*((e.w!=0 || (flags&1))?1:.10);
         }
     }
@@ -276,11 +293,11 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
             float2 delta=e.xy-p;float d2=dot(delta,delta);
             if(d2>=e.z*e.z)continue;
             float d=sqrt(max(.0001,d2));float2 dir=delta/d;
-            float strength=cone(e.w,dir)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.008*d2);
+            float strength=cone(e.w,dir)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.0032*d2);
             if(strength<.002)continue;
             float wet=saturate((max(p.y,e.y)-surface)/max(.01,abs(delta.y)));
             float3 colour=asfloat(scene.Load3(32+32*i));
-            incident+=colour*transmission(wet*d)*strength*pixelShadow(p*2,dir,max(0,2*d-2))*2.8;
+            incident+=colour*transmission(wet*d)*strength*pointVisibility(p*2,2*e.xy)*2.8;
         }
     }
     return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));
@@ -345,7 +362,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(flags&(1|32768)){
         // The bow beam is seen in profile. Most light goes onto the hull
         // or cliff it strikes; suspended particles reveal its path in water.
-        float3 response=surface?.17+.94*base:.075+.40*base;
+        float3 response=surface?.20+.98*base:.105+.49*base;
         colour+=response*energy;
     }
     if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb;

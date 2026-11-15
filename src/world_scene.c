@@ -511,6 +511,7 @@ static void draw_sprites(double alpha)
         uint16_t flags = (!independent || !(s->attr & 0x80)) ? 0x8000 : 0;
         /* Mark receiver pixels before sprite parts are assembled. The GPU
            finds the outer edge of their union, including transparent pens. */
+        if(blast)flags|=0x1000; /* Luminous gases transmit the lights inside them. */
         if (g.fx->rim && !blast && own_bank!=3 && own_bank!=10 && own_bank!=11 &&
             own_bank!=39 && own_bank!=43 && own_bank!=55) flags |= 0x2000;
         for (int row = 0; row < height; ++row) {
@@ -1014,7 +1015,7 @@ static void pack_gpu_light_rows(int from,int to)
             int terrain=divide[clampi(py,0,g.oh-1)+g.off_y[1]]*LW+
                         divide[clampi(px,0,g.ow-1)+g.off_x[1]];
             unsigned bit=1u<<(dy*2+dx);
-            if(sp!=NONE && !(sp&0x4000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
+            if(sp!=NONE && !(sp&0x5000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
             if(layer_on[1] && (g.waterline<0 || ny>g.waterline+12) &&
                layer_idx[1][terrain]!=NONE)coverage|=bit;
         }

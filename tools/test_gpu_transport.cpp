@@ -145,6 +145,32 @@ int main() {
        (clear_view[120*320+105]&0xffffff)!=0x505050)return 1;
     light[3]=0;
     scene.flags=1;
+    // Two embedded lights of different colours project the same ship onto
+    // a terrain receiver in opposite directions. The unblocked lamp fills
+    // each shadow independently; moving the occluder away restores both.
+    scene.count=2;
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
+    auto occupy=[](int x,int y,unsigned material){
+        scene.cells[(y/2)*160+x/2]|=material<<(24+(x&1)+2*(y&1));
+    };
+    for(int i=0;i<2;++i){
+        float *e=scene.emitters[i];
+        e[0]=(120.5f+80*i)*.5f;e[1]=40.25f;e[2]=85;e[3]=0;
+        e[4]=i?0:6;e[5]=0;e[6]=i?6:0;
+        for(int y=77;y<=84;++y)for(int x=117;x<=124;++x)occupy(x+i*80,y,1);
+    }
+    for(int y=136;y<=145;++y)for(int x=125;x<=190;++x)occupy(x,y,1);
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,error,sizeof error))return 1;
+    for(int y=117;y<=123;++y)for(int x=157;x<=163;++x)occupy(x,y,16);
+    if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error))return 1;
+    for(int i=0;i<2;++i){
+        unsigned at=136*320+(i?144:176),shift=i?0:16;
+        int loss=((clear_view[at]>>shift)&255)-((wall_view[at]>>shift)&255);
+        int fill=((wall_view[at]>>(16-shift))&255);
+        if(loss<12 || fill<95)return 1;
+    }
+    puts("PASS: opposing embedded sources cast independent coloured shadows onto terrain.");
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
     // With point emitters off, a coloured wall can tint the receiver only
     // through the indirect pass sampling skylight on the first hit.
     scene.count=0;
