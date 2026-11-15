@@ -24,6 +24,8 @@
 1. Download **InTheHunt-Windows-x64.zip** and extract everything.
 2. Open **InTheHunt.exe** and select your World ROM archive. The game imports it once, then starts automatically.
 
+Merged, non-merged and split MAME collections are supported. Select the World parent archive in any layout. If you select a split regional clone, keep the World parent beside it. The importer uses the verified World chips and the game runs the World edition.
+
 No Python or compiler needed. The built-in importer uses Windows PowerShell and `tar.exe`; CRT presets need Direct3D 12. After import, the original archive can be moved or removed.
 
 ## Controls

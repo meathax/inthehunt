@@ -22,7 +22,8 @@ FILES = {
 INSTRUCTIONS = """IN THE HUNT - Windows edition
 
 Open InTheHunt.exe. On first launch, select your own World inthunt.zip or
-inthunt.7z archive. The game checks and copies the required data into
+inthunt.7z archive from a merged, non-merged or split collection.
+For split sets, choose the World parent. The game checks and copies the required data into
 .local/world. You can then move or remove the original archive.
 
 5 = coin, 1 = start, arrows = move, Z/X = fire, F1/Esc = options.

@@ -99,6 +99,42 @@ function Test-WorldNativeRomCache {
     } finally { $lock.Dispose() }
 }
 
+function Read-WorldArchiveChips {
+    param($Archive, $Scratch, $ByHash, $Sizes, $Found)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipPath = $Archive.FullName
+    if ($Archive.Extension -ieq '.7z') {
+        # Repack in scratch so ZIP and solid 7z use the same member validation.
+        # Archive-controlled names never become filesystem destinations.
+        Copy-Item -LiteralPath $zipPath -Destination (Join-Path $Scratch 'source.7z') -Force -ErrorAction Stop
+        Push-Location -LiteralPath $Scratch
+        try {
+            & (Get-WorldTar) -cf 'members.zip' --format zip '@source.7z'
+            if ($LASTEXITCODE) { throw "Cannot read $($Archive.Name)." }
+        } finally { Pop-Location }
+        $zipPath = Join-Path $Scratch 'members.zip'
+    }
+    $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+    $sha1 = [Security.Cryptography.SHA1]::Create()
+    try {
+        foreach ($entry in $zip.Entries) {
+            if (!$Sizes.ContainsKey($entry.Length)) { continue }
+            $stream = $entry.Open()
+            try { $digest = [BitConverter]::ToString($sha1.ComputeHash($stream)).Replace('-', '') }
+            finally { $stream.Dispose() }
+            $chip = $ByHash[$digest]
+            if (!$chip -or $chip.size -ne $entry.Length -or $Found.ContainsKey($digest)) { continue }
+            $zipEntry = $entry.Open()
+            try {
+                $file = [IO.File]::Create((Join-Path $Scratch $chip.file))
+                try { $zipEntry.CopyTo($file) } finally { $file.Dispose() }
+            } finally { $zipEntry.Dispose() }
+            $Found[$digest] = $true
+            if ($Found.Count -eq $ByHash.Count) { break }
+        }
+    } finally { $sha1.Dispose(); $zip.Dispose() }
+}
+
 function Import-WorldNativeRom {
     param([string]$Root, [string]$Rom, [string]$World)
     $archive = Get-Item -LiteralPath $Rom -ErrorAction Stop
@@ -113,15 +149,30 @@ function Import-WorldNativeRom {
         $cached = Get-WorldNativeCacheManifest $world $metadata $regions
         if ($cached -and $cached.archiveSha256 -eq $archiveHash) { return }
         $scratch = New-Item -ItemType Directory (Join-Path $world ('import-' + [guid]::NewGuid().ToString('N'))) -ErrorAction Stop
-        $members = @($regions | ForEach-Object { $_.chips | ForEach-Object file })
-        # Windows tar can narrow non-ASCII archive paths. Stage the archive with
-        # an ASCII name and use a relative path from the inherited directory.
-        Copy-Item -LiteralPath $archive.FullName -Destination (Join-Path $scratch.FullName 'source.archive')
-        Push-Location -LiteralPath $scratch.FullName
-        try {
-            & (Get-WorldTar) -xf 'source.archive' @members
-            if ($LASTEXITCODE) { throw "Cannot extract the required World chips from $($archive.FullName)." }
-        } finally { Pop-Location }
+        $byHash = @{}
+        $sizes = @{}
+        $found = @{}
+        foreach ($chip in $regions.chips) {
+            $byHash[$chip.sha1] = $chip
+            $sizes[[long]$chip.size] = $true
+        }
+        Read-WorldArchiveChips $archive $scratch.FullName $byHash $sizes $found
+        if ($found.Count -lt $byHash.Count -and $archive.BaseName -in @('inthuntu', 'kaiteids', 'inthuntk')) {
+            foreach ($name in 'inthunt.zip', 'inthunt.7z') {
+                $parent = Join-Path $archive.DirectoryName $name
+                if (Test-Path -LiteralPath $parent -PathType Leaf) {
+                    Read-WorldArchiveChips (Get-Item -LiteralPath $parent) $scratch.FullName $byHash $sizes $found
+                    # A single archive hash cannot identify a two-archive import.
+                    $archiveHash = ''
+                    if ($found.Count -eq $byHash.Count) { break }
+                }
+            }
+        }
+        foreach ($chip in $regions.chips) {
+            if (!$found.ContainsKey($chip.sha1)) {
+                throw "Missing verified World ROM $($chip.file). Select the World parent inthunt.zip or inthunt.7z."
+            }
+        }
         $records = @()
         foreach ($region in $regions) {
             $image = New-Object byte[] $region.size
