@@ -62,6 +62,7 @@ static const NumberSetting numbers[] = {
     {"fx_ocean_depth", offsetof(WorldSettings, fx_ocean_depth), 0, 1, WORLD_GFX_LOW},
     {"fx_aftermath", offsetof(WorldSettings, fx_aftermath), 0, 1, WORLD_GFX_HIGH},
     {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1, WORLD_GFX_HIGH},
+    {"headlight_level", offsetof(WorldSettings, headlight_level), 0, 3, 0},
     {"fx_headlights", offsetof(WorldSettings, fx_headlights), 0, 1, WORLD_GFX_LOW},
     {"fx_rim", offsetof(WorldSettings, fx_rim), 0, 1, WORLD_GFX_LOW},
     {"fx_bubble_light", offsetof(WorldSettings, fx_bubble_light), 0, 1, WORLD_GFX_HIGH},
@@ -130,6 +131,7 @@ void world_settings_defaults(WorldSettings *settings)
     memset(settings, 0, sizeof *settings);
     settings->timing_mode = WORLD_TIMING_ARCADE;
     settings->pacing = 1;
+    settings->headlight_level = 1;
     settings->volume = 100;
     settings->window_scale = 3;
     settings->achievement_popups = 1;

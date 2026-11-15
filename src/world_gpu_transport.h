@@ -1,8 +1,27 @@
 #include <algorithm>
 #include "world_gpu_transport_shader.h"
 static_assert(offsetof(WorldLightScene,water_grade)==82900 && offsetof(WorldLightScene,ice_coverage)==82916);
+static_assert(offsetof(WorldLightScene,sky_stop)==102116);
 static_assert(offsetof(WorldLightScene,light_bins)==81300);
 static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,ocean_rows)==43736 && offsetof(WorldEffectBatch,nodes)==43768 && sizeof(WorldEffectNode)==32);
+
+static_assert(offsetof(WorldLightScene,point_coverage)==102492);
+
+// Close single-pixel stipple holes in each material independently. Four
+// native pixels and both materials are processed together in each byte.
+static void pack_point_coverage(uint8_t *out,const uint32_t *cells){
+    for(int y=0;y<120;++y)for(int x=0;x<160;++x){
+        int i=y*160+x;
+        unsigned c=cells[i]>>24;
+        unsigned l=x?cells[i-1]>>24:0,r=x<159?cells[i+1]>>24:0;
+        unsigned t=y?cells[i-160]>>24:0,b=y<119?cells[i+160]>>24:0;
+        unsigned left=((c&0x55)<<1)|((l&0xaa)>>1);
+        unsigned right=((c&0xaa)>>1)|((r&0x55)<<1);
+        unsigned up=((c&0x33)<<2)|((t&0xcc)>>2);
+        unsigned down=((c&0xcc)>>2)|((b&0x33)<<2);
+        out[i]=(uint8_t)(c|(left&right&up&down));
+    }
+}
 
 struct GpuTransport {
     Com<ID3D12RootSignature> root;
@@ -108,6 +127,7 @@ struct GpuTransport {
             memcpy(map,&data,offsetof(WorldLightScene,effects));
             auto *packed=static_cast<WorldLightScene*>(map);
             packed->flags=dispatch_flags;
+            pack_point_coverage(packed->point_coverage,data.cells);
             uint32_t bins[10*8][5]={};
             for(unsigned i=0;i<data.count && i<WORLD_EMITTERS;++i){
                 const float *e=data.emitters[i];
@@ -134,7 +154,7 @@ struct GpuTransport {
             cmd->SetComputeRootUnorderedAccessView(3,bounce_field->GetGPUVirtualAddress());
             D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
             cmd->ResourceBarrier(1,&sync);
-            if(data.flags&(2|16|16384)){
+            if(!(data.flags&524288) && (data.flags&(2|16|16384))){
                 cmd->SetPipelineState(sun.get());
                 cmd->Dispatch(373,1,1); // 320 columns plus the 53-pixel slant at row 239
                 cmd->ResourceBarrier(1,&sync);

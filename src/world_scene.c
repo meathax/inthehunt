@@ -21,6 +21,7 @@ enum {
 typedef struct {
     uint8_t tiles[65536];
     uint8_t sprites[2048];
+    uint16_t sprite_owners[256];
     uint32_t colors[1024];
     WorldVideoLayer layers[3];
     uint16_t video_control;
@@ -31,7 +32,7 @@ typedef struct {
     int valid;
 } Snapshot;
 
-typedef struct { int left, top, cols, rows; unsigned code, attr; } Sprite;
+typedef struct { int left, top, cols, rows; unsigned code, attr, slot; } Sprite;
 typedef struct { float x, y, age, life, strength; } Ring;
 typedef struct { float x, y, vx, vy, age, life; int kind; } Particle;
 
@@ -76,7 +77,8 @@ static uint32_t history[MAXK * MAXK * N];
 
 /* Only opaque HUD pixels are exempt; water continues behind their gaps. */
 static uint32_t hud_overlay[W * (H - HUD) * MAXK * MAXK];
-static uint32_t hot_sum[3][GW * GH];
+typedef struct { unsigned weight; uint32_t x,y,r,g,b; } BlastRadiance;
+static BlastRadiance blast_radiance[MAX_SPRITES];
 static uint16_t hot_count[GW * GH], hot_before[GW * GH];
 static uint8_t water_map[N];                     /* 1x: open water under this pixel */
 static int8_t field_x[N], field_y[N];            /* shockwave displacement, 1/4 px */
@@ -293,7 +295,39 @@ static int lighting_stage(void)
     return (cur.scene_id&65535)==0xb2e && stage<6?(int)stage:-1;
 }
 
-static uint8_t terrain_cast[LN], far_ice[LN];
+static uint8_t terrain_cast[LN], far_ice[LN], floor_material[LN];
+static int floor_top[LW];
+/* Zero means open sky. Other values encode the first roof hit plus one
+   along the same slant as sunPass, including shafts entering at the right. */
+static uint8_t sky_stop[376];
+static int sky_reaches(int x,int y)
+{
+    int stop=sky_stop[x+(11*y+25)/50];
+    return !stop || y+1<stop;
+}
+
+/* Only a solid run connected to the bottom of the playfield is seabed.
+   The contour follows opaque pixels inside the arcade collision tiles. */
+static void find_seabed(void)
+{
+    int enclosed=cur.waterline<=0;
+    memset(sky_stop,enclosed?1:0,sizeof sky_stop);
+    for(int x=0;x<LW;++x){
+        if(!enclosed && layer_on[1]){
+            for(int y=0;y<H && terrain_cast[(y+MARGIN)*LW+x];++y){
+                int shaft=x-MARGIN+(11*y+25)/50;
+                if((unsigned)shaft<373 && (!sky_stop[shaft] || sky_stop[shaft]>y+1))
+                    sky_stop[shaft]=(uint8_t)(y+1);
+            }
+        }
+        int row=MARGIN+H-1, solid_material=0;
+        while(layer_on[1] && row>=0 && terrain_cast[row*LW+x]){
+            solid_material|=floor_material[row*LW+x];
+            --row;
+        }
+        floor_top[x]=solid_material?row+1:LH;
+    }
+}
 static void render_layer(int layer, int from, int to)
 {
     unsigned master = cur.layers[layer].master;
@@ -339,7 +373,10 @@ static void render_layer(int layer, int from, int to)
             for (; bx<end; ++bx, pens>>=8) {
                 unsigned pen = pens&15;
                 idx[bx] = pen || layer==2 ? (uint16_t)((bank*16+pen)&1023) : 0xffff;
-                if(layer==1)terrain_cast[by*LW+bx]=terrain && pen;
+                if(layer==1){
+                    terrain_cast[by*LW+bx]=terrain && pen;
+                    floor_material[by*LW+bx]=(0xff02u >> ((attr>>11)&15))&1;
+                }
                 if(layer==2 && stage==0){
                     far_ice[by*LW+bx]=ice && pen!=(sea&15);
                     sea>>=8;
@@ -353,6 +390,40 @@ static void render_layer(int layer, int from, int to)
 static void render_tile_rows(int from,int to)
 {
     for (int layer=0; layer<3; ++layer) render_layer(layer,from,to);
+}
+
+/* Sprite-list codes for spray, foam and impact animation parts. Decode the
+   same animation lists and banked descriptors that the board submits to OAM. */
+static uint8_t impact_art[65536 / 8], flash_art[65536 / 8];
+static void mark_impact_frames(const uint8_t *rom, unsigned animation, uint8_t *art)
+{
+    for (unsigned frame=0; frame<128; ++frame) {
+        unsigned descriptor=word(rom+animation+2*frame);
+        if (descriptor==0xffff) break;
+        const uint8_t *bank=rom+((descriptor&1)?0x90000:0x80000);
+        unsigned count=word(bank+descriptor);
+        if (count>210) break;
+        for (unsigned part=0; part<count; ++part) {
+            unsigned code=word(bank+(uint16_t)(descriptor+6+8*part));
+            art[code>>3]|=(uint8_t)(1u<<(code&7));
+        }
+    }
+}
+
+void world_scene_init_impact_art(const uint8_t *program_rom)
+{
+    unsigned animations[]={word(program_rom+0x6cec),word(program_rom+0x6d2a),
+        word(program_rom+0x6d67),word(program_rom+0x6ad9),0x7507,0x7511,0x7555,0x75a7};
+    memset(impact_art,0,sizeof impact_art);
+    for (unsigned i=0;i<sizeof animations/sizeof animations[0];++i)
+        mark_impact_frames(program_rom,animations[i],impact_art);
+    /* World impact, kill, warship and boss blast sequences. Water-entry
+       animations have their own artwork and do not emit explosion light. */
+    const unsigned blasts[]={word(program_rom+0x6ad9),0x747f,0x74a1,0x74c3,
+        0x74e5,0x7533,0x75df};
+    memset(flash_art,0,sizeof flash_art);
+    for(unsigned i=0;i<sizeof blasts/sizeof blasts[0];++i)
+        mark_impact_frames(program_rom,blasts[i],flash_art);
 }
 
 void world_scene_init(const uint8_t *tiles_rom, const uint8_t *sprites_rom)
@@ -387,6 +458,8 @@ void world_scene_submit(const WorldSceneFrame *frame)
     if (cur.valid) memcpy(&prev, &cur, sizeof prev);
     memcpy(cur.tiles, frame->tiles, sizeof cur.tiles);
     memcpy(cur.sprites, frame->sprites, sizeof cur.sprites);
+    if(frame->sprite_owners)memcpy(cur.sprite_owners,frame->sprite_owners,sizeof cur.sprite_owners);
+    else memset(cur.sprite_owners,0,sizeof cur.sprite_owners);
     memcpy(cur.colors, frame->colors, sizeof cur.colors);
     memcpy(cur.layers, frame->layers, sizeof cur.layers);
     memcpy(cur.frac, frame->frac, sizeof cur.frac);
@@ -401,6 +474,7 @@ void world_scene_submit(const WorldSceneFrame *frame)
         layer_rows[layer]=(cur.layers[layer].master & 0x40)!=0;
     }
     parallel(render_tile_rows,LH);
+    find_seabed();
     /* Rings and particles live in the playfield: follow its scroll. */
     int dx = (int16_t)(cur.layers[1].scroll_x - prev.layers[1].scroll_x);
     int dy = (int16_t)(cur.layers[1].scroll_y - prev.layers[1].scroll_y);
@@ -425,6 +499,7 @@ static int parse_sprites(const uint8_t *buffer, Sprite *list)
         Sprite *s = &list[count++];
         s->cols = 1 << ((geometry >> 11) & 3);
         s->rows = 1 << ((geometry >> 9) & 3);
+        s->slot=offset/8;
         offset += 8u * (unsigned)s->cols;
         s->top = 360 - (int)(geometry & 511) - 16 * (s->rows - 1);
         s->left = (int)((word(entry + 6) - 16u) & 511) - 80;
@@ -505,7 +580,7 @@ static void draw_sprites(double alpha)
     static Sprite now[MAX_SPRITES], before[MAX_SPRITES];
     int k = g.k;
     for (size_t i = 0, n = (size_t)g.ow * g.oh; i < n; ++i) sprite_px[i] = NONE;
-    memset(hot_sum, 0, sizeof hot_sum);
+    memset(blast_radiance,0,sizeof blast_radiance);
     memset(hot_count, 0, sizeof hot_count);
     if (cur.video_control & 0x80) return;
     int count = parse_sprites(cur.sprites, now);
@@ -524,18 +599,26 @@ static void draw_sprites(double alpha)
        graphics (fire-coloured paint alone also matches submarines, coins and
        the CONTINUE lettering). Palette banks 1-2 (the players' submarines)
        and 11 (the HUD's GO arrow) never glow. */
-    static uint32_t part_sum[3][GW * GH];
-    static uint16_t part_count[GW * GH], part_cells[GW * GH];
     for (int i = 0; i < count; ++i) {
         const Sprite *s = &now[i];
         int height = s->rows * 16;
-        int touched = 0;
+        unsigned submission=cur.sprite_owners[s->slot], owner=submission&255;
+        BlastRadiance *flash=&blast_radiance[owner?owner-1:s->slot];
         unsigned own_bank = s->attr & 0x7f;
         int may_glow = own_bank != 1 && own_bank != 2 && own_bank != 11;
         /* The game's explosion graphics, in whatever palette. */
         unsigned family = s->code >> 4;
         int blast = (family >= 0x0a9 && family <= 0x0ab) || family == 0x0cb || family == 0x0cc ||
                     family == 0x0fc || family == 0x0fd || (family >= 0x103 && family <= 0x109);
+        /* The vertical weapon frames (ROM tables 99AD/99B5) and its
+           palette-3 wake (9AB3) share tile families with explosions. */
+        int rising_round=(s->code>=0xaac && s->code<=0xaaf) || s->code==0xacf || s->code==0x1038;
+        int bubble_trail=own_bank==3 && ((s->code>=0xa94 && s->code<=0xaaa) ||
+                          s->code==0x1fc8 || s->code==0x106a);
+        int authored_flash=(submission>>8)==2 || ((submission>>8)==1 &&
+            (flash_art[s->code>>3] & (1u<<(s->code&7))));
+        blast=authored_flash || (blast && !rising_round && !bubble_trail);
+        if(authored_flash)may_glow=1;
         if (s->top >= H + 8 || s->top + height <= -8) continue;
         double x=s->left, y=s->top;
         SpriteMotion *m=track ? &motion[motion_root(motion,i)] : NULL;
@@ -554,8 +637,9 @@ static void draw_sprites(double alpha)
         uint16_t flags = (!independent || !(s->attr & 0x80)) ? 0x8000 : 0;
         /* Mark receiver pixels before sprite parts are assembled. The GPU
            finds the outer edge of their union, including transparent pens. */
-        if(blast)flags|=0x1000; /* Luminous gases transmit the lights inside them. */
-        if (g.fx->rim && !blast && own_bank!=3 && own_bank!=10 && own_bank!=11 &&
+        int transmissive=blast || bubble_trail || (impact_art[s->code>>3] & (1u<<(s->code&7)));
+        if(transmissive)flags|=0x1000; /* Luminous gases transmit the lights inside them. */
+        if (g.fx->rim && !transmissive && own_bank!=3 && own_bank!=10 && own_bank!=11 &&
             own_bank!=39 && own_bank!=43 && own_bank!=55) flags |= 0x2000;
         for (int row = 0; row < height; ++row) {
             int screen_y = s->top + row;
@@ -575,33 +659,29 @@ static void draw_sprites(double alpha)
                     int wrap = s->left + shown * 16 >= 497 ? 512 : 0;
                     int sx = s->left + shown * 16 + col - wrap;
                     int px = left + (shown * 16 + col - wrap) * k, py = top + row * k;
-                    drawing_material = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !blast
+                    drawing_material = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive
                         ? material_surface(code,bank,pen,flip_x?15-col:col,local&15,flip_x,flip_y) : 0;
                     sprite_block(px, py, index | flags | (hud ? 0x4000 : 0));
                     /* Fire, flashes and tracer light their surroundings. */
                     if (may_glow && blast && sx >= 0 && sx < W && screen_y >= 0 && screen_y < H) {
                         uint32_t colour = cur.colors[index];
                         unsigned r = (colour >> 16) & 255, gr = (colour >> 8) & 255, b = colour & 255;
-                        if ((r >= 176 && r >= b + 40) || (r >= 236 && gr >= 220)) {
-                            int cell = (screen_y / 8) * GW + sx / 8;
-                            if (!part_count[cell]) part_cells[touched++] = (uint16_t)cell;
-                            part_sum[0][cell] += r; part_sum[1][cell] += gr; part_sum[2][cell] += b;
-                            ++part_count[cell];
+                        unsigned peak=r>gr?r:gr;
+                        if(b>peak)peak=b;
+                        /* Track the animated luminous core per descriptor, even
+                           for blue and violet fire sharing a cell with another blast. */
+                        unsigned weight=peak>48?(peak-48)>>3:0;
+                        if(weight){
+                            flash->weight+=weight;
+                            flash->x+=weight*sx;flash->y+=weight*screen_y;
+                            flash->r+=weight*r;flash->g+=weight*gr;flash->b+=weight*b;
+                            if((r>=176 && r>=b+40) || (r>=236 && gr>=220))++hot_count[(screen_y/8)*GW+sx/8];
                         }
                     }
                 }
             }
         }
-        int glows = blast;
-        for (int t = 0; t < touched; ++t) {
-            int cell = part_cells[t];
-            if (glows) {
-                for (int c = 0; c < 3; ++c) hot_sum[c][cell] += part_sum[c][cell];
-                hot_count[cell] = (uint16_t)(hot_count[cell] + part_count[cell]);
-            }
-            part_sum[0][cell] = part_sum[1][cell] = part_sum[2][cell] = 0;
-            part_count[cell] = 0;
-        }
+
     }
 }
 
@@ -738,7 +818,7 @@ static void build_sunlight(void)
         for (int x=1; x<LW-2; ++x) {
             float diffuse=g.waterline>0?(sky[x-1]+sky[x]+sky[x+1]+sky[x+2])*.25f:1.f;
             float incident=((above[x]+above[x+1])*3.0f+above[x-1]+above[x+2])*0.125f;
-            if (y>=0 && x>=MARGIN && x<MARGIN+W) sunlight[y*W+x-MARGIN]=incident*(.84f+.16f*diffuse);
+            if (y>=0 && x>=MARGIN && x<MARGIN+W) sunlight[y*W+x-MARGIN]=y+MARGIN>floor_top[x]?1.f:incident*(.84f+.16f*diffuse);
             float keep=1.f-.34f*receiver_opacity[(y+MARGIN)*LW+x]/255.f;
             int outside=g.waterline>0 && y<g.waterline;
             below[x]=outside?incident:incident*keep;
@@ -840,12 +920,14 @@ static const WeaponSpectrum spectra[]={
     [RACK_PULSE]={.12f,.28f,.30f,15,0,0}, [GUN_FLASH]={2.75f,1.52f,.58f,48,0,0},
     [MORTAR_FLASH]={3.65f,1.58f,.43f,64,0,0}, [ROCKET_IGNITION]={2.9f,1.63f,.76f,52,0,0},
     [ARC_FLASH]={.65f,1.68f,2.7f,44,0,0}, [ROCKET_PLUME]={.82f,.36f,.085f,15,-4,-1},
+    [VERTICAL_PULSE]={.36f,.21f,.08f,13,0,0},
+    [VERTICAL_EXHAUST]={.20f,.10f,.035f,7,-2,-1},
     [BURNING_FUEL]={1.65f,.52f,.08f,36,0,0}, [ARC_GLOW]={.24f,.70f,1.2f,27,0,0},
     /* Range is in probes; offset is native pixels along the flight axis.
        A zero aim is a round lamp; signed aim points forward or astern. */
     [TORPEDO_LENS]={.56f,.035f,.019f,10,5,0},
     [HEAVY_LENS]={.68f,.085f,.025f,14,6,0},
-    [CHARGE_FUSE]={.37f,.22f,.035f,9,0,0},
+    [CHARGE_FUSE]={.56f,.19f,.035f,13,2,0},
     [TRACER]={.53f,.25f,.075f,9,-1,-1},
     [SHELL_FUSE]={.52f,.12f,.035f,11,2,0},
     [HOT_FRAGMENT]={.35f,.105f,.025f,7,0,0},
@@ -881,7 +963,7 @@ static void draw_weapon_flashes(uint32_t *out)
         if(e.kind>=ROCKET_PLUME) continue;
         WeaponSpectrum s=spectra[e.kind];
         int wet=g.waterline<0 || e.y>=g.waterline;
-        float length=(e.kind==RACK_PULSE?4:e.kind==MORTAR_FLASH?14:10)*(wet?.72f:1);
+        float length=(e.kind==VERTICAL_PULSE?3:e.kind==RACK_PULSE?4:e.kind==MORTAR_FLASH?14:10)*(wet?.72f:1);
         float inv=1/sqrtf((float)(e.dx*e.dx+e.dy*e.dy));
         for(int y=-15;y<=15;++y)for(int x=-15;x<=15;++x){
             int sx=e.x+x-g.shake_x/g.k,sy=e.y+y-g.shake_y/g.k;
@@ -906,30 +988,33 @@ static void draw_weapon_flashes(uint32_t *out)
 static void gather_lights(void)
 {
     light_count = 0;
+    for(unsigned i=0;i<MAX_SPRITES && light_count<MAX_LIGHTS;++i){
+        const BlastRadiance *f=&blast_radiance[i];
+        if(!f->weight)continue;
+        float inv=1.f/f->weight;
+        float power=2.65f*f->weight/(f->weight+850.f);
+        float r=f->r*inv/255.f,g0=f->g*inv/255.f,b=f->b*inv/255.f;
+        lights[light_count++]=(Light){.x=.5f*f->x*inv,.y=.5f*f->y*inv,
+            .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=9+21*power};
+    }
     gather_weapon_lights();
     gather_tile_glow();
-    /* An explosion commonly occupies several 8x8 bins. Use the luminous
-       centroid of each 16x16 patch instead of stacking co-located point
-       lights. Keep weapon actors separate so their muzzle positions survive. */
-    for(int scenery=0;scenery<2;++scenery){
-        for(int y=0;y<GH && light_count<MAX_LIGHTS;y+=2)
-        for(int x=0;x<GW && light_count<MAX_LIGHTS;x+=2){
-            unsigned n=0,sx=0,sy=0,sum[3]={0};
-            for(int dy=0;dy<2 && y+dy<GH;++dy)
-            for(int dx=0;dx<2 && x+dx<GW;++dx){
-                int at=(y+dy)*GW+x+dx;
-                unsigned count=scenery?tile_glow_count[at]:hot_count[at];
-                if(count<(scenery?4u:3u) || (scenery && hot_count[at]>=3))continue;
-                n+=count;
-                sx+=count*(4*(x+dx)+2);sy+=count*(4*(y+dy)+2);
-                for(int c=0;c<3;++c)sum[c]+=scenery?tile_glow_sum[c][at]:hot_sum[c][at];
-            }
-            if(!n)continue;
-            float power=scenery?.18f+.75f*fminf(n/40.f,1):.35f+1.55f*fminf(n/80.f,1);
-            float r=sum[0]/(255.f*n),g0=sum[1]/(255.f*n),b=sum[2]/(255.f*n);
-            lights[light_count++]=(Light){.x=(float)sx/n,.y=(float)sy/n,
-                .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=scenery?25:20+24*power};
+    for(int y=0;y<GH && light_count<MAX_LIGHTS;y+=2)
+    for(int x=0;x<GW && light_count<MAX_LIGHTS;x+=2){
+        unsigned n=0,sx=0,sy=0,sum[3]={0};
+        for(int dy=0;dy<2 && y+dy<GH;++dy)
+        for(int dx=0;dx<2 && x+dx<GW;++dx){
+            int at=(y+dy)*GW+x+dx;
+            unsigned count=tile_glow_count[at];
+            if(count<4 || hot_count[at]>=3)continue;
+            n+=count;sx+=count*(4*(x+dx)+2);sy+=count*(4*(y+dy)+2);
+            for(int c=0;c<3;++c)sum[c]+=tile_glow_sum[c][at];
         }
+        if(!n)continue;
+        float power=.18f+.75f*fminf(n/40.f,1);
+        float r=sum[0]/(255.f*n),g0=sum[1]/(255.f*n),b=sum[2]/(255.f*n);
+        lights[light_count++]=(Light){.x=(float)sx/n,.y=(float)sy/n,
+            .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=25};
     }
 }
 
@@ -1039,7 +1124,7 @@ static void transport_rows(int from, int to)
             float sv = fx->sunshadow ? sunlight[(2*y+1)*W+2*x+1] : 1.0f;
             /* Sunlit rock contributes to the same radiance field that bounce
                rays sample on the next frame. Water filters the incoming ray. */
-            if (fx->sunshadow && fx->lights && solid[p] && sv > 0.0f) {
+            if (fx->sunshadow && fx->lights && solid[p] && sv > 0.0f && sky_reaches(2*x+1,2*y+1)) {
                 float depth = fmaxf(0.0f, fy0 - fmaxf(surface, 0.0f));
                 int wet = clampi((int)(2.0f * depth / -sun_y), 0, 319);
                 float sun = 0.48f * sv;
@@ -1084,12 +1169,13 @@ static void pack_gpu_light_rows(int from,int to)
             unsigned bit=1u<<(dy*2+dx);
             if(sp!=NONE && !(sp&0x5000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
             if(layer_on[1] && terrain_cast[terrain])coverage|=bit;
+            if(layer_on[1] && terrain/LW>floor_top[terrain%LW])ice|=bit<<4;
             if(stage==0 && layer_on[2]){
                 int far_pixel=divide[clampi(py,0,g.oh-1)+g.off_y[2]]*LW+divide[clampi(px,0,g.ow-1)+g.off_x[2]];
                 if(far_ice[far_pixel])ice|=bit;
             }
         }
-        if(stage==0)gpu_light->ice_coverage[at]=ice;
+        gpu_light->ice_coverage[at]=ice;
         gpu_light->cells[at]=(c&0xffffff)|(coverage<<24);
     }
 }
@@ -1112,6 +1198,7 @@ static void transport(const WorldSceneFx *fx)
     if (fx->lights) gather_lights();
     else light_count = 0;
     if (gpu_light) {
+        memcpy(gpu_light->sky_stop,sky_stop,sizeof sky_stop);
         ++gpu_light->revision;
         unsigned lamps=0;
         for(int player=0;fx->headlights && player<2;++player){
@@ -1129,8 +1216,12 @@ static void transport(const WorldSceneFx *fx)
             if(best<0)continue; /* Do not leave a detached beam after the hull disappears. */
             nose=centre+(best+2)*bow[2];
             float *e=gpu_light->emitters[lamps++];
-            e[0]=(nose-g.shake_x/g.k)*.5f;e[1]=(bow[1]-g.shake_y/g.k)*.5f;e[2]=62;e[3]=(float)bow[2];
-            e[4]=2.8f;e[5]=1.94f;e[6]=.94f;e[7]=0;
+            static const float ranges[]={124,148,174,208};
+            static const float gains[]={2,2.25f,2.55f,2.9f};
+            unsigned level=fx->headlight_level & 3;
+            float gain=gains[level];
+            e[0]=(nose-g.shake_x/g.k)*.5f;e[1]=(bow[1]-g.shake_y/g.k)*.5f;e[2]=ranges[level];e[3]=(float)bow[2];
+            e[4]=2.8f*gain;e[5]=1.94f*gain;e[6]=.94f*gain;e[7]=0;
         }
         gpu_light->count=lamps+light_count;
         if(gpu_light->count>WORLD_EMITTERS)gpu_light->count=WORLD_EMITTERS;
@@ -1322,7 +1413,8 @@ static void layer_rows_fx(int from, int to)
                 int w = palette_water[layer_idx[layer][i]] * under >> 8;
                 layer_wat[layer][i] = (uint8_t)w;
                 int surface = w < 128;                       /* rock, ice, wrecks: not open water */
-                float sv = shadowed && in_play ? pixel_light[sy*W+sx].sun : 1.0f;
+                int sky=in_play && sky_reaches(sx,sy);
+                float sv = shadowed && sky ? pixel_light[sy*W+sx].sun : 1.0f;
 
                 if (fx->depth && under) {
                     /* Water absorbs red first, then green: the light that
@@ -1379,7 +1471,7 @@ static void layer_rows_fx(int from, int to)
                         }
                     }
                 }
-                if (!gpu_light && fx->rays && w && ray_fade) {
+                if (!gpu_light && sky && fx->rays && w && ray_fade) {
                     int s = (wx * 2 + wy) * 8;
                     int n = F(s * 2 + g.Q) + F(s * 5 - g.Q * 2 + 2400) + F(s + g.Q / 2 + 5600);
                     if (n > 60) {
@@ -1985,6 +2077,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         int stage=lighting_stage();
         WaterGrade grade=stage>=0?water_grades[stage]:(WaterGrade){.53f,.65f,.79f,1.0625f};
         memcpy(gpu_light->water_grade,&grade,sizeof grade);
+        if(cur.waterline<=0)gpu_light->flags|=1u<<19;
         if(stage>=0)gpu_light->flags|=1u<<17;
         if(stage==0)gpu_light->flags|=1u<<18;
         gpu_light->waterline=g.waterline;

@@ -25,7 +25,9 @@ typedef struct {
     uint32_t revision;
     uint32_t light_bins[10*8][5]; /* 16x16 probes per tile, one bit per emitter */
     float water_grade[4];
-    uint8_t ice_coverage[WORLD_PROBES]; /* distant ice only affects downwelling light */
+    uint8_t ice_coverage[WORLD_PROBES]; /* four distant ice bits and four seabed interior bits */
+    uint8_t sky_stop[376]; /* first roof hit + 1 per diagonal sun ray, zero for sky */
+    uint8_t point_coverage[WORLD_PROBES]; /* continuous material for local-light rays */
     WorldEffectBatch effects;
 } WorldLightScene;
 #endif

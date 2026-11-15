@@ -125,6 +125,7 @@ static void scene_submit(void)
     }
     frame.tiles = tiles;
     frame.sprites = drawn_sprites;
+    frame.sprite_owners = world_sprite_owners;
     frame.colors = drawn_colors;
     memcpy(frame.layers, drawn_layers, sizeof frame.layers);
     frame.video_control = (uint16_t)word(ram + 0x8b28);
@@ -162,6 +163,7 @@ static WorldSceneFx scene_effects(void)
     fx.ocean_depth = settings.fx_ocean_depth;
     fx.aftermath = settings.fx_aftermath;
     fx.materials = settings.fx_materials;
+    fx.headlight_level = settings.headlight_level;
     fx.headlights = settings.fx_headlights;
     fx.rim = settings.fx_rim;
     fx.bubble_light = settings.fx_bubble_light;
@@ -737,6 +739,12 @@ static int tick(uint16_t pads, uint16_t system)
                          (unsigned long)addr, pass.actor, word(ram + 0x80),
                          *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
+            }
+            unsigned sprite_end=word(ram+0x9e04);
+            if(sprite_end!=sprite){
+                int radial=addr==0x6f84 || addr==0x6fb1;
+                int detonation=addr==0xa1bf || addr==0x1d2ea || addr==0xad81;
+                world_frame_tag_blast(sprite,sprite_end,detonation?2:radial);
             }
             locate_sounds(rendered_actor,sound_tail);
             observe_weapon(addr,rendered_actor,old_x,old_y);
@@ -1504,6 +1512,7 @@ load_game_data:
     }
     world_ga20_reset(&pcm, samples, sizeof samples);
     world_scene_init(gfx1, gfx2);
+    world_scene_init_impact_art(rom);
     /* A game, not a background task: keep Windows from parking it on the
        efficiency cores or slowing its clock when the window is not in front. */
     {

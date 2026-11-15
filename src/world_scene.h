@@ -32,11 +32,12 @@ typedef struct {
     unsigned splashes;
     unsigned sparks, impact_motes;
     unsigned pressure, sediment_light, water_volume, ocean_depth, aftermath, materials;
-    unsigned headlights, rim, bubble_light, contact_shade, blast_reflect;
+    unsigned headlight_level, headlights, rim, bubble_light, contact_shade, blast_reflect;
 } WorldSceneFx;
 
 typedef struct {
     const uint8_t *tiles;        /* 64 KiB video RAM */
+    const uint16_t *sprite_owners; /* optional OAM-to-descriptor indices */
     const uint8_t *sprites;      /* 2 KiB sprite list as drawn */
     const uint32_t *colors;      /* 1024 ARGB palette entries */
     WorldVideoLayer layers[3];
@@ -50,6 +51,7 @@ typedef struct {
 #include "world_weapon_light.h"
 void world_scene_weapons(const WeaponEmitter *emitters, unsigned count);
 void world_scene_init(const uint8_t *gfx1, const uint8_t *gfx2);
+void world_scene_init_impact_art(const uint8_t *program_rom);
 /* A new game frame went on show. */
 void world_scene_submit(const WorldSceneFrame *frame);
 /* Largest supported K. */

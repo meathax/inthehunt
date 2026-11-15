@@ -53,7 +53,7 @@ typedef struct {
     unsigned fx_splashes;
     unsigned fx_sparks, fx_impact_motes;
     unsigned fx_pressure, fx_sediment_light, fx_water_volume, fx_ocean_depth, fx_aftermath, fx_materials;
-    unsigned fx_headlights, fx_rim, fx_bubble_light, fx_contact_shade, fx_blast_reflect;
+    unsigned headlight_level, fx_headlights, fx_rim, fx_bubble_light, fx_contact_shade, fx_blast_reflect;
     char shader[WORLD_SETTINGS_ID_SIZE];
     WorldInputBindings bindings;
 } WorldSettings;

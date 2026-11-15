@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+/* OAM parts from one submitted descriptor share a lighting owner (1..210). */
+extern uint16_t world_sprite_owners[256];
+void world_frame_tag_blast(unsigned first, unsigned end, int blast);
+
 /* Stage and briefing master routines use the same board resets. */
 void world_frame_init_actors(uint8_t *ram, uint16_t first_handler, uint16_t terminal_priority);
 void world_frame_init_palette(uint8_t *ram, uint8_t *palette, const uint8_t *rom, uint16_t list);

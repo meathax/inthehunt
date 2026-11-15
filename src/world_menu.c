@@ -24,7 +24,7 @@ enum {
     ITEM_FX_PARTICLES, ITEM_FX_SHAKE, ITEM_FX_SURFACE,
     ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
-    ITEM_FX_HEADLIGHTS, ITEM_FX_RIM, ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
+    ITEM_FX_HEADLIGHTS, ITEM_HEADLIGHT_LEVEL, ITEM_FX_RIM, ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
 };
 enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
@@ -286,6 +286,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_OCEAN_DEPTH, "OCEAN DEPTH", "DISTANT COLORS BLEND INTO WATER");
             ADD(ITEM_FX_AFTERMATH, "BATTLE AFTERMATH", "BUBBLES LINGER AFTER BLASTS");
             ADD(ITEM_FX_HEADLIGHTS, "SUB HEADLIGHTS", "BOW LAMPS CAST PIXEL SHADOWS");
+            ADD(ITEM_HEADLIGHT_LEVEL, "HEADLIGHT POWER", "BOW BEAM LENGTH AND INTENSITY");
             ADD(ITEM_FX_RIM, "RIM LIGHTING", "SUN AND FIRE LIGHT HULL EDGES");
             ADD(ITEM_FX_BUBBLE_LIGHT, "BUBBLE LIGHTING", "WAKES AND BUBBLES CATCH LIGHT");
             ADD(ITEM_FX_CONTACT_SHADE, "CONTACT SHADOWS", "SHADOWS DEEPEN IN CREVICES");
@@ -308,6 +309,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
 
 static int item_disabled(const WorldSettings *s, unsigned id)
 {
+    if (id == ITEM_HEADLIGHT_LEVEL) return !s->fx_enable || !s->fx_headlights;
     if (id == ITEM_SCALE) return s->fullscreen != 0;
     if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_HAZE && id <= ITEM_FX_SURFACE))
         return !s->fx_enable;
@@ -320,6 +322,11 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
 {
     out[0] = 0;
     switch (id) {
+    case ITEM_HEADLIGHT_LEVEL: {
+        static const char *const levels[]={"LOW","MEDIUM","HIGH","ULTRA"};
+        strcpy(out,levels[s->headlight_level]);
+        break;
+    }
     case ITEM_QUALITY: {
         const char *names[]={"LOW","MEDIUM","HIGH"};
         snprintf(out,32,"%s%s",names[s->gfx_quality-1],!s->fx_enable?" (OFF)":world_settings_quality_custom(s)?" *":"");
@@ -384,6 +391,10 @@ static unsigned step_percent(unsigned value, int direction)
 static unsigned adjust(WorldSettings *s, unsigned id, int d)
 {
     switch (id) {
+    case ITEM_HEADLIGHT_LEVEL:
+        if (item_disabled(s,id)) return 0;
+        s->headlight_level=(s->headlight_level+(d>0?1:3))%4;
+        return WORLD_MENU_VIEW;
     case ITEM_QUALITY:
         world_settings_apply_quality(s,1+(s->gfx_quality-1+(d>0?1:2))%3);
         return WORLD_MENU_VIEW;

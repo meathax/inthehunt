@@ -39,25 +39,30 @@ uint caster(int2 pixel){
     uint bits=cell(pixel/2)>>(24+((pixel.y&1)*2+(pixel.x&1)));
     return (bits&16)?2:bits&1;
 }
-// Trace the open segment between receiver and emitter on the artwork grid.
-// A lamp can be embedded in a hull or glowing tile. Permit the contiguous
-// material at each endpoint, but any intervening silhouette blocks this lamp.
+uint pointCaster(int2 p){
+    if(any(p<0)||any(p>=2*size))return 0;
+    uint i=indexOf(p/2);
+    uint bits=scene.Load(102492+(i&~3u))>>(8*(i&3)+2*(p.y&1)+(p.x&1));
+    return (bits&16)?2:bits&1;
+}
+// Compare boundary distances by cross multiplication. A corner crossing
+// always advances both axes, independently of ray length or camera phase.
 int pointBlockerRow(float2 receiver,float2 emitter){
-    int2 q=int2(floor(receiver)),end=int2(floor(emitter));
-    uint nearMaterial=caster(q),farMaterial=caster(end);
-    float2 delta=emitter-receiver;
-    int2 stepDir=int2(delta.x<0?-1:1,delta.y<0?-1:1);
-    float2 stride=1/max(abs(delta),.000001);
-    float2 next=(stepDir*(float2(q)-receiver)+float2(stepDir.x>0,stepDir.y>0))*stride;
+    int2 start=int2(floor(receiver*16+.5)),finish=int2(floor(emitter*16+.5));
+    int2 q=start>>4,end=finish>>4;
+    uint nearMaterial=pointCaster(q),farMaterial=pointCaster(end);
+    int2 delta=finish-start,stepDir=int2(sign(delta)),span=abs(delta);
+    int2 border=16*(q+int2(stepDir.x>0,stepDir.y>0));
+    int2 distance=abs(border-start)*span.yx;
+    int2 stride=16*span.yx;
     int entered=-1;
     [loop]while(any(q!=end)){
-        float crossing=min(next.x,next.y);
-        if(crossing>=1)break;
-        bool2 advance=next<=crossing;
+        bool2 advance=bool2(q.x!=end.x && (q.y==end.y || distance.x<=distance.y),
+                            q.y!=end.y && (q.x==end.x || distance.y<=distance.x));
         q+=int2(advance)*stepDir;
-        next+=float2(advance)*stride;
+        distance+=int2(advance)*stride;
         if(all(q==end))break;
-        uint material=caster(q);
+        uint material=pointCaster(q);
         if(nearMaterial && material==nearMaterial)continue;
         nearMaterial=0;
         if(!material){
@@ -69,9 +74,17 @@ int pointBlockerRow(float2 receiver,float2 emitter){
     }
     return -1;
 }
-float pointVisibility(float2 receiver,float2 emitter){
+float pointVisibility(float2 receiver,float2 emitter,bool bow){
     int row=pointBlockerRow(receiver,emitter),wl=asint(scene.Load(8));
-    if(wl<=0 || min(receiver.y,emitter.y)>=wl || row>=wl)return row<0?1:0;
+    if(wl<=0 || min(receiver.y,emitter.y)>=wl || row>=wl){
+        if(!bow || abs(receiver.x-emitter.x)<12)return row<0?1:0;
+        // The bow lens is vertical in side view. Fixed taps keep tiny nearby
+        // silhouette details from switching the entire distant beam on/off.
+        float2 rim=float2(0,1.5);
+        int top=pointBlockerRow(receiver,emitter-rim);
+        int bottom=pointBlockerRow(receiver,emitter+rim);
+        return .375*(top<0)+.25*(row<0)+.375*(bottom<0);
+    }
     // Sky fill keeps local-light shadows from airborne blockers very faint.
     // Sample a small area of the source for a stable feathered boundary.
     float2 delta=emitter-receiver;
@@ -90,13 +103,18 @@ float cone(float facing,float2 toLight,uint emitter){
 // One group follows one parallel shaft of sunlight through the side view.
 // The first exit from a solid silhouette shadows every subsequent receiver.
 groupshared uint firstShadowRow,firstSolidRow,firstIceRow,firstAirRow;
-bool distantIce(int2 p){
+uint terrainFlags(int2 p){
     if(any(p<0)||any(p>=size*2))return false;
     uint i=indexOf(p/2);
     uint bits=scene.Load(82916+(i&~3u))>>(8*(i&3));
-    return (bits&(1u<<((p.y&1)*2+(p.x&1))))!=0;
+    return bits>>((p.y&1)*2+(p.x&1));
 }
 int sunOffset(int row){return (11*row+25)/50;}
+bool skyReaches(int2 p){
+    uint column=p.x+sunOffset(p.y);
+    uint stop=(scene.Load(102116+(column&~3u))>>(8*(column&3)))&255;
+    return stop==0 || p.y+1<int(stop);
+}
 [numthreads(256,1,1)]
 void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
     int y=int(lane),column=int(group.x);
@@ -112,7 +130,7 @@ void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
             if(previous==caster(int2(column-sunOffset(y-2),y-2)) &&
                previous==caster(int2(column-sunOffset(y-3),y-3)))InterlockedMin(firstSolidRow,lane);
         }
-        if((scene.Load(4)&262144) && distantIce(int2(column-sunOffset(y-1),y-1)) && !distantIce(p))
+        if((scene.Load(4)&262144) && (terrainFlags(int2(column-sunOffset(y-1),y-1))&1) && !(terrainFlags(p)&1))
             InterlockedMin(firstIceRow,lane);
     }
     GroupMemoryBarrierWithGroupSync();
@@ -133,9 +151,10 @@ void directPass(uint3 id:SV_DispatchThreadID){
     int2 q=pixel/2;
     float2 origin=pixel+.5,p=origin*.5;
     uint flags=scene.Load(4);
-    float sun=(flags&(2|16|16384))?directField[19200+pixel.y*320+pixel.x].a:1;
+    bool sky=!(flags&524288) && skyReaches(pixel);
+    float sun=sky && (flags&(2|16|16384))?directField[19200+pixel.y*320+pixel.x].a:1;
     int wl=asint(scene.Load(8));
-    if((flags&(2|16|16384)) && wl>0){
+    if(sky && (flags&(2|16|16384)) && wl>0){
         int column=pixel.x+sunOffset(pixel.y);
         float shade=0;
         // Normalized triangular filter across seventeen adjacent sun rays.
@@ -149,6 +168,7 @@ void directPass(uint3 id:SV_DispatchThreadID){
         }
         sun*=1-shade*(.16/81.);
     }
+    if((terrainFlags(pixel)&16) && caster(pixel)!=2)sun=1;
     float3 energy=0;
     uint bin=(q.y/16)*10+q.x/16;
     [loop]for(uint w=0;w<(scene.Load(0)+31)/32;++w){
@@ -162,14 +182,14 @@ void directPass(uint3 id:SV_DispatchThreadID){
             float d=length(delta);
             if(d>=e.z)continue;
             float2 dir=delta/max(.001,d);
-            float fall=cone(e.w,dir,i)*pow(saturate(1-d/e.z),2)/(1+d*d*(headlamp?.00045:.0032));
+            float fall=cone(e.w,dir,i)*pow(saturate(1-d/e.z),2)/(1+d*d*(headlamp?1.73/(e.z*e.z):.0032));
             float3 emission=asfloat(scene.Load3(32+32*i));
             if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
-            float vis=pointVisibility(origin,2*e.xy);
+            float vis=pointVisibility(origin,2*e.xy,headlamp);
             energy+=emission*fall*vis*((headlamp || (flags&1))?1:.10);
         }
     }
-    float4 light=float4(energy,sun);
+    float4 light=float4(energy,sky?sun:0);
     directField[19200+pixel.y*320+pixel.x]=light;
     if(!any(pixel&1))directField[indexOf(q)]=light;
 }
@@ -234,14 +254,14 @@ void volumePass(uint3 id:SV_DispatchThreadID){
     // the stepped diagonals caused by integer division in the shaft texture.
     float x=q.x+scroll-.32*q.y;
     float beam=.5+.28*sin(x*.026+t*.003)+.19*sin(x*.051+q.y*.006-t*.0021);
-    float shaft=beam*beam*l.a*exp2(-max(0.,q.y-max(0,wl))*.009);
+    float shaft=skyReaches(q)*beam*beam*l.a*exp2(-max(0.,q.y-max(0,wl))*.009);
     uint flags=scene.Load(4);
     float3 colour=shaft*float3(3,11,15)*((flags&512)?1.:.32);
     if(flags&32)colour+=l.rgb*float3(9,10,12)*((flags&4)?.65:1);
     [loop]for(uint i=0;i<effects.Load(4816);++i){
-        float3 e=asfloat(effects.Load3(4824+i*16));float2 delta=q-e.xy;
+        float4 e=asfloat(effects.Load4(4824+i*16));float2 delta=q-e.xy;
         float d2=dot(delta,delta),wet=wl<0?1:saturate((max(q.y,e.y)-wl)/max(.01,abs(delta.y)));
-        colour+=e.z*900/(900+d2)*float3(18,10,3)*exp(-sqrt(d2)*wet*float3(.012,.005,.0025));
+        colour+=e.z*900/(900+d2)*(e.w>0?18*rgb(uint(e.w)):float3(18,10,3))*exp(-sqrt(d2)*wet*float3(.012,.005,.0025));
     }
     volumes[at]=float4(min(255.,colour)/255.,0);
 }
@@ -346,11 +366,11 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
             float2 delta=e.xy-p;float d2=dot(delta,delta);
             if(d2>=e.z*e.z)continue;
             float d=sqrt(max(.0001,d2));float2 dir=delta/d;
-            float strength=cone(e.w,dir,i)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.0032*d2);
+            float strength=cone(e.w,dir,i)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+(abs(e.w)==1?1.73/(e.z*e.z):.0032)*d2);
             if(strength<.002)continue;
             float wet=saturate((max(p.y,e.y)-surface)/max(.01,abs(delta.y)));
             float3 colour=asfloat(scene.Load3(32+32*i));
-            incident+=colour*transmission(wet*d)*strength*pointVisibility(p*2,2*e.xy)*2.8;
+            incident+=colour*transmission(wet*d)*strength*pointVisibility(float2(pixel/k)+.5,2*e.xy,abs(e.w)==1)*2.8;
         }
     }
     return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));
@@ -409,7 +429,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     float3 colour=base;
     if(flags&65536)colour*=lerp(1,(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79),depth);
     bool surface=caster(native)!=0;
-    if(flags&2){
+    if((flags&2) && !(flags&524288) && skyReaches(native)){
         float3 occluded=surface?float3(.49,.55,.72):float3(.87,.91,.95);
         // Open water shows suspended light; the sky never receives a projected silhouette.
         float3 deepTint=(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79);
@@ -420,7 +440,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(flags&(1|32768)){
         // The bow beam is seen in profile. Most light goes onto the hull
         // or cliff it strikes; suspended particles reveal its path in water.
-        float3 response=surface?.20+.98*base:.105+.49*base;
+        float3 response=pointCaster(native)!=0?.20+.98*base:.105+.49*base;
         colour+=response*energy;
     }
     if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb;

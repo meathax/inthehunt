@@ -1,7 +1,7 @@
 /* Bounded presentation-only water volumes.
  * No reads/writes of gameplay actors. Native tile/sprite priorities always win. */
 enum { CINEMA_EVENTS=24, VW=W/4, VH=H/4 };
-typedef struct {float x,y,age,life,power; int seabed;} CinemaEvent;
+typedef struct {float x,y,age,life,power; int seabed; unsigned tint;} CinemaEvent;
 static CinemaEvent cinema_events[CINEMA_EVENTS];
 static uint32_t volume_probes[VW*VH], water_volume[N];
 static unsigned cinema_emitted,cinema_samples;
@@ -53,12 +53,14 @@ static uint32_t material_shade(uint32_t c,uint32_t surface,int x,int y)
     float peak=fmaxf(l->r,fmaxf(l->g,l->b));
     float dynamic=peak>0?fminf(l->energy,2)*28/peak:0;
     float sunlight = wet && g.fx->sunshadow && transport_valid ? pixel_light[y*W+x].sun : 1.0f;
+    int sky=sky_reaches(x,y);
+    if(!sky)sunlight=0;
     float hr=highlight*((wet?13:18)*sunlight+l->r*dynamic);
     float hg=highlight*((wet?17:18)*sunlight+l->g*dynamic);
     float hb=highlight*(19*sunlight+l->b*dynamic);
     float relief=1+clampi((int)((nx*.25f-ny*.40f)*30),-12,16)/100.0f;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
-    if (wet && g.fx->lights && g.fx->sunshadow) relief *= 0.74f + 0.26f * sunlight;
+    if (sky && wet && g.fx->lights && g.fx->sunshadow) relief *= 0.74f + 0.26f * sunlight;
     float dark=kind==MAT_RUST?(grain-.5f)*8:0;
     r=(int)(r*relief+hr*((m->tint>>16)&255)/255.0f+(r+12)*l->r*.24f+dark);
     gr=(int)(gr*relief+hg*((m->tint>>8)&255)/255.0f+(gr+12)*l->g*.24f+dark);
@@ -88,7 +90,17 @@ static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
     if(slot<0)return;
     int seabed=0;
     for(int d=2;d<=22;d+=4)if(wf_rock(x,y+d)||wf_rock(x-8,y+d)||wf_rock(x+8,y+d)){seabed=1;break;}
-    cinema_events[slot]=(CinemaEvent){x,y,0,3.8f, size>=110?1.0f:.65f,seabed};
+    unsigned tint=0xff8e2b;
+    float nearest=48*48;
+    for(unsigned i=0;i<MAX_SPRITES;++i){
+        const BlastRadiance *f=&blast_radiance[i];
+        if(!f->weight)continue;
+        float dx=(float)f->x/f->weight-x,dy=(float)f->y/f->weight-y;
+        if(dx*dx+dy*dy>=nearest)continue;
+        nearest=dx*dx+dy*dy;
+        tint=((f->r/f->weight)<<16)|((f->g/f->weight)<<8)|(f->b/f->weight);
+    }
+    cinema_events[slot]=(CinemaEvent){x,y,0,3.8f, size>=110?1.0f:.65f,seabed,tint};
     ++cinema_emitted;
 }
 
@@ -152,7 +164,7 @@ static void cinema_update(float dt)
             const CinemaEvent *p=cinema_events+i;
             if(p->life<=0 || p->age>=.65f)continue;
             float *v=batch->volumes[batch->volume_count++];
-            v[0]=p->x;v[1]=p->y;v[2]=(1-p->age/.65f)*p->power;
+            v[0]=p->x;v[1]=p->y;v[2]=(1-p->age/.65f)*p->power;v[3]=(float)p->tint;
         }
         return;
     }
@@ -169,7 +181,7 @@ static void cinema_update(float dt)
                 if(sy>=0 && solid[(sy/2)*PW+sx/2])sun*=.3f;}
         }
         int beam=S((x+g.scroll_x[2]-y/3)*9+g.T/3)+S(x*5-y*3+g.T/5);
-        float shaft=(beam>210?(beam-210)/302.0f:0)*sun;
+        float shaft=sky_reaches(x,y)*(beam>210?(beam-210)/302.0f:0)*sun;
         int depth=g.waterline<0?y:y-g.waterline;
         float fade=1-clampi(depth,0,240)/300.0f;
         float r=shaft*3*fade,gr=shaft*11*fade,b=shaft*16*fade;
@@ -179,7 +191,10 @@ static void cinema_update(float dt)
             float dx=x-p->x,dy=y-p->y,d=dx*dx+dy*dy;
             float f=(1-p->age/.65f)*p->power*900/(900+d);
             int wet=submerged_path(y,p->y,sqrtf(d));
-            r+=f*18*light_absorb[0][wet];gr+=f*10*light_absorb[1][wet];b+=f*3*light_absorb[2][wet];
+            f*=18.f/255;
+            r+=f*(p->tint>>16)*light_absorb[0][wet];
+            gr+=f*((p->tint>>8)&255)*light_absorb[1][wet];
+            b+=f*(p->tint&255)*light_absorb[2][wet];
         }
         volume_probes[at]=clamp255((int)r)<<16|clamp255((int)gr)<<8|clamp255((int)b);
     }

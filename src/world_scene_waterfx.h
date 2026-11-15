@@ -269,9 +269,10 @@ static void bubble_rim(uint32_t *out,int x,int y,int alpha)
     if ((unsigned)x>=W || (unsigned)y>=H) return;
     if(gpu_stamp(x,y,0,0,stamp_colour(0,0,0,alpha),2,0,x,y,x,y))return;
     const PixelLight *l=&pixel_light[y*W+x];
-    int r=clamp255((int)(80+95*l->sun+120*l->r));
-    int gr=clamp255((int)(126+88*l->sun+62*l->g));
-    int b=clamp255((int)(150+78*l->sun+40*l->b));
+    float sun=sky_reaches(x,y)?l->sun:0;
+    int r=clamp255((int)(80+95*sun+120*l->r));
+    int gr=clamp255((int)(126+88*sun+62*l->g));
+    int b=clamp255((int)(150+78*sun+40*l->b));
     wf_pixel(out,x,y,r,gr,b,alpha,1);
 }
 

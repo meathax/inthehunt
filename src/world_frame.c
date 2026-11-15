@@ -114,10 +114,19 @@ static int valid_sprite_list(const uint8_t *ram, const uint8_t *rom)
     }
     return 1;
 }
+uint16_t world_sprite_owners[256];
+static uint8_t descriptor_blast[210];
+void world_frame_tag_blast(unsigned first,unsigned end,int blast)
+{
+    if(first<0x8c00 || end>0x8c00+sizeof descriptor_blast*16 || end<=first)return;
+    for(unsigned pos=first;pos<end;pos+=16)descriptor_blast[(pos-0x8c00)/16]=(uint8_t)blast;
+}
+
 /* 0E74, linked priority buckets -> the M92 sprite display list. */
 static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
 {
     unsigned priority, out = 0;
+    memset(world_sprite_owners,0,sizeof world_sprite_owners);
     for (priority = 0; priority < 128; priority += 2) {
         uint16_t actor = word(ram + 0x9c00 + priority);
         if (!actor) break;
@@ -145,6 +154,8 @@ static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
                 if (distance_from_center(y) > 0xf9) continue;
                 put(oam + out, y | ((attr & 255) << 8));
                 put(oam + out + 4, sprite[8] | ((attr ^ (sprite[9] << 8)) & 0xff00));
+                unsigned slot=(actor-0x8c00)/16;
+                world_sprite_owners[out/8]=(slot+1)|(descriptor_blast[slot]<<8);
                 out += 8;
                 if (out == 210 * 8) {
                     put(ram + 0x8b26, -210);
