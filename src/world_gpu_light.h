@@ -14,6 +14,7 @@ typedef struct {
     float volumes[24][4];
     int reflect_row,reflect_rows,ripple[30];
     uint32_t mirror[30][320];
+    uint32_t ocean_rows[8]; /* underwater terrain eligible for deferred depth colour */
     WorldEffectNode nodes[WORLD_EFFECT_NODES];
 } WorldEffectBatch;
 typedef struct {

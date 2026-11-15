@@ -153,7 +153,7 @@ int3 compositeParticles(uint2 pixel,uint scale,uint mask,float4 light,int3 colou
     int2 native=int2(pixel/scale);
     uint node=effects.Load(4*((native.y/8)*40+native.x/8));
     [loop]while(node){
-        uint at=43736+node*32;
+        uint at=43768+node*32;
         int4 shape=asint(effects.Load4(at));
         uint4 data=effects.Load4(at+16);
         node=data.w;
@@ -215,6 +215,17 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         tag=224+(tag&31);
     }
     if(tag==255){result.Store(offset,c);if(flags&8)history.Store(offset,0);return;}
+    if((flags&4096) && (tag&240)==224){
+        uint row=id.y/k;
+        if(effects.Load(43736+(row/32)*4)&(1u<<(row%32))){
+            int3 v=int3(round(base*255));
+            int lum=(v.r*3+v.g*5+v.b*2)/10;
+            int cool=clamp((max(v.g,v.b)-v.r)*3,0,255);
+            int water=min(255,cool*(255-lum)/200);
+            int f=3+water*((flags&8192)?5:21)/255;
+            base=(v+(int3(5,28,52)-v)*f/256)/255.;
+        }
+    }
     if(flags&64){
         int row=int(id.y/k)-asint(effects.Load(5208));
         if(row>=0 && row<asint(effects.Load(5212))){

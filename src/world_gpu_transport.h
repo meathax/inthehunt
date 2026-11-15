@@ -1,7 +1,7 @@
 #include <algorithm>
 #include "world_gpu_transport_shader.h"
 static_assert(offsetof(WorldLightScene,light_bins)==81300);
-static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,nodes)==43736 && sizeof(WorldEffectNode)==32);
+static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,ocean_rows)==43736 && offsetof(WorldEffectBatch,nodes)==43768 && sizeof(WorldEffectNode)==32);
 
 struct GpuTransport {
     Com<ID3D12RootSignature> root;

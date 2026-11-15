@@ -1350,15 +1350,18 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
                 wet = layer_wat[layer][i];
                 break;
             }
-            struct Memo *background=&memo[x1];
-            int key=y1*W+x1+1;
-            if (background->bg_cell!=key || background->bg_layer!=id || background->bg_base!=c) {
-                background->bg_cell=key;
-                background->bg_layer=id;
-                background->bg_base=c;
-                background->bg_result=cinema_background(c,id,x1,y1);
+            if (!gpu_light || (fx->ocean_depth &&
+                !(gpu_light->effects.ocean_rows[y1/32] & (1u<<(y1%32))))) {
+                struct Memo *background=&memo[x1];
+                int key=y1*W+x1+1;
+                if (background->bg_cell!=key || background->bg_layer!=id || background->bg_base!=c) {
+                    background->bg_cell=key;
+                    background->bg_layer=id;
+                    background->bg_base=c;
+                    background->bg_result=cinema_background(c,id,x1,y1);
+                }
+                c=background->bg_result;
             }
-            c=background->bg_result;
             int qx=X+g.shake_x, qy=Y+g.shake_y;
             /* HUD sprites are screen-fixed. Move a world sprite as a whole
                even when it crosses the score band or a water distortion. */
@@ -1433,7 +1436,7 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
                 post->post_cell=post_tag;post->input=post_input;post->result=c;
             }
             if(gpu_light && !hud_pixel){
-                int volume=(fx->water_volume || fx->rays) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
+                int volume=(fx->water_volume || fx->rays || fx->ocean_depth) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
                 c=(c&0xffffff)|(volume?0xee000000u:0xfe000000u);
             }
             o[X] = c;
@@ -1843,6 +1846,23 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     cinema_update(dt);
     if(changed_frame || fx_changed)material_prepare();
 
+    if(gpu_light && fx->ocean_depth){
+        // CPU color is still needed before surface glints and muzzle overlays.
+        // All other terrain can take the same integer tint in the final shader.
+        uint32_t *rows=gpu_light->effects.ocean_rows;
+        memset(rows,0xff,sizeof gpu_light->effects.ocean_rows);
+        if(fx->surface && g.waterline>=0){
+            for(int y=clampi(g.waterline-3,0,H-1);y<=clampi(g.waterline+1,0,H-1);++y)
+                rows[y/32]&=~(1u<<(y%32));
+        }
+        if(fx->lights)for(unsigned i=0;i<weapon_count;++i){
+            const WeaponEmitter *e=weapon_emitters+i;
+            if(e->kind>=ROCKET_PLUME)continue;
+            int center=e->y-g.shake_y/k;
+            for(int y=clampi(center-15,0,H-1);y<=clampi(center+15,0,H-1);++y)
+                rows[y/32]&=~(1u<<(y%32));
+        }
+    }
     g.out = out;
     parallel(compose_rows, g.oh);
     double t4 = stamp();
@@ -1882,7 +1902,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     if(gpu_light){
         gpu_light->scale=k;
         gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
-            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u);
+            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
         gpu_light->waterline=g.waterline;
         /* Tag visibility only in occupied tiles. Opaque UI written later stays
            protected. Each bit follows the sampling rule of its CPU effect. */

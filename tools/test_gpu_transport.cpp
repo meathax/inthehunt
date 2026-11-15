@@ -30,6 +30,26 @@ int main() {
     if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error) ||
        (clear_view[center]&0xffffff)!=0x808080)return 1;
     puts("PASS: ordered particles, volumetric water mask, reflection and HUD protection.");
+    // Compare water tint to the original integer compositor, including the
+    // near-surface rows retained on CPU and opaque/above-water pixels.
+    for(unsigned haze : {0u,8192u}){
+        scene.flags=4096u|haze;
+        std::fill_n(scene.effects.ocean_rows,8,0xaaaaaaaau);
+        for(unsigned i=0;i<320*240;i++)
+            frame[i]=((i%3==0?0xffu:i%3==1?0xfeu:0xeeu)<<24)|((i*2654435761u)&0xffffffu);
+        if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error))return 1;
+        for(unsigned i=0;i<320*240;i++){
+            int r=(frame[i]>>16)&255,g=(frame[i]>>8)&255,b=frame[i]&255;
+            if((i/320)%2 && i%3==2){
+                int lum=(3*r+5*g+2*b)/10;
+                int w=std::min(255,std::clamp((std::max(g,b)-r)*3,0,255)*(255-lum)/200);
+                int f=3+w*(haze?5:21)/255;
+                r+=(5-r)*f/256;g+=(28-g)*f/256;b+=(52-b)*f/256;
+            }
+            if(clear_view[i]!=(0xff000000u|(r<<16)|(g<<8)|b))return 1;
+        }
+    }
+    puts("PASS: GPU ocean tint matches native integer output, HUD and reserved rows.");
     scene.flags=1;scene.count=1;
     float *light=scene.emitters[0]; light[0]=65;light[1]=60;light[2]=55;
     light[4]=3;light[5]=1;light[6]=.2f;
@@ -43,6 +63,13 @@ int main() {
     printf("Lit %08x, occluded %08x, HUD %08x\n",clear_view[receiver],wall_view[receiver],clear_view[120*320+125]);
     if (((clear_view[receiver]>>16)&255)<=((wall_view[receiver]>>16)&255)+6 ||
         clear_view[120*320+125]!=0xff36a2c5 || wall_view[120*320+125]!=0xff36a2c5) return 1;
+    for(unsigned budget : {1024u, 1024u|2048u}){
+        scene.flags=1|budget;
+        if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error) ||
+           ((wall_view[receiver]>>16)&255)+6>=((clear_view[receiver]>>16)&255) ||
+           wall_view[120*320+125]!=0xff36a2c5)return 1;
+    }
+    scene.flags=1;
     // With point emitters off, a coloured wall can tint the receiver only
     // through the indirect pass sampling skylight on the first hit.
     scene.count=0;
@@ -54,10 +81,3 @@ int main() {
     return !(((clear_view[receiver]>>16)&255)>((wall_view[receiver]>>16)&255) &&
              (wall_view[receiver]&255)>(clear_view[receiver]&255));
 }
-    for(unsigned budget : {1024u, 1024u|2048u}){
-        scene.flags=1|budget;
-        if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error) ||
-           ((wall_view[receiver]>>16)&255)+6>=((clear_view[receiver]>>16)&255) ||
-           wall_view[120*320+125]!=0xff36a2c5)return 1;
-    }
-    scene.flags=1;

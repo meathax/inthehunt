@@ -240,16 +240,16 @@ static void present_game(const uint32_t *source)
         settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
         settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
-        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid)
+        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid || settings.fx_ocean_depth)
         && world_gpu_transport_available();
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
+    if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (title && trace && lights.scale == k) {
         lights.flags |= 256u;
         world_menu_gpu_title(&menu, shown, gfx1, GetTickCount());
     } else if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
     overlay_notices(shown, k);
-    if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
