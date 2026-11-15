@@ -21,7 +21,6 @@ __pycache__/
 *.log
 /build/
 /tools/*
-!/tools/fit_stage6_bursts.py
 /.codex-attachments/
 
 /docs/
