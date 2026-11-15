@@ -33,48 +33,75 @@ float visible(float2 p,float2 dir,float length){
     int2 hit;float d;float2 normal;
     return trace(p,dir,length,hit,d,normal)?0.:1.;
 }
+// Each cell packs four native terrain pixels and four sprite pixels.
+uint caster(int2 pixel){
+    if(any(pixel<0)||any(pixel>=size*2))return 0;
+    uint bits=cell(pixel/2)>>(24+((pixel.y&1)*2+(pixel.x&1)));
+    return (bits&16)?2:bits&1;
+}
+float pixelShadow(float2 p,float2 dir,float reach){
+    int2 start=int2(p);
+    uint receiver=caster(start);
+    float stepSize=1/max(max(abs(dir.x),abs(dir.y)),.001);
+    [loop] for(float t=stepSize;t<reach;t+=stepSize){
+        int2 q=int2(floor(p+dir*t));
+        if(any(q<0)||any(q>=size*2))break;
+        uint obstacle=caster(q);
+        if(obstacle && obstacle!=receiver)return 0;
+        if(!obstacle)receiver=0;
+    }
+    return 1;
+}
+float cone(float facing,float2 toLight){
+    return facing==0?1:smoothstep(.885,.975,-toLight.x*facing);
+}
+// One group follows one parallel shaft of sunlight through the side view.
+// The first exit from a solid silhouette shadows every subsequent receiver.
+groupshared uint firstShadowRow;
+int sunOffset(int row){return (11*row+25)/50;}
+[numthreads(256,1,1)]
+void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
+    int y=int(lane),column=int(group.x);
+    int2 p=int2(column-sunOffset(y),y);
+    if(lane==0)firstShadowRow=240;
+    GroupMemoryBarrierWithGroupSync();
+    if(y>0 && y<240 && p.x>=0 && p.x<320){
+        uint previous=caster(int2(column-sunOffset(y-1),y-1));
+        if(previous!=0 && previous!=caster(p))InterlockedMin(firstShadowRow,lane);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if(y<240 && p.x>=0 && p.x<320)
+        directField[19200+y*320+p.x]=float4(0,0,0,lane<firstShadowRow?1:0);
+}
 [numthreads(8,8,1)]
 void directPass(uint3 id:SV_DispatchThreadID){
-    int2 q=id.xy;if(!inside(q))return;
-    float2 p=q+.5;int wl=asint(scene.Load(8));float surface=wl<0?0:wl*.5;
+    int2 pixel=id.xy;if(any(pixel>=2*size))return;
+    int2 q=pixel/2;
+    float2 origin=pixel+.5,p=origin*.5;
     uint flags=scene.Load(4);
-    // Four interleaved phases distribute samples across neighboring probes.
-    // Fixed phases keep identical frames stable without temporal accumulation.
-    float phase=((q.x&1)+2*(q.y&1)+.5)*.25;
-    float sun=1;
-    if(flags&(2|16)){
-        sun=0;
-        [unroll]for(int j=0;j<2;j++){
-            float2 dir=normalize(float2(.23+(j+phase)*.20,-1));
-            sun+=.5*visible(p,dir,clamp((p.y-surface)/-dir.y,0,48));
-        }
-    }
-    float3 irradiance=0;
+    float sun=(flags&(2|16|16384))?directField[19200+pixel.y*320+pixel.x].a:1;
+    float3 energy=0;
     uint bin=(q.y/16)*10+q.x/16;
     [loop]for(uint w=0;w<(scene.Load(0)+31)/32;++w){
-      uint candidates=scene.Load(81300+20*bin+4*w);
-      [loop]while(candidates){
-        uint i=32*w+firstbitlow(candidates);candidates&=candidates-1;
-        float4 a=asfloat(scene.Load4(16+32*i));
-        float3 colour=asfloat(scene.Load3(32+32*i));
-        float2 delta=a.xy-p;float d2=dot(delta,delta);
-        if(d2>=a.z*a.z)continue;
-        float d=sqrt(d2);float fall=pow(saturate(1-d/a.z),2)/(1+d2*.012);
-        float strength=fall*max(colour.r,max(colour.g,colour.b));
-        if(strength<.002)continue;
-        fall*=smoothstep(.002,.011,strength);
-        float2 dir=delta/max(d,.001);
-        // A finite emitter produces a penumbra behind blocking scenery.
-        float2 side=float2(-dir.y,dir.x);
-        float offset=(phase-.5)*min(3.,a.z*.075);
-        float2 target=delta+side*offset;
-        float path=length(target);
-        float vis=d<2?1:visible(p,target/max(path,.001),max(0.,path-1));
-        float wet=saturate((max(p.y,a.y)-surface)/max(.01,abs(delta.y)));
-        irradiance+=colour*(fall*vis)*transmission(wet*d);
+        uint bits=scene.Load(81300+20*bin+4*w);
+        [loop]while(bits){
+            uint i=w*32+firstbitlow(bits);bits&=bits-1;
+            float4 e=asfloat(scene.Load4(16+32*i));
+            if(e.w==0 && !(flags&(1|4|16)))continue;
+            float2 delta=e.xy-p;
+            float d=length(delta);
+            if(d>=e.z)continue;
+            float2 dir=delta/max(.001,d);
+            float fall=cone(e.w,dir)*pow(saturate(1-d/e.z),2)/(1+d*d*(e.w==0?.012:.00045));
+            float3 emission=asfloat(scene.Load3(32+32*i));
+            if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
+            float vis=pixelShadow(origin,dir,max(0,2*d-2));
+            energy+=emission*fall*vis*((e.w!=0 || (flags&1))?1:.10);
+        }
     }
-    }
-    directField[indexOf(q)]=float4(irradiance,sun);
+    float4 light=float4(energy,sun);
+    directField[19200+pixel.y*320+pixel.x]=light;
+    if(!any(pixel&1))directField[indexOf(q)]=light;
 }
 // Deterministic stratified paths prevent independently seeded frames from shimmering.
 // Integrate incident radiance at two successive diffuse interactions.
@@ -102,7 +129,7 @@ void indirectPass(uint3 id:SV_DispatchThreadID){
         }
     }
     float4 direct=directField[indexOf(q)];
-    bounceField[indexOf(q)]=float4(direct.rgb+sum/paths,direct.a);
+    bounceField[indexOf(q)]=float4(sum/paths,direct.a);
 }
 // Reconstruct the interleaved paths once per lighting update, in probe space.
 [numthreads(8,8,1)]
@@ -203,13 +230,70 @@ int3 compositeParticles(uint2 pixel,uint scale,uint mask,float4 light,int3 colou
     }
     return colour;
 }
+// Use the assembled sprite silhouette to approximate a grazing surface
+// normal, so adjacent tiles of a multipart vehicle share a single contour.
+float rimMask(int2 pixel,int2 extent,bool scenery){
+    pixel=clamp(pixel,0,extent-1);
+    uint tag=picture.Load(4*(pixel.y*extent.x+pixel.x))>>24;
+    // Occluding sprites and HUD cover the scenery; never outline their cutouts.
+    return ((tag&240)==160 || tag==255 || (scenery && tag>=96 && tag<128))?1.:0.;
+}
+float4 exposedSides(int2 p,int2 extent,int width,bool scenery){
+    int2 dx=int2(width,0),dy=int2(0,width);
+    return 1-float4(rimMask(p+dx,extent,scenery),rimMask(p-dx,extent,scenery),
+                    rimMask(p+dy,extent,scenery),rimMask(p-dy,extent,scenery));
+}
+float facingLight(float4 sides,float2 dir){
+    return saturate(dot(sides,max(0,float4(dir.x,-dir.x,dir.y,-dir.y))));
+}
+float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
+    float4 sides=exposedSides(pixel,extent,k,scenery);
+    // A softer second texel rolls the highlight back into the hull. Scenery
+    // keeps a narrow crest so that large cliffs never compete with the player.
+    if(!scenery)sides=max(sides,.42*exposedSides(pixel,extent,2*k,false));
+    if(!any(sides))return 0;
+    float2 p=clamp((pixel+.5)/(2.*k),.001,float2(size)-.001);
+    float surface=max(0,asint(scene.Load(8))*.5);
+    float depth=max(0,p.y-surface);
+    float2 sunDir=normalize(float2(.22,-1));
+    float facing=facingLight(sides,sunDir);
+
+    float3 incident=0;
+    if(facing>0){
+        int2 native=min(pixel/k,int2(319,239));
+        float sun=directField[19200+native.y*320+native.x].a;
+        float immersion=asint(scene.Load(8))<0?1:smoothstep(0,6,depth);
+        float3 sunlight=lerp(float3(1.36,1.16,.92),float3(.98,1.20,1.38),immersion);
+        incident+=sunlight*transmission(depth*.46)*sun*facing;
+    }
+    uint2 tile=uint2(p)/16;
+    uint bin=tile.y*10+tile.x;
+    [loop] for(uint w=0;w<(scene.Load(0)+31)/32;++w){
+        uint bits=scene.Load(81300+20*bin+4*w);
+        [loop] while(bits){
+            uint i=w*32+firstbitlow(bits);bits&=bits-1;
+            float4 e=asfloat(scene.Load4(16+32*i));
+            float2 delta=e.xy-p;float d2=dot(delta,delta);
+            if(d2>=e.z*e.z)continue;
+            float d=sqrt(max(.0001,d2));float2 dir=delta/d;
+            float strength=cone(e.w,dir)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.008*d2);
+            if(strength<.002)continue;
+            float wet=saturate((max(p.y,e.y)-surface)/max(.01,abs(delta.y)));
+            float3 colour=asfloat(scene.Load3(32+32*i));
+            incident+=colour*transmission(wet*d)*strength*pixelShadow(p*2,dir,max(0,2*d-2))*2.8;
+        }
+    }
+    return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));
+}
 [numthreads(8,8,1)]
 void shadePass(uint3 id:SV_DispatchThreadID){
     uint k=scene.Load(12);uint2 extent=uint2(320,240)*k;
     if(any(id.xy>=extent))return;
     uint offset=(id.y*extent.x+id.x)*4,c=picture.Load(offset);float3 base=rgb(c);
     uint tag=c>>24,flags=scene.Load(4);
+    bool terrainRim=tag>=96 && tag<128;
     uint plane=255;
+    if(terrainRim){plane=251;tag=224+(tag&31);}
     if(tag>=32 && tag<96){
         plane=250+(tag>>5);
         tag=224+(tag&31);
@@ -244,24 +328,37 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         int lum=(v.r*3+v.g*5+v.b*2)/10;
         base=clamp(lum+(v-lum)*17/16,0,255)/255.;
     }
-    float2 uv=clamp((id.xy+.5)/(2*k)-.5,0,float2(size)-1);
-    int2 a=int2(uv),b=min(a+1,size-1);float2 f=frac(uv);
+    int2 native=id.xy/k;
     float4 l=float4(0,0,0,1);
-    if(flags&23)l=lerp(lerp(directField[indexOf(a)],directField[indexOf(int2(b.x,a.y))],f.x),
-                  lerp(directField[indexOf(int2(a.x,b.y))],directField[indexOf(b)],f.x),f.y);
+    if(flags&(23|32768|16384))l=directField[19200+native.y*320+native.x];
     int wl=asint(scene.Load(8));
-    float wet=wl<0?1:saturate((float(id.y)/k-wl)/8);
-    float3 energy=l.rgb/(1+.45*max(l.r,max(l.g,l.b)));
-    float3 colour=base*(1-((flags&2)?wet*.29*(1-l.a):0));
-    // Local shadowing also modulates the diffuse skylight scattered into water.
-    if((flags&6)==6) colour+=wet*l.a*float3(.002,.009,.012)*exp(-max(0.,float(id.y)/k-max(wl,0))*.012);
-    if(flags&1) colour+=base*energy*.78;
-    if(flags&4) colour+=wet*energy*float3(.045,.065,.085);
+    float wet=wl<0?1:saturate((float(native.y)-wl)/8);
+    float depth=wet*saturate((native.y-max(wl,0))/195.);
+    float3 energy=l.rgb/(1+.42*max(l.r,max(l.g,l.b)));
+    float3 colour=base;
+    if(flags&65536)colour*=lerp(1,float3(.53,.65,.79),depth);
+    bool surface=caster(native)!=0;
+    if(flags&2){
+        float3 occluded=surface?float3(.49,.55,.72):float3(.87,.91,.95);
+        colour*=lerp(occluded,float3(1.02,1.01,1),l.a);
+    }
+    if(flags&(1|32768)){
+        // The bow beam is seen in profile. Most light goes onto the hull
+        // or cliff it strikes; suspended particles reveal its path in water.
+        float3 response=surface?.17+.94*base:.075+.40*base;
+        colour+=response*energy;
+    }
+    if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb;
+    if(flags&4)colour+=wet*energy*float3(.042,.049,.056);
     if((flags&(32|512)) && (tag&240)==224){
         float2 pos=clamp((float2(id.xy/k)-2)*.25,0,float2(79,59));
         uint2 v0=uint2(pos),v1=min(v0+1,uint2(79,59));float2 f=frac(pos);
-        colour+=lerp(lerp(volumes[v0.y*80+v0.x].rgb,volumes[v0.y*80+v1.x].rgb,f.x),
+        colour+=.52*lerp(lerp(volumes[v0.y*80+v0.x].rgb,volumes[v0.y*80+v1.x].rgb,f.x),
                      lerp(volumes[v1.y*80+v0.x].rgb,volumes[v1.y*80+v1.x].rgb,f.x),f.y);
+    }
+    if((flags&16384) && ((tag&240)==160 || terrainRim)){
+        float3 rim=rimLight(id.xy,k,extent,flags,terrainRim);
+        colour+=rim*(1-saturate(colour))*(.82+.18*sqrt(base));
     }
     // Stochastic rounding of fractional light removes 8-bit halo contours.
     // Anchor it to arcade pixels so static light stays still at every scale.
@@ -281,7 +378,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(flags&8){
         if(!effects.Load(4804)){
             uint old=history.Load(offset);
-            v=max(v,(uint3((old>>16)&255,(old>>8)&255,old&255)*7)>>4);
+            v=max(v,(uint3((old>>16)&255,(old>>8)&255,old&255)*4)>>4);
         }
         history.Store(offset,(v.r<<16)|(v.g<<8)|v.b);
     }

@@ -21,7 +21,7 @@ typedef struct {
     uint32_t count, flags;
     int waterline, scale;
     float emitters[WORLD_EMITTERS][8];
-    uint32_t cells[WORLD_PROBES]; /* occupancy in alpha, diffuse RGB */
+    uint32_t cells[WORLD_PROBES]; /* alpha bits 0..3 terrain, 4..7 sprites in 2x2 raster order; diffuse RGB */
     uint32_t revision;
     uint32_t light_bins[10*8][5]; /* 16x16 probes per tile, one bit per emitter */
     WorldEffectBatch effects;

@@ -210,14 +210,14 @@ int main(void){
     for(unsigned quality=WORLD_GFX_LOW;quality<=WORLD_GFX_HIGH;++quality){
         world_settings_apply_quality(&loaded,quality);
         assert(loaded.fx_enable && loaded.fx_depth && !world_settings_quality_custom(&loaded));
-        assert(loaded.fx_lights==(quality>=WORLD_GFX_MEDIUM));
+        assert(loaded.fx_lights && loaded.fx_headlights && loaded.fx_sunshadow && loaded.fx_rim);
         assert(loaded.fx_trails==(quality==WORLD_GFX_HIGH));
         assert(world_settings_save(preset_file,&loaded)==WORLD_SETTINGS_OK);
         assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
         assert(loaded.gfx_quality==quality && !world_settings_quality_custom(&loaded));
     }
     legacy=fopen(preset_file,"wb");assert(legacy);
-    fputs("version=1\nfx_trails=1\ngfx_quality=1\n",legacy);fclose(legacy);
+    fputs("version=1\nfx_trails=1\nfx_lights=0\ngfx_quality=1\n",legacy);fclose(legacy);
     assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
     assert(loaded.fx_enable && loaded.fx_trails && !loaded.fx_lights && world_settings_quality_custom(&loaded));
     puts("PASS: all three quality presets persist; explicit overrides survive partial settings files");

@@ -448,7 +448,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
 {
     Presenter *p=gpu;
     if(!p || !data || !p->transport.ready || p->early_light_failed ||
-       !(data->flags&23) || !p->transport.needs_light(*data))return;
+       !(data->flags&(23|16384|32768)) || !p->transport.needs_light(*data))return;
     UINT f=p->frame_index;
     if(p->fence->GetCompletedValue()<std::max(p->light_fence[f],p->frame_fence[f]))return;
     if(!p->light_alloc[f] &&

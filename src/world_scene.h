@@ -32,7 +32,7 @@ typedef struct {
     unsigned splashes;
     unsigned sparks, impact_motes;
     unsigned pressure, sediment_light, water_volume, ocean_depth, aftermath, materials;
-    unsigned bubble_light, contact_shade, blast_reflect;
+    unsigned headlights, rim, bubble_light, contact_shade, blast_reflect;
 } WorldSceneFx;
 
 typedef struct {
@@ -43,6 +43,7 @@ typedef struct {
     uint16_t video_control;
     int waterline;               /* screen row of the sea surface, negative = all water */
     int frac[3];                 /* true scroll beyond the whole pixel, 1/256 px, per layer */
+    int lamp[2][3]; /* native bow x, y, facing; zero facing disables */
     unsigned scene_id;           /* changes on a scene cut (no in-between frames across it) */
 } WorldSceneFrame;
 

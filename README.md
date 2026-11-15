@@ -1,28 +1,16 @@
-# IN THE HUNT
+# In the Hunt
 
-**0.9.4 Beta** | An unofficial native Windows port of Irem's submarine shooter.
+**0.9.5 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
-[**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) | [Release notes](https://github.com/meathax/inthehunt/releases/latest) | [Report a bug](https://github.com/meathax/inthehunt/issues)
+[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
-- All six stages, both endings and local two-player co-op.
-- Keyboard and Xbox-style controllers, saved settings and pause menus.
-- Integer scaling, fullscreen and optional underwater effects.
-- Selectable EXACT and SMOOTH frame pacing with arcade-style slowdown; RecompLauncher import and settings support.
+![A submarine shines its bow lamp across an undersea minefield as sunlight casts long pixel shadows beneath the ice.](artwork/screenshots/side-view-lighting.png)
 
-<p align="center">
-  <img src="artwork/screenshots/title.png" alt="In the Hunt title screen and main menu" width="64%">
-</p>
-<p align="center">
-  <img src="artwork/screenshots/ice-cavern.png" alt="Submarine combat beneath the ice" width="49%">
-  <img src="artwork/screenshots/minefield.png" alt="Navigating an underwater minefield" width="49%">
-</p>
+## New in 0.9.5
 
-## New in 0.9.4
-
-- Choose Low, Medium or High graphics quality. High is the default, and each effect can still be toggled individually.
-- Direct3D 12 now handles underwater lighting, shadows, water effects and fractional camera movement. On High, the GPU can trace lighting while the CPU composes the scene, reducing the work that must finish in sequence before each frame.
-- EXACT keeps arcade speed and supports VRR in focused borderless fullscreen. SMOOTH follows compatible fixed-refresh displays.
-- Import any supported In the Hunt MAME set layout: merged, non-merged or split, in ZIP or 7z format. See the regional and parent-set details below.
+- The D3D12 lighting engine casts sharp sun shadows to the edge of the screen. Gunfire and explosions light the facing edges of hulls and wreckage.
+- Switch on **Sub Headlights** to project a beam from each player’s bow. Terrain and sprites cast shadows through the beam.
+- Faster shadow-mask preparation and water shading reduced CPU rendering time in three boss fights with every enhancement enabled.
 
 ## Play
 
@@ -45,55 +33,17 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 | Start / join | 1 | 2 | A |
 | Options | F1 / Esc | F1 / Esc | Start |
 
-## Make it yours
+## Graphics and frame pacing
 
-Open **Options** for video, sound, difficulty and enhancements. Choose **GFX Quality** in Video or Enhance. **Low** keeps color, depth and shake at native resolution. **Medium** adds soft shadows, colored weapon lighting, wakes and particles with a reduced tracing budget. **High** enables every enhancement and the full lighting pass. New installations start on High. An asterisk marks a preset with individual overrides. Individual choices are saved and restored when you turn the master switch back on.
+Open **Options → Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
-<details>
-<summary>Every enhancement at a glance</summary>
-
-| Option | Effect |
-|---|---|
-| **Enhancements** | Master switch; off keeps the arcade picture. |
-| **Light Shafts** | Sunbeams from the surface. |
-| **Sun Shadows** | Scenery blocks sunlight. |
-| **Path Tracing** | Coloured lighting, soft shadows and light bounces; no RTX card required. |
-| **Water Glow** | Scattered light around explosions. |
-| **Absorption** | Red light fades with depth. |
-| **Marine Snow** | Drifting underwater particles. |
-| **Vivid Color** | Stronger colour and contrast. |
-| **Motion Trails** | Phosphor-style afterimages. |
-| **Depth Haze** | Distant scenery fades toward blue. |
-| **Live Surface** | Waterline ripples and glints. |
-| **Reflections** | Sky reflections on the water. |
-| **Shockwaves** | Spreading distortion around blasts. |
-| **Particles** | Explosion embers and bubbles. |
-| **Shake + Rumble** | Screen shake and controller vibration. |
-| **Wakes + Turbulence** | Curling submarine and torpedo trails. |
-| **Destruction Debris** | Tumbling, settling wreckage. |
-| **Impact Silt** | Sediment clouds near impacts. |
-| **Surface Splashes** | Spray and ripples at waterline crossings. |
-| **Underwater Sparks** | Brief hot flecks. |
-| **Impact Particles** | Sinking debris and rising bubbles. |
-| **Pressure Waves** | Background refraction and bubble rings. |
-| **Lit Sediment** | Sediment catches explosion light. |
-| **Volumetric Water** | Light beams within the water. |
-| **Ocean Depth** | Distant scenery blends into the ocean. |
-| **Battle Aftermath** | Lingering bubbles and cooling flecks. |
-| **Bubble Lighting** | Sunlit wakes and blast-lit bubbles. |
-| **Contact Shadows** | Soft shading in underwater seams. |
-| **Blast Reflections** | Explosion light on wave crests. |
-| **Sprite Materials** | Distinct lighting for paint, metal, rust and glass. |
-
-</details>
-
-Under Video, Frame Pacing defaults to EXACT. In focused borderless fullscreen, EXACT submits each new arcade frame on its board-clock deadline using VRR-compatible presentation when DXGI supports it. Enable Adaptive-Sync on the monitor and in the graphics driver to use VRR. SMOOTH synchronizes to displays running near an integer multiple of the arcade rate. With synchronized presentation, each display refresh uses the newest game pose and fractional camera scrolling. Extra refreshes predict camera motion by at most one board tick.
+Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
 ## Updates & beta status
 
 To update, back up **`.local/world`**, extract the new version into a fresh folder and copy that directory across.
 
-Nearly feature-complete. Arcade slowdown is approximate; live launcher, audio, GPU presentation and physical-controller testing remain incomplete. RecompLauncher catalogue listing is pending. Include your version, hardware, stage and enabled effects when reporting bugs; never upload ROMs.
+Arcade slowdown is approximate. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
 
 ## Build & credits
 

@@ -70,6 +70,35 @@ int main() {
         }
     }
     puts("PASS: GPU ocean tint matches native integer output, HUD and reserved rows.");
+    // Assembled silhouette with a warm lamp to the left and sun above.
+    scene.flags=16384;scene.count=1;
+    float *lamp=scene.emitters[0];
+    lamp[0]=53;lamp[1]=62;lamp[2]=25;lamp[4]=3;lamp[5]=.4f;lamp[6]=.1f;
+    std::fill_n(frame,320*240,0xfe404040u);
+    for(int y=116;y<136;++y)for(int x=120;x<152;++x)frame[y*320+x]=0xae404040u;
+    frame[0]=0xff123456;
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error))return 1;
+    int left=124*320+120,top=116*320+136,mid=124*320+136,bottom=135*320+136;
+    // A readable outer crest rolls off through one inner hull pixel.
+    int inner=top+320;
+    if((clear_view[top]&255)<(clear_view[mid]&255)+35 ||
+       (clear_view[inner]&255)<(clear_view[mid]&255)+12 ||
+       (clear_view[top]&255)<=(clear_view[inner]&255))return 1;
+    for(int x=0;x<160;++x)scene.cells[52*160+x]=0xff303030;
+    for(int y=0;y<120;++y)scene.cells[y*160+57]=0xff303030;
+    if(!world_gpu_light_offscreen(&scene,frame,wall_view,check_error,sizeof check_error))return 1;
+    if(((clear_view[left]>>16)&255)<=((wall_view[left]>>16)&255)+5 ||
+       (clear_view[top]&255)<=(wall_view[top]&255)+5 ||
+       clear_view[mid]!=0xff404040 || clear_view[bottom]!=clear_view[mid] ||
+       clear_view[0]!=0xff123456 || wall_view[0]!=clear_view[0])return 1;
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
+    for(int y=116;y<136;++y)for(int x=120;x<152;++x)frame[y*320+x]=0x6e404040u;
+    // Foreground wreckage receives a single edge pixel, with no inner band.
+    if(!world_gpu_light_offscreen(&scene,frame,wall_view,check_error,sizeof check_error) ||
+       (wall_view[top]&255)<(wall_view[mid]&255)+15 ||
+       wall_view[inner]!=wall_view[mid] || wall_view[0]!=frame[0])return 1;
+    puts("PASS: strong directional hull and scenery rims, shadow occlusion, inner rolloff and HUD.");
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
     scene.flags=1;scene.count=1;
     float *light=scene.emitters[0]; light[0]=65;light[1]=60;light[2]=55;
     light[4]=3;light[5]=1;light[6]=.2f;
@@ -89,6 +118,32 @@ int main() {
            ((wall_view[receiver]>>16)&255)+6>=((clear_view[receiver]>>16)&255) ||
            wall_view[120*320+125]!=0xff36a2c5)return 1;
     }
+    // Two one-pixel casters above the waterline: follow both shadows across
+    // the interface to the very last row, with clear water beside each edge.
+    scene.flags=2;scene.count=0;scene.waterline=70;
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,error,sizeof error))return 1;
+    scene.cells[10*160+65]=0x01000000;
+    scene.cells[10*160+95]=0x10000000;
+    if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error))return 1;
+    for(int y=21;y<240;++y)for(int x:{130,190}){
+        int at=y*320+x+(11*20+25)/50-(11*y+25)/50;
+        if((wall_view[at]&255)+3>=(clear_view[at]&255) ||
+           wall_view[at+1]!=clear_view[at+1])return 1;
+    }
+    puts("PASS: terrain and sprite sun shadows cross the waterline and reach row 239.");
+    scene.waterline=-1;scene.count=1;
+    // A right-facing bow lamp illuminates only its cone. A single native
+    // pixel at x=140,y=120 blocks the centre ray but leaves its neighbour lit.
+    std::fill_n(scene.cells,WORLD_PROBES,0u);
+    scene.flags=32768;light[3]=1;light[1]=60.25f;
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,error,sizeof error))return 1;
+    scene.cells[60*160+70]=0x10000000;
+    if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error))return 1;
+    if((clear_view[receiver]&0xffffff)==(wall_view[receiver]&0xffffff) ||
+       (wall_view[receiver+320*4]&0xffffff)!=(clear_view[receiver+320*4]&0xffffff) ||
+       (clear_view[120*320+105]&0xffffff)!=0x505050)return 1;
+    light[3]=0;
     scene.flags=1;
     // With point emitters off, a coloured wall can tint the receiver only
     // through the indirect pass sampling skylight on the first hit.

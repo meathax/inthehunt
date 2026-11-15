@@ -112,6 +112,16 @@ static void scene_submit(void)
 {
     WorldSceneFrame frame;
     memset(&frame, 0, sizeof frame);
+    if (word(ram+0x80)==0xb2e) for (int player=0; player<2; ++player) {
+        unsigned actor=word(ram+0x90+2*player);
+        if (actor<0x400 || actor>0xff00) continue;
+        int x=(int16_t)word(ram+actor+0x21)-96, y=375-(int16_t)word(ram+actor+0x24);
+        if (x<0 || x>=320 || y<0 || y>=240) continue;
+        int facing=(ram[actor+0x29]&1)?-1:1;
+        frame.lamp[player][0]=x+17*facing;
+        frame.lamp[player][1]=y;
+        frame.lamp[player][2]=facing;
+    }
     frame.tiles = tiles;
     frame.sprites = drawn_sprites;
     frame.colors = drawn_colors;
@@ -151,6 +161,8 @@ static WorldSceneFx scene_effects(void)
     fx.ocean_depth = settings.fx_ocean_depth;
     fx.aftermath = settings.fx_aftermath;
     fx.materials = settings.fx_materials;
+    fx.headlights = settings.fx_headlights;
+    fx.rim = settings.fx_rim;
     fx.bubble_light = settings.fx_bubble_light;
     fx.contact_shade = settings.fx_contact_shade;
     fx.blast_reflect = settings.fx_blast_reflect;
@@ -163,7 +175,7 @@ static WorldSceneFx scene_effects(void)
  * 240-line picture. */
 static int scene_scale(void)
 {
-    if (settings.crt_shader || (settings.fx_enable && settings.gfx_quality==WORLD_GFX_LOW)) return 1;
+    if (settings.crt_shader || (settings.fx_enable && (settings.gfx_quality==WORLD_GFX_LOW || settings.fx_sunshadow || settings.fx_headlights))) return 1;
     int scale = world_window_scale();
     /* Two subpixel phases per arcade pixel match the two refreshes per
        board tick on 120 Hz displays. Avoid rasterizing a 4x picture when
@@ -240,7 +252,7 @@ static void present_game(const uint32_t *source)
     static WorldLightScene lights;
     int trace=(!title || world_menu_main_title(&menu)) && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow ||
         settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
-        settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
+        settings.fx_headlights || settings.fx_rim || settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
         settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid || settings.fx_ocean_depth)
         && world_gpu_transport_available();
@@ -771,6 +783,17 @@ static unsigned headless_autopilot(unsigned fallback)
     return held | fire;                         /* both fire buttons in turn */
 }
 
+static int restore_snapshot(const char *load_path)
+{
+        FILE *f = world_fopen(load_path, "rb");
+        int failed = !f || fread(ram, sizeof ram, 1, f) != 1 || fread(tiles, sizeof tiles, 1, f) != 1 ||
+            fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
+            fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
+            fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1;
+        if(f)fclose(f);
+        return !failed;
+}
+
 static void headless_run(const char *dir, const char *script_path)
 {
     FILE *script = world_fopen(script_path, "r");
@@ -798,18 +821,12 @@ static void headless_run(const char *dir, const char *script_path)
         if (save_path) ++save_path;
     }
     if (load_path) {
-        FILE *f = world_fopen(load_path, "rb");
-        if (!f || fread(ram, sizeof ram, 1, f) != 1 || fread(tiles, sizeof tiles, 1, f) != 1 ||
-            fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
-            fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
-            fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1) {
-            snprintf(failure, sizeof failure, "Cannot load the headless snapshot.");
-            if (f) fclose(f);
-            if (trace) fclose(trace);
+        if(!restore_snapshot(load_path)){
+            snprintf(failure,sizeof failure,"Cannot load snapshot.");
+            if(trace)fclose(trace);
             fclose(script);
             return;
         }
-        fclose(f);
     }
     /* WORLD_SCRIPT_RELATIVE=1: script frames count from the loaded snapshot. */
     unsigned long script_base = getenv("WORLD_SCRIPT_RELATIVE") ? ticks : 0;
@@ -1044,6 +1061,24 @@ static void headless_run(const char *dir, const char *script_path)
                     word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6));
         }
         draw();
+        if(getenv("WORLD_LIGHT_CAPTURE")){
+            static WorldLightScene capture;
+            static uint32_t readback[320*240];
+            char err[256]={0};
+            scene_submit();
+            world_scene_light_target(&capture);
+            enhance(pixels,shown,(uint32_t)(ticks*133),1,1);
+            if(shot){
+                if(!world_gpu_light_offscreen(&capture,shown,readback,err,sizeof err)){
+                    snprintf(failure,sizeof failure,"GPU capture: %.200s",err);
+                    break;
+                }
+                char name[40];
+                snprintf(name,sizeof name,"lighting-%06lu",ticks);
+                shot_source=readback;headless_shot(dir,name);shot_source=pixels;
+            }
+            world_scene_light_target(NULL);
+        }
         /* WORLD_SCENE_RUN=K: render every frame through the scene renderer at
            K times the size, halfway to the frame and on it, with the default
            effects; time it, and save both pictures on shot frames. */
@@ -1342,6 +1377,8 @@ load_game_data:
         headless_run(dir, headless);
         goto finished;
     }
+    const char *boss_snapshot=getenv("WORLD_BOSS_BENCH_SNAPSHOT");
+    if(boss_snapshot && !restore_snapshot(boss_snapshot)){snprintf(failure,sizeof failure,"Cannot load boss replay.");goto finished;}
     sound_device = world_audio_output_open();
     if (!world_window_open()) {
         MessageBoxA(NULL, "Windows could not create the game window.", "In The Hunt", MB_ICONERROR);
@@ -1365,6 +1402,7 @@ load_game_data:
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     world_menu_open_title(&menu, 0, 0, GetTickCount());
     menu.title_hidden = 1;
+    if(boss_snapshot)menu.open=0;
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
     FILE *pacing_log = getenv("WORLD_PACING_LOG") ? world_fopen(getenv("WORLD_PACING_LOG"), "w") : NULL;
@@ -1489,6 +1527,7 @@ load_game_data:
                 if (pads != 0xffff || ((uint16_t)~system & 15) || menu_held) pads = system = 0xffff;
                 else hold_input = 0;
             }
+            if(boss_snapshot)pads=(uint16_t)~headless_autopilot(0xc1);
             if (!play_tick(pads, system)) goto end_loop;
             last_tick = deadline;
             deadline += period * elapsed_board_frames;

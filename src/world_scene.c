@@ -26,6 +26,7 @@ typedef struct {
     uint16_t video_control;
     int waterline;
     int frac[3];
+    int lamp[2][3]; /* native bow x, y, facing; zero facing disables */
     unsigned scene_id;
     int valid;
 } Snapshot;
@@ -348,6 +349,7 @@ void world_scene_submit(const WorldSceneFrame *frame)
     memcpy(cur.frac, frame->frac, sizeof cur.frac);
     cur.video_control = frame->video_control;
     cur.waterline = frame->waterline;
+    memcpy(cur.lamp, frame->lamp, sizeof cur.lamp);
     cur.scene_id = frame->scene_id;
     cur.valid = 1;
     if (!prev.valid || prev.scene_id != cur.scene_id) memcpy(&prev, &cur, sizeof prev);
@@ -507,6 +509,10 @@ static void draw_sprites(double alpha)
         int flip_x = (s->attr & 0x100) != 0, flip_y = (s->attr & 0x200) != 0;
         unsigned bank = (s->attr & (independent ? 0x7f : 0xff)) | ((cur.video_control & 0x8000) ? 0x100 : 0);
         uint16_t flags = (!independent || !(s->attr & 0x80)) ? 0x8000 : 0;
+        /* Mark receiver pixels before sprite parts are assembled. The GPU
+           finds the outer edge of their union, including transparent pens. */
+        if (g.fx->rim && !blast && own_bank!=3 && own_bank!=10 && own_bank!=11 &&
+            own_bank!=39 && own_bank!=43 && own_bank!=55) flags |= 0x2000;
         for (int row = 0; row < height; ++row) {
             int screen_y = s->top + row;
             if (screen_y < -8 || screen_y >= H + 8) continue;
@@ -840,38 +846,28 @@ static void gather_lights(void)
     light_count = 0;
     gather_weapon_lights();
     gather_tile_glow();
-    for (int cell = 0; cell < GW * (H / 8) && light_count < MAX_LIGHTS; ++cell) {
-        int n = hot_count[cell];
-        if (n < 3) continue;
-        Light *l = &lights[light_count++];
-        /* Cell centre in probes; strength grows with the burning area. */
-        l->x = (float)((cell % GW) * 4 + 2);
-        l->y = (float)((cell / GW) * 4 + 2);
-        float s = (n > 64 ? 64 : n) / 64.0f;
-        s = 0.35f + 1.25f * s;
-        float r0 = hot_sum[0][cell] / (255.0f * n);
-        l->r = r0 * r0 * s; /* approximate linear emission from display-encoded art */
-        float g0 = hot_sum[1][cell] / (255.0f * n);
-        l->g = g0 * g0 * s; /* approximate linear emission from display-encoded art */
-        float b0 = hot_sum[2][cell] / (255.0f * n);
-        l->b = b0 * b0 * s; /* approximate linear emission from display-encoded art */
-        l->range = 26.0f + 46.0f * s;              /* probes */
-    }
-    /* Then the glowing scenery, softer (it is lit paint, not flame). */
-    for (int cell = 0; cell < GW * (H / 8) && light_count < MAX_LIGHTS; ++cell) {
-        int n = tile_glow_count[cell];
-        if (n < 4 || hot_count[cell] >= 3) continue;
-        Light *l = &lights[light_count++];
-        l->x = (float)((cell % GW) * 4 + 2);
-        l->y = (float)((cell / GW) * 4 + 2);
-        float s = 0.18f + 0.30f * n / 16.0f;
-        float r0 = tile_glow_sum[0][cell] / (255.0f * n);
-        l->r = r0 * r0 * s; /* approximate linear emission from display-encoded art */
-        float g0 = tile_glow_sum[1][cell] / (255.0f * n);
-        l->g = g0 * g0 * s; /* approximate linear emission from display-encoded art */
-        float b0 = tile_glow_sum[2][cell] / (255.0f * n);
-        l->b = b0 * b0 * s; /* approximate linear emission from display-encoded art */
-        l->range = 30.0f;
+    /* An explosion commonly occupies several 8x8 bins. Use the luminous
+       centroid of each 16x16 patch instead of stacking co-located point
+       lights. Keep weapon actors separate so their muzzle positions survive. */
+    for(int scenery=0;scenery<2;++scenery){
+        for(int y=0;y<GH && light_count<MAX_LIGHTS;y+=2)
+        for(int x=0;x<GW && light_count<MAX_LIGHTS;x+=2){
+            unsigned n=0,sx=0,sy=0,sum[3]={0};
+            for(int dy=0;dy<2 && y+dy<GH;++dy)
+            for(int dx=0;dx<2 && x+dx<GW;++dx){
+                int at=(y+dy)*GW+x+dx;
+                unsigned count=scenery?tile_glow_count[at]:hot_count[at];
+                if(count<(scenery?4u:3u) || (scenery && hot_count[at]>=3))continue;
+                n+=count;
+                sx+=count*(4*(x+dx)+2);sy+=count*(4*(y+dy)+2);
+                for(int c=0;c<3;++c)sum[c]+=scenery?tile_glow_sum[c][at]:hot_sum[c][at];
+            }
+            if(!n)continue;
+            float power=scenery?.18f+.75f*fminf(n/40.f,1):.35f+1.55f*fminf(n/80.f,1);
+            float r=sum[0]/(255.f*n),g0=sum[1]/(255.f*n),b=sum[2]/(255.f*n);
+            lights[light_count++]=(Light){.x=(float)sx/n,.y=(float)sy/n,
+                .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=scenery?25:20+24*power};
+        }
     }
 }
 
@@ -998,11 +994,39 @@ static void distributed_transport_rows(int from,int to)
     }
 }
 
+/* Each worker writes disjoint light-grid rows from the completed sprite
+   and tile planes. Use the compositor's exact subpixel-to-texel mapping. */
+static void pack_gpu_light_rows(int from,int to)
+{
+    for(int y=from;y<to;++y)for(int x=0;x<PW;++x){
+        int at=y*PW+x, sx=(2*x+1)*g.k, sy=(2*y+1)*g.k;
+        uint16_t sprite=sprite_px[(size_t)sy*g.ow+sx];
+        uint32_t c=0;
+        if(solid[at]) c=receiver_colour((2*y+1+MARGIN)*LW+2*x+1+MARGIN,2*y+1)|0xff000000u;
+        if(sprite!=NONE && !(sprite&0x4000) && (!(sprite&0x8000)||!solid[at]))
+            c=cur.colors[sprite&1023]|0xff000000u;
+        unsigned coverage=0;
+        for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx){
+            int nx=2*x+dx, ny=2*y+dy;
+            int px=nx*g.k+g.shake_x, py=ny*g.k+g.shake_y;
+            unsigned sp=(unsigned)px<(unsigned)g.ow && (unsigned)py<(unsigned)g.oh
+                ?sprite_px[(size_t)py*g.ow+px]:NONE;
+            int terrain=divide[clampi(py,0,g.oh-1)+g.off_y[1]]*LW+
+                        divide[clampi(px,0,g.ow-1)+g.off_x[1]];
+            unsigned bit=1u<<(dy*2+dx);
+            if(sp!=NONE && !(sp&0x4000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
+            if(layer_on[1] && (g.waterline<0 || ny>g.waterline+12) &&
+               layer_idx[1][terrain]!=NONE)coverage|=bit;
+        }
+        gpu_light->cells[at]=(c&0xffffff)|(coverage<<24);
+    }
+}
+
 static void transport(const WorldSceneFx *fx)
 {
     /* Glow has its own switch: request radiance without enabling surface lighting. */
     WorldSceneFx requested=*fx;
-    requested.lights=fx->lights || fx->glow || fx->bubble_light;
+    requested.lights=fx->lights || fx->glow || fx->bubble_light || (gpu_light && (fx->rim || fx->headlights));
     requested.sunshadow=fx->sunshadow || fx->bubble_light;
     fx=&requested;
     if (!fx->lights && !fx->sunshadow && !(gpu_light && (fx->water_volume || fx->rays))) {
@@ -1017,22 +1041,34 @@ static void transport(const WorldSceneFx *fx)
     else light_count = 0;
     if (gpu_light) {
         ++gpu_light->revision;
-        gpu_light->count=light_count;
+        unsigned lamps=0;
+        for(int player=0;fx->headlights && player<2;++player){
+            const int *bow=cur.lamp[player];
+            if(!bow[2])continue;
+            /* Place the lens just beyond the actual leading hull pixel;
+               animation poses change the bow width by several pixels. */
+            int nose=bow[0], centre=nose-17*bow[2], best=-1;
+            for(int dy=-2;dy<=2;++dy)for(int ahead=0;ahead<=25;++ahead){
+                int x=centre+ahead*bow[2],y=bow[1]+dy;
+                if((unsigned)x>=W || (unsigned)y>=H)continue;
+                unsigned ink=sprite_px[(size_t)(y*g.k)*g.ow+x*g.k];
+                if(ink!=NONE && ((ink&1023)>>4)==(unsigned)(1+player) && ahead>best)best=ahead;
+            }
+            if(best<0)continue; /* Do not leave a detached beam after the hull disappears. */
+            nose=centre+(best+2)*bow[2];
+            float *e=gpu_light->emitters[lamps++];
+            e[0]=(nose-g.shake_x/g.k)*.5f;e[1]=(bow[1]-g.shake_y/g.k)*.5f;e[2]=62;e[3]=(float)bow[2];
+            e[4]=2.8f;e[5]=1.94f;e[6]=.94f;
+        }
+        gpu_light->count=lamps+light_count;
+        if(gpu_light->count>WORLD_EMITTERS)gpu_light->count=WORLD_EMITTERS;
         gpu_light->waterline=g.waterline;
-        for(int i=0;i<light_count;++i){
-            float *e=gpu_light->emitters[i]; const Light *l=lights+i;
-            e[0]=l->x;e[1]=l->y;e[2]=l->range;
+        for(int i=0;i<(int)(gpu_light->count-lamps);++i){
+            float *e=gpu_light->emitters[lamps+i];e[3]=0; const Light *l=lights+i;
+            e[0]=l->x-.5f*g.shake_x/g.k;e[1]=l->y-.5f*g.shake_y/g.k;e[2]=l->range;
             e[4]=l->r;e[5]=l->g;e[6]=l->b;
         }
-        for(int y=0;y<PH;++y)for(int x=0;x<PW;++x){
-            int at=y*PW+x, sx=(2*x+1)*g.k, sy=(2*y+1)*g.k;
-            uint16_t sprite=sprite_px[(size_t)sy*g.ow+sx];
-            uint32_t c=0;
-            if(solid[at]) c=receiver_colour((2*y+1+MARGIN)*LW+2*x+1+MARGIN,2*y+1)|0xff000000u;
-            if(sprite!=NONE && !(sprite&0x4000) && (!(sprite&0x8000)||!solid[at]))
-                c=cur.colors[sprite&1023]|0xff000000u;
-            gpu_light->cells[at]=c;
-        }
+        parallel(pack_gpu_light_rows,PH);
         transport_valid=0;
         return;
     }
@@ -1173,6 +1209,9 @@ static void colour_rows(int from, int to)
     }
 }
 
+/* One water classification per palette entry is enough for all three
+   arcade layers. The palette can animate on every board tick. */
+static uint8_t palette_water[1024];
 static void layer_rows_fx(int from, int to)
 {
     const WorldSceneFx *fx = g.fx;
@@ -1196,7 +1235,7 @@ static void layer_rows_fx(int from, int to)
                 const int r0 = r, g0 = gr, b0 = b;          /* the surface's own colour */
                 int x = bx - MARGIN, wx = x + g.scroll_x[1], sx = clampi(x, 0, W - 1);
                 int lum = receiver_lum[i];
-                int w = water_amount(p) * under >> 8;
+                int w = palette_water[layer_idx[layer][i]] * under >> 8;
                 layer_wat[layer][i] = (uint8_t)w;
                 int surface = w < 128;                       /* rock, ice, wrecks: not open water */
                 float sv = shadowed && in_play ? pixel_light[sy*W+sx].sun : 1.0f;
@@ -1337,6 +1376,7 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
             int protect=fx->pressure || fx->shock || fx->surface;
             int base_u=protect?clampi(X+g.shake_x,0,ow-1):U,base_v=protect?shaken_y:V;
             uint32_t c = backdrop;
+            int rim_receiver = 0;
             int id = -1, wet = 0, at[3] = {-1, -1, -1};
             for (int layer = 0; layer < 3; ++layer) {
                 if (!layer_on[layer]) continue;
@@ -1388,6 +1428,7 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
                         }
                     }
                     if (!blocked) {
+                        rim_receiver = (sprite & 0x2000) != 0;
                         c = cur.colors[sprite & 1023];
                         id = 3;
                         uint32_t mat=(fx->materials || fx->contact_shade)?sprite_material[(size_t)qy*ow+qx]:0;
@@ -1441,11 +1482,15 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
             }
             if(gpu_light && !hud_pixel){
                 int volume=(fx->water_volume || fx->rays || fx->ocean_depth) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
-                c=(c&0xffffff)|(volume?0xee000000u:0xfe000000u);
+                // Tag the middle scenery plane before lighting. Its opaque pens
+                // form the cliffs, wrecks and pillars in front of the backdrop.
+                int terrain_rim=fx->rim && id==1;
+                unsigned tag=terrain_rim?(volume?0x6e:0x7e):rim_receiver?0xae:volume?0xee:0xfe;
+                c=(c&0xffffffu)|(tag<<24);
             }
             /* In the GPU input tag, retain the five volume/particle bits
                alongside the plane. Sprites and UI keep their original tag. */
-            if(camera_fractional && !hud_pixel && (id==1 || id==2)){
+            if(camera_fractional && !hud_pixel && (id==1 || id==2) && !(gpu_light && fx->rim && id==1)){
                 unsigned tag=gpu_light ? ((unsigned)id<<5)|((c>>24)&31) : 250u+id;
                 c=(c&0xffffffu)|(tag<<24);
             }
@@ -1850,7 +1895,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     if(changed_frame || fx_changed)transport(fx);
     if(gpu_light){
         gpu_light->scale=k;
-        gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
+        gpu_light->flags=(fx->depth?65536u:0u)|(fx->headlights?32768u:0u)|(fx->rim?16384u:0u)|(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
             (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
         gpu_light->waterline=g.waterline;
         if (world_scene_light_ready) world_scene_light_ready(gpu_light);
@@ -1862,7 +1907,11 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         new_frame = 0;
     }
     double t2 = stamp();
-    if(layers_dirty){parallel(layer_rows_fx,LH);layer_clock=clock;}
+    if(layers_dirty){
+        for(unsigned i=0;i<1024;++i)palette_water[i]=(uint8_t)water_amount(cur.colors[i]);
+        parallel(layer_rows_fx,LH);
+        layer_clock=clock;
+    }
     double t3 = stamp();
     build_field(fx, dt);
     cinema_volume_dirty=changed_frame || fx_changed || layers_dirty;

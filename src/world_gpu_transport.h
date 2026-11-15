@@ -5,7 +5,7 @@ static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBat
 
 struct GpuTransport {
     Com<ID3D12RootSignature> root;
-    Com<ID3D12PipelineState> direct, indirect, shade, volume, resolve;
+    Com<ID3D12PipelineState> sun, direct, indirect, shade, volume, resolve;
     Com<ID3D12Resource> effect_upload[FRAMES], history, volume_field, effect_device, input_device;
     Com<ID3D12Resource> scene_upload[FRAMES], scene, direct_field, bounce_field, result;
     bool ready=false, have_field=false, have_inputs=false;
@@ -61,9 +61,9 @@ struct GpuTransport {
         Com<ID3DBlob> signature, errors;
         if(FAILED(D3D12SerializeRootSignature(&desc,D3D_ROOT_SIGNATURE_VERSION_1,signature.put(),errors.put())) ||
            FAILED(dev->CreateRootSignature(0,signature->GetBufferPointer(),signature->GetBufferSize(),IID_PPV_ARGS(root.put()))))return false;
-        const char *names[]={"directPass","indirectPass","shadePass","volumePass","resolvePass"};
-        Com<ID3D12PipelineState> *states[]={&direct,&indirect,&shade,&volume,&resolve};
-        for(int i=0;i<5;i++){
+        const char *names[]={"sunPass","directPass","indirectPass","shadePass","volumePass","resolvePass"};
+        Com<ID3D12PipelineState> *states[]={&sun,&direct,&indirect,&shade,&volume,&resolve};
+        for(int i=0;i<6;i++){
             Com<ID3DBlob> code;
             if(FAILED(D3DCompile(transport_shader,strlen(transport_shader),"water transport",nullptr,nullptr,names[i],"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put()))){
                 if(errors) fprintf(stderr,"%s\n",(const char*)errors->GetBufferPointer());
@@ -87,7 +87,7 @@ struct GpuTransport {
             D3D12_HEAP_PROPERTIES heap={};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
             return SUCCEEDED(dev->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,nullptr,IID_PPV_ARGS(resource.put())));
         };
-        ready=storage(volume_field,80*60*16) && storage(history,W*H*4*4*4) && storage(direct_field,WORLD_PROBES*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,W*H*4*4*4);
+        ready=storage(volume_field,80*60*16) && storage(history,W*H*4*4*4) && storage(direct_field,(WORLD_PROBES+320*240)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,W*H*4*4*4);
         return ready;
     }
 
@@ -126,14 +126,19 @@ struct GpuTransport {
             transition(scene.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             scale=k;
         }
-        if (changed && (data.flags&23)) {
+        if (changed && (data.flags&(23|32768|16384))) {
             cmd->SetComputeRootSignature(root.get());
             cmd->SetComputeRootShaderResourceView(0,scene->GetGPUVirtualAddress());
             cmd->SetComputeRootUnorderedAccessView(2,direct_field->GetGPUVirtualAddress());
             cmd->SetComputeRootUnorderedAccessView(3,bounce_field->GetGPUVirtualAddress());
             D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
             cmd->ResourceBarrier(1,&sync);
-            cmd->SetPipelineState(direct.get());cmd->Dispatch(20,15,1);
+            if(data.flags&(2|16|16384)){
+                cmd->SetPipelineState(sun.get());
+                cmd->Dispatch(373,1,1); // 320 columns plus the 53-pixel slant at row 239
+                cmd->ResourceBarrier(1,&sync);
+            }
+            cmd->SetPipelineState(direct.get());cmd->Dispatch(40,30,1);
             cmd->ResourceBarrier(1,&sync);
             cmd->SetPipelineState(indirect.get());cmd->Dispatch(20,15,1);
             cmd->ResourceBarrier(1,&sync);
@@ -151,10 +156,10 @@ struct GpuTransport {
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
         read_time(frame);
-        bool medium=(data.flags&1024)!=0 && (data.flags&23)!=0;
+        bool medium=(data.flags&1024)!=0 && (data.flags&(23|32768|16384))!=0;
         uint32_t dispatch_flags=data.flags | (medium && budget_mode ? 2048u : 0u);
         bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
-        bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&23)) && (++sample_counter%16==0));
+        bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&(23|32768|16384))) && (++sample_counter%16==0));
         if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2);
         if(!prepare(cmd,scene_upload[frame].get(),k,data,dispatch_flags))return false;
         void *effect_map=nullptr;
