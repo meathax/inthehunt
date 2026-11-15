@@ -1408,6 +1408,7 @@ load_game_data:
                 ++phase;
             } else if (phase == 3 && ticks >= 900) break;
         }
+        if (menu.open && !menu.title) world_gpu_request_vrr(0);
         if (menu.open && menu.title) {
             unsigned title_held = menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0);
             world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
@@ -1443,6 +1444,7 @@ load_game_data:
             continue;
         }
         if (rising && !menu.open) {
+            world_gpu_request_vrr(0);
             draw_captured_pixels();
             memcpy(paused_frame, pixels, sizeof paused_frame);
             world_menu_open(&menu, menu_held | ((toggle & 2) ? WORLD_MENU_BACK : 0), gamepad, GetTickCount());
@@ -1452,6 +1454,25 @@ load_game_data:
         /* Board deadlines advance only by elapsed arcade vblanks. Display
            refreshes may repeat a state, but never stage the next input frame. */
         QueryPerformanceCounter(&now);
+        int vrr = world_gpu_request_vrr(settings.pacing && settings.fullscreen && focused);
+        double period = arcade_period;
+        if (!settings.pacing) {
+            double hz = world_window_refresh_hz();
+            double multiple = floor(hz * arcade_period / rate.QuadPart + 0.5);
+            if (multiple >= 1 && multiple <= 8 &&
+                fabs(hz / multiple * arcade_period / rate.QuadPart - 1.0) <= 0.006)
+                period = rate.QuadPart * multiple / hz;
+        }
+        /* Immediate presents do not throttle the loop. Wait before polling
+           gameplay input and keep the deadline on the absolute board clock. */
+        if (vrr) {
+            while ((double)now.QuadPart < deadline) {
+                double ms = (deadline - now.QuadPart) * 1000.0 / rate.QuadPart;
+                if (ms >= 2.0) Sleep((DWORD)(ms - 1.0));
+                else YieldProcessor();
+                QueryPerformanceCounter(&now);
+            }
+        }
         int advanced = 0;
         while ((double)now.QuadPart >= deadline) {
             if (!world_window_poll(&pads, &system)) goto end_loop;
@@ -1461,7 +1482,7 @@ load_game_data:
             }
             if (!play_tick(pads, system)) goto end_loop;
             last_tick = deadline;
-            deadline += arcade_period * elapsed_board_frames;
+            deadline += period * elapsed_board_frames;
             ticks += elapsed_board_frames;
             counted += elapsed_board_frames;
             advanced = 1;
@@ -1474,7 +1495,7 @@ load_game_data:
         }
         /* Hold original multi-vblank slowdown frames. On extra display
            refreshes only the camera can advance beyond the newest pose. */
-        double phase = (camera_display_time(now.QuadPart,rate.QuadPart) - last_tick) / arcade_period;
+        double phase = vrr ? 0.0 : (camera_display_time(now.QuadPart,rate.QuadPart) - last_tick) / period;
         scene_alpha = 1.0 + (elapsed_board_frames == 1 ? fmin(1.0,fmax(0.0,phase)) : 0.0);
         if (pacing_log) QueryPerformanceCounter(&after_submit);
         beam_step();
@@ -1491,6 +1512,8 @@ load_game_data:
             fputc(10,pacing_log);
             fprintf(pacing_log, "%.4f %lu %.5f %u\n",
                     (double)now.QuadPart * 1000.0 / rate.QuadPart,ticks,scene_alpha,word(ram + 0xb70a));
+            fprintf(pacing_log,"camera %u %u %.5f %.5f %d\n",drawn_layers[1].scroll_x,
+                    drawn_layers[2].scroll_x,displayed_camera_offsets[0],displayed_camera_offsets[2],focused);
             unsigned shown_present, shown_refresh, made;
             if (world_gpu_frame_statistics(&shown_present,&shown_refresh,&made))
                 fprintf(pacing_log,"dxgi %u %u %u\n",shown_present,shown_refresh,made);

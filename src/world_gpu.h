@@ -40,6 +40,7 @@ void world_gpu_set_options(int scaling, int beam, int vsync);
  * (game frames plus the fraction elapsed), for the beam simulator. */
 void world_gpu_present(const uint32_t *frame, int k, double source_time);
 /* Measured display refresh rate (0 until known). */
+int world_gpu_request_vrr(int enable);
 double world_gpu_refresh_hz(void);
 /* QPC timestamp of a display sync and its refresh counter. */
 int world_gpu_sync_sample(int64_t *qpc, unsigned *refresh);

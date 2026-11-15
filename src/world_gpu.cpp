@@ -182,6 +182,7 @@ struct Presenter {
     Com<ID3D12Resource> picture, picture_upload[FRAMES];
     UINT width = 0, height = 0;
     bool tearing = false;
+    bool vrr = false;
     int scaling = 0, beam = 0, vsync = 1;
     std::unique_ptr<PostChain> chain;
     LARGE_INTEGER last_present = {};
@@ -542,6 +543,13 @@ extern "C" void world_gpu_set_options(int scaling, int beam, int vsync)
 }
 
 
+extern "C" int world_gpu_request_vrr(int enable)
+{
+    if (!gpu) return 0;
+    gpu->vrr = enable && gpu->shown && gpu->tearing && !gpu->beam;
+    return gpu->vrr;
+}
+
 extern "C" double world_gpu_refresh_hz(void) { return gpu ? gpu->refresh_hz : 0.0; }
 
 extern "C" int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refresh,
@@ -672,7 +680,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     ID3D12CommandList *lists[] = {cmd};
     p->queue->ExecuteCommandLists(1, lists);
     // The beam simulator needs every display refresh, so it always syncs.
-    bool sync = p->vsync || p->beam;
+    bool sync = !p->vrr && (p->vsync || p->beam);
     HRESULT presented = p->swap->Present(sync ? 1 : 0, !sync && p->tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
     if (FAILED(presented) && getenv("WORLD_PACING_LOG")) fprintf(stderr, "Present failed %08lx reason %08lx%c", (unsigned long)presented, (unsigned long)p->device->GetDeviceRemovedReason(), 10);
     ++p->fence_value;

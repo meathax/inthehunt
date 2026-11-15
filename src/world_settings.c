@@ -18,6 +18,7 @@ typedef struct {
 } NumberSetting;
 
 static const NumberSetting numbers[] = {
+    {"pacing", offsetof(WorldSettings, pacing), 0, 1, 0},
     {"volume", offsetof(WorldSettings, volume), 0, 100, 0},
     {"fullscreen", offsetof(WorldSettings, fullscreen), 0, 1, 0},
     {"window_scale", offsetof(WorldSettings, window_scale), 1, 12, 0},
@@ -125,6 +126,7 @@ void world_settings_defaults(WorldSettings *settings)
     if (!settings) return;
     memset(settings, 0, sizeof *settings);
     settings->timing_mode = WORLD_TIMING_ARCADE;
+    settings->pacing = 1;
     settings->volume = 100;
     settings->window_scale = 3;
     settings->achievement_popups = 1;
@@ -187,6 +189,7 @@ static int number(const char *text, unsigned *value)
 /* Returns -1 for an invalid recognized value, zero for an unknown key. */
 static int apply_setting(WorldSettings *settings, const char *key, const char *value, unsigned char *seen)
 {
+    if (!strcmp(key, "pacing") && !strcmp(value, "2")) value = "1"; /* Retired timer mode. */
     if (!strcmp(key, "timing_mode"))
         return world_timing_mode_parse(value, &settings->timing_mode) ? 1 : -1;
     for (unsigned i = 0; i < sizeof numbers / sizeof numbers[0]; ++i) {

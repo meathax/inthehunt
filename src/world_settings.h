@@ -19,7 +19,7 @@ typedef struct {
     unsigned achievement_popups;
     unsigned scaling;            /* 0 integer, 1 fit 4:3, 2 stretch */
     unsigned fps_limit;
-    unsigned pacing;             /* 0 smooth (locked to the display), 1 exact 60.01 Hz, 2 timer */          /* index into the frame-rate table; 0 is the arcade rate */
+    unsigned pacing;             /* 0 display-locked, 1 exact arcade clock */
     unsigned show_fps;
     unsigned pause_unfocused;
     unsigned fm_volume, pcm_volume;

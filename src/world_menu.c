@@ -13,7 +13,7 @@ enum { PAGE_MAIN, PAGE_OPTIONS, PAGE_CONTROLS, PAGE_QUIT };
 enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_ENHANCE, TAB_COUNT };
 enum {
     ITEM_RESUME, ITEM_OPTIONS, ITEM_CONTROLS, ITEM_QUIT,
-    ITEM_DISPLAY, ITEM_SCALE,
+    ITEM_DISPLAY, ITEM_SCALE, ITEM_PACING,
     ITEM_VOLUME, ITEM_DEFAULTS, ITEM_BACK,
     ITEM_NO, ITEM_YES, ITEM_TABS,
     ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
@@ -238,6 +238,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_QUALITY, "GFX QUALITY", "LOW, MEDIUM OR HIGH EFFECTS");
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
+            ADD(ITEM_PACING, "FRAME PACING", "DISPLAY LOCK OR EXACT ARCADE VRR");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
         } else if (m->tab == TAB_SOUND) {
@@ -319,6 +320,7 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
         break;
     }
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
+    case ITEM_PACING: strcpy(out, s->pacing ? "EXACT" : "SMOOTH"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
     case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
@@ -380,6 +382,7 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         world_settings_apply_quality(s,1+(s->gfx_quality-1+(d>0?1:2))%3);
         return WORLD_MENU_VIEW;
     case ITEM_DISPLAY: s->fullscreen = !s->fullscreen; return WORLD_MENU_DISPLAY;
+    case ITEM_PACING: s->pacing = !s->pacing; return WORLD_MENU_VIEW;
     case ITEM_SCALE: {
         unsigned scale = s->window_scale + (d > 0 ? 1 : -1);
         if (s->fullscreen || scale < 1 || scale > 8) return 0;

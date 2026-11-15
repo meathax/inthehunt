@@ -7,7 +7,7 @@
 - All six stages, both endings and local two-player co-op.
 - Keyboard and Xbox-style controllers, saved settings and pause menus.
 - Integer scaling, fullscreen and optional underwater effects.
-- Fixed arcade-speed pacing with arcade-style slowdown; RecompLauncher import and settings support.
+- Selectable EXACT and SMOOTH frame pacing with arcade-style slowdown; RecompLauncher import and settings support.
 
 <p align="center">
   <img src="artwork/screenshots/title.png" alt="In the Hunt title screen and main menu" width="64%">
@@ -80,7 +80,7 @@ Open **Options** for video, sound, difficulty and enhancements. Choose **GFX Qua
 
 </details>
 
-Gameplay runs on the arcade clock. Each display refresh uses the newest game pose and fractional camera scrolling. Extra refreshes predict camera motion by at most one board tick.
+Under Video, Frame Pacing defaults to EXACT. In focused borderless fullscreen, EXACT submits each new arcade frame on its board-clock deadline using VRR-compatible presentation when DXGI supports it. Enable Adaptive-Sync on the monitor and in the graphics driver to use VRR. SMOOTH synchronizes to displays running near an integer multiple of the arcade rate. With synchronized presentation, each display refresh uses the newest game pose and fractional camera scrolling. Extra refreshes predict camera motion by at most one board tick.
 
 ## Updates & beta status
 

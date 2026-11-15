@@ -100,10 +100,13 @@ int main(void){
     for(int kind=1;kind<MAT_COUNT;++kind)assert((material_shade(c,kind,100,100)>>24)==255);
     puts("PASS: authored material roles, flip-correct normals and dynamic lighting response");
     WorldSettings saved,loaded;world_settings_defaults(&saved);
+    assert(saved.pacing == 1);
+    saved.pacing = 0;
     saved.fx_pressure=0;saved.fx_sediment_light=1;saved.fx_water_volume=0;saved.fx_ocean_depth=1;
     saved.fx_aftermath=0;saved.fx_materials=1;
     assert(world_settings_save("build/light-colour-20261113/settings.ini",&saved)==WORLD_SETTINGS_OK);
     assert(world_settings_load("build/light-colour-20261113/settings.ini",&loaded)==WORLD_SETTINGS_OK);
+    assert(loaded.pacing == 0);
     assert(!loaded.fx_pressure&&loaded.fx_sediment_light&&!loaded.fx_water_volume&&loaded.fx_ocean_depth);
     assert(!loaded.fx_aftermath&&loaded.fx_materials);
     puts("PASS: six independent settings persist");
