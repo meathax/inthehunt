@@ -4,15 +4,15 @@
 #include <string.h>
 #include "world_audio_output.h"
 
-/* Mono 48 kHz output through waveOut. Samples go into a FIFO and are handed
+/* Stereo 48 kHz output through waveOut. Samples go into a FIFO and are handed
  * to the device in small blocks as blocks free up; nothing here ever waits,
  * so the video clock alone paces the game and the caller keeps the level
  * near its target by resampling slightly (see sound_frame). */
 enum { BLOCKS = 24, BLOCK = 256, FIFO = 16384, START_LEVEL = 1536 };
 static HWAVEOUT device;
 static WAVEHDR headers[BLOCKS];
-static int16_t blocks[BLOCKS][BLOCK];
-static int16_t fifo[FIFO];
+static int16_t blocks[BLOCKS][BLOCK][2];
+static int16_t fifo[FIFO][2];
 static unsigned fifo_read, fifo_count, prepared, next_block, in_flight, playing;
 
 void world_audio_output_close(void)
@@ -32,11 +32,11 @@ int world_audio_output_open(void)
     if (device) return 1;
     WAVEFORMATEX format = {0};
     format.wFormatTag = WAVE_FORMAT_PCM;
-    format.nChannels = 1;
+    format.nChannels = 2;
     format.nSamplesPerSec = 48000;
     format.wBitsPerSample = 16;
-    format.nBlockAlign = 2;
-    format.nAvgBytesPerSec = 96000;
+    format.nBlockAlign = 4;
+    format.nAvgBytesPerSec = 192000;
     if (waveOutOpen(&device, WAVE_MAPPER, &format, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) {
         device = NULL;
         return 0;
@@ -67,7 +67,7 @@ void world_audio_output_pump(void)
         WAVEHDR *h = &headers[next_block];
         if ((h->dwFlags & WHDR_INQUEUE) && !(h->dwFlags & WHDR_DONE)) break;
         for (unsigned i = 0; i < BLOCK; ++i) {
-            blocks[next_block][i] = fifo[fifo_read];
+            memcpy(blocks[next_block][i],fifo[fifo_read],sizeof fifo[0]);
             fifo_read = (fifo_read + 1) % FIFO;
         }
         fifo_count -= BLOCK;
@@ -94,7 +94,7 @@ int world_audio_output_submit(const int16_t *samples, size_t count)
             fifo_read = (fifo_read + 1) % FIFO;
             --fifo_count;
         }
-        fifo[(fifo_read + fifo_count) % FIFO] = samples[i];
+        memcpy(fifo[(fifo_read + fifo_count) % FIFO],samples+2*i,sizeof fifo[0]);
         ++fifo_count;
     }
     world_audio_output_pump();

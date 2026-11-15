@@ -16,7 +16,7 @@ enum {
     ITEM_DISPLAY, ITEM_SCALE, ITEM_PACING,
     ITEM_VOLUME, ITEM_DEFAULTS, ITEM_BACK,
     ITEM_NO, ITEM_YES, ITEM_TABS,
-    ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM,
+    ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM, ITEM_SPATIAL,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
     ITEM_FX, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
@@ -34,6 +34,7 @@ enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 static unsigned *toggle_field(WorldSettings *s, unsigned id)
 {
     switch (id) {
+    case ITEM_SPATIAL: return &s->spatial_audio;
     case ITEM_SHOWFPS: return &s->show_fps;
     case ITEM_FOCUS: return &s->pause_unfocused;
     case ITEM_AUTOFIRE: return &s->autofire;
@@ -245,6 +246,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
         } else if (m->tab == TAB_SOUND) {
             ADD(ITEM_VOLUME, "VOLUME", "MASTER VOLUME. 0 IS MUTE");
+            ADD(ITEM_SPATIAL, "UNDERWATER AUDIO", "STEREO AND WATER ACOUSTICS");
             ADD(ITEM_FM, "FM SYNTH", "YM2151 MUSIC LEVEL");
             ADD(ITEM_PCM, "PCM SAMPLES", "GA20 SAMPLE LEVEL");
         } else if (m->tab == TAB_GAME) {

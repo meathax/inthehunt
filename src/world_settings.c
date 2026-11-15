@@ -27,6 +27,7 @@ static const NumberSetting numbers[] = {
     {"show_fps", offsetof(WorldSettings, show_fps), 0, 1, 0},
     {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1, 0},
     {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100, 0},
+    {"spatial_audio", offsetof(WorldSettings, spatial_audio), 0, 1, 0},
     {"pcm_volume", offsetof(WorldSettings, pcm_volume), 0, 100, 0},
     {"dip_lives", offsetof(WorldSettings, dip_lives), 0, 3, 0},
     {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3, 0},
@@ -135,6 +136,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->pause_unfocused = 1;
     settings->fm_volume = 100;
     settings->pcm_volume = 100;
+    settings->spatial_audio = 1;
     settings->dip_lives = 1;         /* factory: 3 submarines */
     settings->dip_difficulty = 2;    /* factory: normal */
     settings->dip_demo_sound = 1;

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "world_gpu_transport_shader.h"
+static_assert(offsetof(WorldLightScene,water_grade)==82900 && offsetof(WorldLightScene,ice_coverage)==82916);
 static_assert(offsetof(WorldLightScene,light_bins)==81300);
 static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,ocean_rows)==43736 && offsetof(WorldEffectBatch,nodes)==43768 && sizeof(WorldEffectNode)==32);
 
@@ -87,7 +88,7 @@ struct GpuTransport {
             D3D12_HEAP_PROPERTIES heap={};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
             return SUCCEEDED(dev->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,nullptr,IID_PPV_ARGS(resource.put())));
         };
-        ready=storage(volume_field,80*60*16) && storage(history,W*H*4*4*4) && storage(direct_field,(WORLD_PROBES+320*240)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,W*H*4*4*4);
+        ready=storage(volume_field,80*60*16) && storage(history,W*H*4*4*4) && storage(direct_field,(WORLD_PROBES+320*240+373)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,W*H*4*4*4);
         return ready;
     }
 

@@ -55,6 +55,7 @@ int32_t world_ga20_clock(WorldGa20 *chip)
     int32_t mixed = 0;
     for (unsigned i = 0; i < 4; ++i) {
         WorldGa20Voice *voice = &chip->voices[i];
+        chip->tick_voice[i]=0;
         if (!voice->playing) continue;
         unsigned position = voice->position & 0xfffff;
         /* The World 512 KiB ROM mirrors across the 20-bit sample bus. */
@@ -64,7 +65,8 @@ int32_t world_ga20_clock(WorldGa20 *chip)
             voice->playing = 0;
             continue;
         }
-        mixed += ((int)sample - 128) * voice->volume;
+        chip->tick_voice[i]=((int)sample-128)*voice->volume;
+        mixed+=chip->tick_voice[i];
         if (--voice->counter <= voice->rate) {
             voice->position = (position + 1) & 0xfffff;
             voice->counter = 256;
@@ -73,23 +75,34 @@ int32_t world_ga20_clock(WorldGa20 *chip)
     return mixed;
 }
 
-void world_ga20_render(WorldGa20 *chip, int16_t *output, size_t count)
+static void render(WorldGa20 *chip, int16_t *mono, int16_t (*voices)[4], size_t count)
 {
     /* Exact rational 14318181 / 16 Hz -> 48000 Hz. Integrate each
        piecewise constant chip sample over the output sample interval. */
     for (size_t frame = 0; frame < count; ++frame) {
         unsigned remaining = 14318181;
-        int64_t integral = 0;
+        int64_t integral = 0,channels[4]={0};
         while (remaining) {
             if (!chip->tick_remaining) {
                 chip->tick_sample = world_ga20_clock(chip);
                 chip->tick_remaining = 16 * 48000;
             }
             unsigned duration = remaining < chip->tick_remaining ? remaining : chip->tick_remaining;
-            integral += (int64_t)chip->tick_sample * duration;
+            if(voices)for(int i=0;i<4;++i)channels[i]+=(int64_t)chip->tick_voice[i]*duration;
+            else integral += (int64_t)chip->tick_sample * duration;
             chip->tick_remaining -= duration;
             remaining -= duration;
         }
-        output[frame] = (int16_t)(integral / (4 * 14318181));
+        if(voices)for(int i=0;i<4;++i)voices[frame][i]=(int16_t)(channels[i]/(4*14318181));
+        else mono[frame] = (int16_t)(integral / (4 * 14318181));
     }
+}
+
+void world_ga20_render_voices(WorldGa20 *chip, int16_t (*output)[4], size_t count)
+{
+    render(chip,NULL,output,count);
+}
+void world_ga20_render(WorldGa20 *chip,int16_t *output,size_t count)
+{
+    render(chip,output,NULL,count);
 }

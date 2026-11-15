@@ -19,7 +19,7 @@ typedef struct {
     uint8_t registers[32];
     WorldGa20Voice voices[4];
     uint32_t tick_remaining;
-    int32_t tick_sample;
+    int32_t tick_sample, tick_voice[4];
 } WorldGa20;
 
 void world_ga20_reset(WorldGa20 *chip, const uint8_t *samples, size_t size);
@@ -31,6 +31,7 @@ int32_t world_ga20_clock(WorldGa20 *chip);
 /* One chip output, signed 16-bit PCM at 48 kHz. The mono board sums both
  * identical chip outputs. Fractional clock phase survives calls.
  * Writes take effect after the currently sampled chip clock. */
+void world_ga20_render_voices(WorldGa20 *chip, int16_t (*output)[4], size_t count);
 void world_ga20_render(WorldGa20 *chip, int16_t *output, size_t count);
 #ifdef __cplusplus
 }

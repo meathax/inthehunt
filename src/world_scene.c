@@ -276,10 +276,29 @@ static void parallel(void (*fn)(int, int), int rows)
 
 /* The tile layers as world_video_playfields samples them, one layer at a
  * time, over the picture plus a margin. */
+/* Optical depth and vivid-colour gain for the six gameplay palettes.
+   They scale ambient light; explosions, lamps and the HUD retain their range. */
+typedef struct { float r,g,b,saturation; } WaterGrade;
+static const WaterGrade water_grades[]={
+    {.47f,.62f,.80f,1.035f}, /* blue ice and snow */
+    {.45f,.67f,.65f,1.025f}, /* green harbour */
+    {.56f,.66f,.74f,1.018f}, /* sunlit industrial waterfront */
+    {.59f,.70f,.80f,1.025f}, /* dark caverns, preserve basalt detail */
+    {.62f,.65f,.72f,1.012f}, /* warm masonry, cool ice */
+    {.48f,.63f,.69f,1.025f}  /* flooded steelworks */
+};
+static int lighting_stage(void)
+{
+    unsigned stage=cur.scene_id>>16;
+    return (cur.scene_id&65535)==0xb2e && stage<6?(int)stage:-1;
+}
+
+static uint8_t terrain_cast[LN], far_ice[LN];
 static void render_layer(int layer, int from, int to)
 {
     unsigned master = cur.layers[layer].master;
     if (!layer_on[layer]) return;
+    int stage=lighting_stage();
     unsigned wide = master & 4, columns = wide ? 128 : 64;
     for (int by = from; by < to; ++by) {
         unsigned sy = (unsigned)(by - MARGIN + 136 + cur.layers[layer].scroll_y) & 511;
@@ -298,9 +317,33 @@ static void render_layer(int layer, int from, int to)
             pens >>= 8*(sx&7);
             int end = bx + 8 - (int)(sx&7);
             if (end>LW) end=LW;
+            unsigned code=word(tile);
+            int terrain=layer==1;
+            int depth=by-MARGIN-cur.waterline;
+            /* The wave strip shares the playfield with structures in stages
+               one and two; the other stages have a separate water layer. */
+            if((stage==0 && (bank&63)==24) || (stage==1 && (bank&63)==16))
+                terrain=0;
+            /* The cavern has composite rock/foam tiles along the interface.
+               Only the repeating foam artwork is optically transparent. */
+            if(stage==3 && (bank&63)==15 && ((code>=0x6488 && code<=0x648d) ||
+                code==0x6323 || code==0x6333))terrain=0;
+            uint64_t sea=0;
+            int ice=layer==2 && stage==0 && (bank&63)==14 && code>=0x2256 &&
+                code<=0x2330 && depth>=0 && depth<48 && cur.waterline!=-1;
+            if(ice){
+                /* Far-plane ice embeds the sea gradient in opaque tiles.
+                   Subtract the matching row of open water, pen for pen. */
+                sea=decode_plane_row(gfx1+(0x1fb3+depth/8)*8+(sy&7),0x80000)>>(8*(sx&7));
+            }
             for (; bx<end; ++bx, pens>>=8) {
                 unsigned pen = pens&15;
                 idx[bx] = pen || layer==2 ? (uint16_t)((bank*16+pen)&1023) : 0xffff;
+                if(layer==1)terrain_cast[by*LW+bx]=terrain && pen;
+                if(layer==2 && stage==0){
+                    far_ice[by*LW+bx]=ice && pen!=(sea&15);
+                    sea>>=8;
+                }
                 pri[bx] = pen && ((attr&0x100) || ((attr&0x80) && pen>=8));
             }
         }
@@ -683,21 +726,23 @@ static inline uint32_t receiver_colour(int i, int y)
  * produces a penumbra that widens with distance from the casting edge. */
 static void build_sunlight(void)
 {
-    float rows[2][LW];
-    for (int x=0; x<LW; ++x) rows[0][x]=rows[1][x]=1.0f;
+    float rows[2][LW],air[2][LW];
+    for (int x=0; x<LW; ++x) rows[0][x]=rows[1][x]=air[0][x]=air[1][x]=1.0f;
     /* Continue the shadow through the tile margin above the viewport. */
     for (int y=-MARGIN; y<H; ++y) {
         const float *above=rows[(y+MARGIN)&1];
         float *below=rows[(y+MARGIN+1)&1];
-        const uint8_t *terrain=receiver_opacity+(y+MARGIN)*LW;
-        /* Surface foam is drawn on the terrain layer. Ease in its opacity
-           below the wave tiles instead of introducing a horizontal cutoff. */
-        float opacity=g.waterline<0 ? 1.0f : clampi(y-g.waterline-20,0,20)/20.0f;
-        float extinction=0.34f*opacity*opacity/255.0f;
+
+        const float *sky=air[(y+MARGIN)&1];
+        float *skyBelow=air[(y+MARGIN+1)&1];
         for (int x=1; x<LW-2; ++x) {
+            float diffuse=g.waterline>0?(sky[x-1]+sky[x]+sky[x+1]+sky[x+2])*.25f:1.f;
             float incident=((above[x]+above[x+1])*3.0f+above[x-1]+above[x+2])*0.125f;
-            if (y>=0 && x>=MARGIN && x<MARGIN+W) sunlight[y*W+x-MARGIN]=incident;
-            below[x]=incident*(1.0f-extinction*terrain[x]);
+            if (y>=0 && x>=MARGIN && x<MARGIN+W) sunlight[y*W+x-MARGIN]=incident*(.84f+.16f*diffuse);
+            float keep=1.f-.34f*receiver_opacity[(y+MARGIN)*LW+x]/255.f;
+            int outside=g.waterline>0 && y<g.waterline;
+            below[x]=outside?incident:incident*keep;
+            skyBelow[x]=outside?diffuse*keep:diffuse;
         }
     }
 }
@@ -705,14 +750,12 @@ static void build_sunlight(void)
 /* Build the distance field from the same visible material as the sun pass. */
 static void build_solid(int trace_sun)
 {
-    int wl = g.waterline;
     if (gpu_light) {
         for (int py=0; py<PH; ++py) {
             int sy=2*py+1;
-            const uint8_t *opacity=receiver_opacity+(sy+MARGIN)*LW+MARGIN;
+
             uint8_t *row=solid+py*PW;
-            if (wl>=0 && sy<=wl+20) memset(row,0,PW);
-            else for (int px=0; px<PW; ++px) row[px]=opacity[2*px+1]>=128;
+            for (int px=0; px<PW; ++px) row[px]=layer_on[1] && terrain_cast[(sy+MARGIN)*LW+MARGIN+2*px+1];
         }
         return;
     }
@@ -723,9 +766,9 @@ static void build_solid(int trace_sun)
             solid[p] = 0;
             albedo[0][p] = albedo[1][p] = albedo[2][p] = 0;
             /* The surface's own wave tiles are not rock. */
-            if (sy >= H || (wl >= 0 && sy <= wl + 20)) continue;
+            if (sy >= H) continue;
             int i = (sy + MARGIN) * LW + sx + MARGIN;
-            if (receiver_opacity[i] < 128) continue;
+            if (receiver_opacity[i]<128) continue;
             uint32_t c = receiver_colour(i, sy);
             solid[p] = 1;
             albedo[0][p] = ((c >> 16) & 255) / 255.0f;
@@ -1022,6 +1065,7 @@ static void distributed_transport_rows(int from,int to)
    and tile planes. Use the compositor's exact subpixel-to-texel mapping. */
 static void pack_gpu_light_rows(int from,int to)
 {
+    int stage=lighting_stage();
     for(int y=from;y<to;++y)for(int x=0;x<PW;++x){
         int at=y*PW+x, sx=(2*x+1)*g.k, sy=(2*y+1)*g.k;
         uint16_t sprite=sprite_px[(size_t)sy*g.ow+sx];
@@ -1029,7 +1073,7 @@ static void pack_gpu_light_rows(int from,int to)
         if(solid[at]) c=receiver_colour((2*y+1+MARGIN)*LW+2*x+1+MARGIN,2*y+1)|0xff000000u;
         if(sprite!=NONE && !(sprite&0x4000) && (!(sprite&0x8000)||!solid[at]))
             c=cur.colors[sprite&1023]|0xff000000u;
-        unsigned coverage=0;
+        unsigned coverage=0,ice=0;
         for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx){
             int nx=2*x+dx, ny=2*y+dy;
             int px=nx*g.k+g.shake_x, py=ny*g.k+g.shake_y;
@@ -1039,9 +1083,13 @@ static void pack_gpu_light_rows(int from,int to)
                         divide[clampi(px,0,g.ow-1)+g.off_x[1]];
             unsigned bit=1u<<(dy*2+dx);
             if(sp!=NONE && !(sp&0x5000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
-            if(layer_on[1] && (g.waterline<0 || ny>g.waterline+12) &&
-               layer_idx[1][terrain]!=NONE)coverage|=bit;
+            if(layer_on[1] && terrain_cast[terrain])coverage|=bit;
+            if(stage==0 && layer_on[2]){
+                int far_pixel=divide[clampi(py,0,g.oh-1)+g.off_y[2]]*LW+divide[clampi(px,0,g.ow-1)+g.off_x[2]];
+                if(far_ice[far_pixel])ice|=bit;
+            }
         }
+        if(stage==0)gpu_light->ice_coverage[at]=ice;
         gpu_light->cells[at]=(c&0xffffff)|(coverage<<24);
     }
 }
@@ -1216,6 +1264,7 @@ static void wf_pixel(uint32_t *out,int x,int y,int r,int gr,int b,int a,int unde
 
 static void colour_rows(int from, int to)
 {
+    int stage=lighting_stage();
     for (int layer = 0; layer < 3; ++layer) {
         if (!layer_on[layer]) continue;
         for (int i = from * LW; i < to * LW; ++i) {
@@ -1229,7 +1278,11 @@ static void colour_rows(int from, int to)
             uint32_t c = receiver_colour(i, by - MARGIN);
             int lum = (((c >> 16) & 255) * 3 + ((c >> 8) & 255) * 5 + (c & 255) * 2) / 10;
             receiver_lum[i] = (uint8_t)lum;
-            receiver_opacity[i] = (uint8_t)(clampi(lum*12,0,255)*(255-water_amount(c))/255);
+            if(!gpu_light){
+                if(stage<0)receiver_opacity[i]=(uint8_t)(clampi(lum*12,0,255)*(255-water_amount(c))/255);
+                else receiver_opacity[i]=layer_on[1] && terrain_cast[i]?255:
+                    stage==0 && layer_on[2] && far_ice[i]?80:0;
+            }
         }
     }
 }
@@ -1240,6 +1293,8 @@ static uint8_t palette_water[1024];
 static void layer_rows_fx(int from, int to)
 {
     const WorldSceneFx *fx = g.fx;
+    int stage=lighting_stage();
+    const WaterGrade *grade=stage>=0?&water_grades[stage]:NULL;
     const int lit = (fx->lights || fx->glow) && transport_valid, shadowed = fx->sunshadow && transport_valid;
     for (int layer = 0; layer < 3; ++layer) {
         if (!layer_on[layer]) continue;
@@ -1250,6 +1305,10 @@ static void layer_rows_fx(int from, int to)
             int depth = y - g.waterline;
             int under = g.waterline < 0 ? 256 : depth < 0 ? 0 : depth >= 8 ? 256 : (depth + 1) * 32;
             if (depth < 0) depth = 0;
+            float profile=(!gpu_light && grade && fx->depth)?clampi(depth,0,195)/195.f:0;
+            int depth_r=profile?(int)(256*(1+profile*(grade->r-.53f))):256;
+            int depth_g=profile?(int)(256*(1+profile*(grade->g-.65f))):256;
+            int depth_b=profile?(int)(256*(1+profile*(grade->b-.79f))):256;
             int ray_fade = depth < 190 ? 190 - depth : 0;
             int sy = clampi(y, 0, H - 1), in_play = y >= 0 && y < H;
             for (int bx = 0; bx < LW; ++bx) {
@@ -1268,6 +1327,7 @@ static void layer_rows_fx(int from, int to)
                 if (fx->depth && under) {
                     /* Water absorbs red first, then green: the light that
                        reaches this depth from the surface. Rock and wrecks keep most of their colour. */
+                    r=r*depth_r>>8; gr=gr*depth_g>>8; b=b*depth_b>>8;
                     int d = depth > 319 ? 319 : depth;
                     int amount = w + ((255 - w) >> 2);
                     r = r * (256 - (amount * (256 - absorb[0][d]) >> 8)) >> 8;
@@ -1922,6 +1982,11 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         gpu_light->scale=k;
         gpu_light->flags=(fx->depth?65536u:0u)|(fx->headlights?32768u:0u)|(fx->rim?16384u:0u)|(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
             (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
+        int stage=lighting_stage();
+        WaterGrade grade=stage>=0?water_grades[stage]:(WaterGrade){.53f,.65f,.79f,1.0625f};
+        memcpy(gpu_light->water_grade,&grade,sizeof grade);
+        if(stage>=0)gpu_light->flags|=1u<<17;
+        if(stage==0)gpu_light->flags|=1u<<18;
         gpu_light->waterline=g.waterline;
         if (world_scene_light_ready) world_scene_light_ready(gpu_light);
     }

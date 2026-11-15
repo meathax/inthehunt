@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 int world_audio_output_open(void);
-/* Queue mono 48 kHz samples. Never blocks; the oldest samples are dropped
+/* Queue interleaved 48 kHz stereo, count in frames. Never blocks; the oldest samples are dropped
  * if the FIFO overflows. Returns zero only without a device. */
 int world_audio_output_submit(const int16_t *samples, size_t count);
 /* Move queued samples to the device; call regularly. */

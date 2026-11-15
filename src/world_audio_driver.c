@@ -73,7 +73,7 @@ static unsigned allocate_task(uint8_t *s, unsigned parent)
 }
 
 /* 0DE2 dispatches one eligible command from the scheduler's command task. */
-void world_audio_dispatch(uint8_t *s, const uint8_t *rom, uint16_t task)
+static void dispatch(uint8_t *s,const uint8_t *rom,uint16_t task,const WorldAudioBus *bus)
 {
     unsigned command;
     if (!next_command(s, &command)) return;
@@ -88,10 +88,16 @@ void world_audio_dispatch(uint8_t *s, const uint8_t *rom, uint16_t task)
     if (!sequence) return;
     unsigned child = allocate_task(s, task);
     if (child) {
+        if(bus && bus->effect_created)bus->effect_created(child,(s[0x8d1]-1u)&15);
         s[child] = 4;
         s[child + 8] = (uint8_t)index;
         put(s + child + 0xa, sequence);
     }
+}
+
+void world_audio_dispatch(uint8_t *s,const uint8_t *rom,uint16_t task)
+{
+    dispatch(s,rom,task,NULL);
 }
 
 static void ramp(uint8_t *t, unsigned interval, unsigned value)
@@ -473,10 +479,11 @@ static unsigned run_task_list(uint8_t *s, const uint8_t *rom, unsigned root, con
         case 1: break;
         case 2:
             if (t[9]) ++t[0];
-            else world_audio_dispatch(s, rom, (uint16_t)current);
+            else dispatch(s,rom,(uint16_t)current,bus);
             break;
         case 4: case 5: case 6: case 7: {
             uint8_t busy = bus && bus->ga20_busy ? bus->ga20_busy(bus->context) : 0;
+            if(bus && bus->effect_selected)bus->effect_selected(current);
             ok = effect_io(s, rom, (uint16_t)current, busy, bus ? bus->ym_write : NULL,
                     bus ? bus->ga20_write : NULL, bus ? bus->context : NULL);
             break;

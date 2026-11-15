@@ -7,8 +7,9 @@ extern "C" {
 #endif
 void world_ym_reset(void);
 void world_ym_write(uint8_t reg, uint8_t value);
-/* 48 kHz mono with the World board's FM routing gain. */
-void world_ym_render(int32_t *output, size_t count);
+void world_ym_render(int32_t *output,size_t count);
+/* Interleaved 48 kHz stereo with the World board's FM routing gain. */
+void world_ym_render_stereo(int32_t *output, size_t count);
 #ifdef __cplusplus
 }
 #endif

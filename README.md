@@ -1,12 +1,20 @@
 # In the Hunt
 
-**0.9.7 Beta** Â· An unofficial native Windows port of Iremâ€™s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.8 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
-[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) Â· [Release notes](https://github.com/meathax/inthehunt/releases/latest) Â· [Report a bug](https://github.com/meathax/inthehunt/issues)
+[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![A submarine shines its bow lamp across an undersea minefield as sunlight casts long pixel shadows beneath the ice.](artwork/screenshots/side-view-lighting.png)
 
-## New in 0.9.7
+## New in 0.9.8
+
+Aircraft and other objects above the water cast faint, soft-edged shadows. Submerged hulls cast sharper contact shadows that lose contrast with depth. Each of the six stages has its own water colour and depth balance. Icebergs now cast from their visible silhouettes, fixing the straight shadow band below the surface.
+
+**Options > Sound > Underwater Audio** enables the new 48 kHz stereo mix by default. Weapon and impact sounds follow their on-screen sources. Submerged effects gain bass and short reflections while the FM soundtrack retains its stereo channels. Switch this option off for the arcade mono mix.
+
+[Compare the surface shadows](https://github.com/meathax/inthehunt/releases/download/v0.9.8/surface-shadow-comparison.png)
+
+## Boss and projectile lighting
 
 All six stage bosses and the fortress encounter now carry lights on individual parts. The battleship has a red bow light and amber turret lamps. The ice boss has a blue core and violet arm joints. Destroying a powered part takes its light out with it.
 
@@ -16,8 +24,8 @@ Torpedoes carry small red bow lights. Rocket exhaust casts amber light behind th
 
 ## Lighting and performance
 
-- The D3D12 lighting engine casts sharp sun shadows to the edge of the screen. Gunfire and explosions light the facing edges of hulls and wreckage.
-- Switch on **Sub Headlights** to project a beam from each playerâ€™s bow. Terrain and sprites cast shadows through the beam.
+- The D3D12 lighting engine projects sun shadows through the water to the edge of the screen. Gunfire and explosions light the facing edges of hulls and wreckage.
+- Switch on **Sub Headlights** to project a beam from each player’s bow. Terrain and sprites cast shadows through the beam.
 - Faster shadow-mask preparation and water shading reduced CPU rendering time in three boss fights with every enhancement enabled.
 
 ## Play
@@ -43,7 +51,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 ## Graphics and frame pacing
 
-Open **Options â†’ Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
+Open **Options → Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
 Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
@@ -85,7 +93,7 @@ Use slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`. The scrip
 | librashader.dll | `8e5912fc7432ff39e935c61674823f37b96a824bb6c727f1319cc31fc561a74a` |
 | dxcompiler.dll | `0689e2fee0a1c9df8662a59680469f24e2a3ad7ce6bbbcc9284f7a83172bfc59` |
 
-Game and host source live in `src/`. The build commands above use a Git checkout and retrieve the pinned build helpers from the previous release. The icon and ROM selector background are embedded build inputs. Generated files, imported ROMs and local settings are ignored. The importer scripts and ROM metadata are embedded into the executable; RecompLauncher uses its `--import-rom` command.
+Game and host source live in `src/`. The build commands above use a Git checkout and retrieve the pinned build helpers from v0.9.6. The icon and ROM selector background are embedded build inputs. Generated files, imported ROMs and local settings are ignored. The importer scripts and ROM metadata are embedded into the executable; RecompLauncher uses its `--import-rom` command.
 
 </details>
 

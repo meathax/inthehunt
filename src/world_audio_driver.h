@@ -23,6 +23,8 @@ typedef struct {
     void (*reply)(void *context, uint8_t value);
     void (*unrecovered)(void *context, uint16_t task, uint8_t state, uint16_t cursor);
     WorldAudioYmWrite ym_write;
+    void (*effect_created)(unsigned task,unsigned command_slot);
+    void (*effect_selected)(unsigned task);
 } WorldAudioBus;
 /* Run one YM timer A interrupt. Unrecovered tracks are reported and retired
  * individually, so the other voices continue. Return the number skipped. */

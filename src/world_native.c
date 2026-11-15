@@ -351,8 +351,47 @@ static uint8_t sound_busy(void *context)
     return active;
 }
 
+/* Match positions to the actual sound queue entry, sequencer task and PCM
+   key-on. A repeated command from the other player gets its own position. */
+typedef struct { float pan, submerged; } SoundOrigin;
+static SoundOrigin board_origins[8],command_origins[16],effect_origins[WORLD_AUDIO_STATE_SIZE];
+static SoundOrigin selected_origin,voice_origins[4];
+static struct {
+    float bass[4], tone[4], echo[2048][2];
+    unsigned cursor;
+} acoustics;
+static double stereo_phase;
+static int16_t stereo_last[2];
+
+static void sound_created(unsigned task,unsigned slot){effect_origins[task]=command_origins[slot];}
+static void sound_selected(unsigned task){selected_origin=effect_origins[task];}
+
+static void locate_sounds(unsigned actor,unsigned tail)
+{
+    unsigned end=word(ram+0xa6d4)&14;
+    if(tail==end)return;
+    SoundOrigin origin={0};
+    if(word(ram+0x80)==0xb2e){
+        int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
+        if(x>=-48 && x<368 && y>=-48 && y<288){
+            origin.pan=fmaxf(-.72f,fminf(.72f,(x-159.5f)*(.72f/160)));
+            int wl=waterline_row();
+            origin.submerged=wl==-1?.82f:fmaxf(0,fminf(1,(y-wl+4)/32.f));
+        }
+    }
+    while(tail!=end){tail=(tail+2)&14;board_origins[tail/2]=origin;}
+}
+
+static float limit_audio(float x)
+{
+    float peak=fabsf(x),knee=25500.f;
+    if(peak<=knee)return x;
+    float excess=peak-knee;
+    return copysignf(knee+7000.f*excess/(excess+7000.f),x);
+}
 static void sound_write(void *context, uint8_t reg, uint8_t value)
 {
+    if((reg&7)==6 && (value&2))voice_origins[(reg>>3)&3]=selected_origin;
     world_ga20_write(context, reg, value);
 }
 
@@ -383,12 +422,28 @@ static void sound_fm_write(void *context, uint8_t reg, uint8_t value)
     world_ym_write(reg, value);
 }
 
-static WorldAudioBus sound_bus = { &pcm, sound_busy, sound_write, sound_reply, sound_unrecovered, sound_fm_write };
+static WorldAudioBus sound_bus = { &pcm, sound_busy, sound_write, sound_reply, sound_unrecovered, sound_fm_write, sound_created, sound_selected };
 
 static void sound_frame(void)
 {
-    int16_t output[1024];
-    int32_t fm[1024];
+    int16_t output[1024][2],voices[1024][4],mono[1024];
+    int32_t fm[2048];
+    float master=settings.volume*.01f,pcm_gain=settings.pcm_volume*.02f,fm_gain=settings.fm_volume*.01f;
+    static unsigned previous_acoustic_scene=~0u;
+    unsigned acoustic_scene=(word(ram+0x80)|(word(ram+0x84)<<16))^(settings.spatial_audio<<30);
+    if(acoustic_scene!=previous_acoustic_scene){
+        memset(&acoustics,0,sizeof acoustics);
+        previous_acoustic_scene=acoustic_scene;
+    }
+    float listener=0;
+    if(word(ram+0x80)==0xb2e){
+        int wl=waterline_row();
+        unsigned player=word(ram+0x90);
+        if(player>=0x400 && player<=0xff00){
+            int y=375-(int16_t)word(ram+player+0x24);
+            listener=wl==-1?1:fmaxf(0,fminf(1,(y-wl+6)/45.f));
+        }
+    }
     /* One board frame has 424*262 pixel clocks at 6,666,666 Hz. */
     sound_frame_phase += (uint64_t)48000 * 424 * 262;
     unsigned frames = (unsigned)(sound_frame_phase / 6666666);
@@ -398,15 +453,40 @@ static void sound_frame(void)
     while (done < frames) {
         unsigned count = (unsigned)((timer_period - sound_timer_phase + 14318180) / 14318181);
         if (count > frames - done) count = frames - done;
-        world_ga20_render(&pcm, output + done, count);
-        world_ym_render(fm, count);
-        for (unsigned i = 0; i < count; ++i) {
-            /* Both GA20 outputs route at unity to the mono speaker. */
-            int32_t mixed = (2 * (int32_t)output[done + i] * (int32_t)settings.pcm_volume / 100 +
-                             fm[i] * (int32_t)settings.fm_volume / 100) * (int32_t)settings.volume / 100;
-            if (mixed > 32767) mixed = 32767;
-            if (mixed < -32768) mixed = -32768;
-            output[done + i] = (int16_t)mixed;
+        if(settings.spatial_audio)world_ga20_render_voices(&pcm,voices,count);
+        else world_ga20_render(&pcm,mono,count);
+        if(settings.spatial_audio)world_ym_render_stereo(fm,count);
+        else world_ym_render(fm,count);
+        for(unsigned i=0;i<count;++i){
+            if(!settings.spatial_audio){
+                float sum=pcm_gain*mono[i]+fm_gain*fm[i];
+                output[done+i][0]=output[done+i][1]=(int16_t)fmaxf(-32768,fminf(32767,master*sum));
+                continue;
+            }
+            float direct[2]={0},send[2]={0};
+            for(int v=0;v<4;++v){
+                float x=voices[i][v],wet=voice_origins[v].submerged;
+                float pan=voice_origins[v].pan;
+                /* Parallel 110 Hz shelf, gentle HF absorption, dry transient.
+                   Bass stays near centre for speakers and mono downmix. */
+                acoustics.bass[v]+=.0143f*(x-acoustics.bass[v]);
+                acoustics.tone[v]+=.38f*(x-acoustics.tone[v]);
+                float body=acoustics.bass[v]*wet*(.32f+.38f*listener);
+                float tone=x+wet*(.18f+.20f*listener)*(acoustics.tone[v]-x);
+                direct[0]+=tone*(1-pan)+body;
+                direct[1]+=tone*(1+pan)+body;
+                float reflection=acoustics.tone[v]*wet*listener;
+                send[0]+=reflection*(1-pan);
+                send[1]+=reflection*(1+pan);
+            }
+            unsigned pos=acoustics.cursor;
+            for(int ch=0;ch<2;++ch){
+                float reflection=.075f*acoustics.echo[(pos-733)&2047][ch]+.043f*acoustics.echo[(pos-1301)&2047][1-ch];
+                float mixed=fm_gain*fm[2*i+ch]+pcm_gain*(direct[ch]+reflection);
+                output[done+i][ch]=(int16_t)limit_audio(master*mixed);
+                acoustics.echo[pos][ch]=send[ch];
+            }
+            acoustics.cursor=(pos+1)&2047;
         }
         done += count;
         sound_timer_phase += (uint64_t)count * 14318181;
@@ -419,27 +499,29 @@ static void sound_frame(void)
     /* Dynamic rate control: the video clock paces the game, so stretch or
        squeeze this frame's samples by at most 0.5 percent to hold the output
        queue near 50 ms. Linear interpolation; the phase carries over. */
-    static double phase;
-    static int16_t last;
+
     const double target = 2400.0;
     double level = (double)world_audio_output_level();
     double error = (level - target) / target;
     if (error > 1.0) error = 1.0;
     if (error < -1.0) error = -1.0;
     double step = 1.0 + 0.005 * error;      /* input samples per output sample */
-    int16_t stretched[1100];
+    int16_t stretched[1100][2];
     unsigned produced = 0;
     while (produced < sizeof stretched / sizeof stretched[0]) {
-        unsigned index = (unsigned)phase;
+        unsigned index = (unsigned)stereo_phase;
         if (index >= frames) break;
-        double t = phase - index;
-        int16_t a0 = index ? output[index - 1] : last, a1 = output[index];
-        stretched[produced++] = (int16_t)(a0 + (a1 - a0) * t);
-        phase += step;
+        double t = stereo_phase - index;
+        for(int ch=0;ch<2;++ch){
+            int a=index?output[index-1][ch]:stereo_last[ch],b=output[index][ch];
+            stretched[produced][ch]=(int16_t)(a+(b-a)*t);
+        }
+        ++produced;
+        stereo_phase+=step;
     }
-    phase -= frames;
-    if (frames) last = output[frames - 1];
-    if (!world_audio_output_submit(stretched, produced)) {
+    stereo_phase-=frames;
+    if(frames)memcpy(stereo_last,output[frames-1],sizeof stereo_last);
+    if (!world_audio_output_submit(&stretched[0][0], produced)) {
         fprintf(stderr, "Windows audio output stopped.\n");
         world_audio_output_close();
         sound_device = 0;
@@ -648,6 +730,7 @@ static int tick(uint16_t pads, uint16_t system)
                 return 0;
             }
             uint16_t rendered_actor=pass.actor,sprite=word(ram+0x9e04);
+            unsigned sound_tail=word(ram+0xa6d4)&14;
             int old_x=weapon_position(rendered_actor+0x20),old_y=weapon_position(rendered_actor+0x23);
             if (!world_dispatch_native_video(&pass, ram, rom, tiles)) {
                 snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.%s%s",
@@ -655,6 +738,7 @@ static int tick(uint16_t pads, uint16_t system)
                          *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
             }
+            locate_sounds(rendered_actor,sound_tail);
             observe_weapon(addr,rendered_actor,old_x,old_y);
             observe_boss(rendered_actor,sprite);
         }
@@ -705,6 +789,7 @@ static int tick(uint16_t pads, uint16_t system)
     slowdown_overruns += vblanks > 1;
     if (vblanks > 1) ++slowdown_by_master[master];
     slowdown_estimate = 0;
+    unsigned sound_head=word(ram+0xa6d2)&14;
     int boundary_ok = vblanks > 1
         ? world_frame_boundary_irq_vblanks(ram, tiles, oam, palette, rom, pads, 0xffff, system,
                                            world_dispatch_port4, vblanks, &sound, &master_sound)
@@ -718,8 +803,16 @@ static int tick(uint16_t pads, uint16_t system)
     /* Preserve the physical interval of the recovered mid-transfer VBlank
        before these scene controllers send their sound-reset command. */
     for (unsigned i = 1; i < elapsed_board_frames; ++i) sound_frame();
-    if (sound >= 0) world_audio_receive(sound_state, (uint8_t)sound);
-    if (master_sound >= 0) world_audio_receive(sound_state, (uint8_t)master_sound);
+    if(sound>=0){
+        unsigned head=word(ram+0xa6d2)&14;
+        command_origins[sound_state[0x8d0]&15]=head!=sound_head?board_origins[head/2]:(SoundOrigin){0};
+        if(head!=sound_head)board_origins[head/2]=(SoundOrigin){0};
+        world_audio_receive(sound_state,(uint8_t)sound);
+    }
+    if(master_sound>=0){
+        command_origins[sound_state[0x8d0]&15]=(SoundOrigin){0};
+        world_audio_receive(sound_state,(uint8_t)master_sound);
+    }
     sound_frame();
     for (unsigned i = 0; i < elapsed_board_frames; ++i) world_clock_wait_vblank(&board_clock);
     if (elapsed_board_frames > 1) board_clock.busy_vblanks += elapsed_board_frames - 1;
@@ -1299,6 +1392,13 @@ static void machine_reset(void)
     ticks = 0;
     world_clock_reset(&board_clock, settings.timing_mode);
     world_ga20_reset(&pcm, samples, sizeof samples);
+    memset(&acoustics,0,sizeof acoustics);
+    memset(board_origins,0,sizeof board_origins);
+    memset(command_origins,0,sizeof command_origins);
+    memset(effect_origins,0,sizeof effect_origins);
+    memset(voice_origins,0,sizeof voice_origins);
+    selected_origin=(SoundOrigin){0};
+    stereo_phase=0;memset(stereo_last,0,sizeof stereo_last);
     sound_frame_phase = sound_timer_phase = 0;
     sound_power_on();
     memset(slowdown_shadow, 0, sizeof slowdown_shadow);
