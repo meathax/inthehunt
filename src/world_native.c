@@ -235,11 +235,18 @@ static void present_game(const uint32_t *source)
     /* The title menu sits over the running attract sequence, at 1x. */
     int title = menu.open && menu.title && !menu.title_hidden && !menu.peek;
     static WorldLightScene lights;
-    int trace=!title && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow)
+    int trace=(!title || world_menu_main_title(&menu)) && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow ||
+        settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
+        settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
+        settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
+        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid)
         && world_gpu_transport_available();
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
-    if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
+    if (title && trace && lights.scale == k) {
+        lights.flags |= 256u;
+        world_menu_gpu_title(&menu, shown, gfx1, GetTickCount());
+    } else if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
     overlay_notices(shown, k);
     if (settings.show_fps && shown_fps) {
         char label[32];

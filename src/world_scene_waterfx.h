@@ -244,6 +244,7 @@ static void wf_pixel(uint32_t *out, int x, int y, int r, int gr, int b, int a, i
     if (x < 0 || x >= W || y < 0 || y >= H || a <= 0) return;
     if (underwater && ((g.waterline >= 0 && y < g.waterline) || water_map[y * W + x] < 60)) return;
     ++wf_samples;
+    if(gpu_stamp(x,y,0,0,stamp_colour(r,gr,b,a),underwater?1:0,0,x,y,x,y))return;
     int k = g.k;
     for (int yy = y * k; yy < (y + 1) * k; ++yy)
         for (int xx = x * k; xx < (x + 1) * k; ++xx) {
@@ -266,6 +267,7 @@ static void wf_pixel(uint32_t *out, int x, int y, int r, int gr, int b, int a, i
 static void bubble_rim(uint32_t *out,int x,int y,int alpha)
 {
     if ((unsigned)x>=W || (unsigned)y>=H) return;
+    if(gpu_stamp(x,y,0,0,stamp_colour(0,0,0,alpha),2,0,x,y,x,y))return;
     const PixelLight *l=&pixel_light[y*W+x];
     int r=clamp255((int)(80+95*l->sun+120*l->r));
     int gr=clamp255((int)(126+88*l->sun+62*l->g));
@@ -376,6 +378,16 @@ static void waterfx_draw(uint32_t *out, const WorldSceneFx *fx, float dt)
                 int radius = kind == WF_SILT ? (int)(p->size + 11 * t) : (int)(p->size + t);
                 int r2 = radius * radius + 1;
                 int alpha = kind == WF_SILT ? (int)(fade * (p->age < 0.2f ? p->age * 5 : 1) * 58) : (int)(fade * 110);
+                /* Shape, rim light and alpha are evaluated on the GPU. Keep the
+                   original sample allowance, including a partially drawn disk. */
+                unsigned disk_kind=kind==WF_SILT?4:5;
+                unsigned options=(fx->bubble_light?1u:0u)|(fx->wakes?2u:0u);
+                if(gpu_stamp((int)p->x,(int)p->y,radius,(int)p->phase,
+                     stamp_colour(0,0,options,alpha),disk_kind,(unsigned)budget,
+                     (int)p->x-radius,(int)p->y-radius,(int)p->x+radius,(int)p->y+radius)){
+                    budget-=(radius*2+1)*(radius*2+1);
+                    continue;
+                }
                 for (int dy = -radius; dy <= radius && budget > 0; ++dy)
                     for (int dx = -radius; dx <= radius && budget > 0; ++dx, --budget) {
                         int d2 = dx * dx + dy * dy;

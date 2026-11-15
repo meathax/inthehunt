@@ -5,7 +5,32 @@
 static WorldLightScene scene={};
 static uint32_t frame[320*240], clear_view[320*240], wall_view[320*240];
 int main() {
-    scene.scale=1;scene.waterline=-1;scene.flags=1;scene.count=1;
+    scene.scale=1;scene.waterline=-1;
+    unsigned center=120*320+120, tile=(120/8)*40+120/8;
+    std::fill_n(frame,320*240,0xf7505050u);
+    scene.effects.heads[tile]=1;scene.effects.count=2;
+    scene.effects.nodes[1]={120,120,0,0,0x8050d050,1,0,2};
+    scene.effects.nodes[2]={120,120,1,0,0xff100020,3,0,0};
+    char check_error[512]={};
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error)){puts(check_error);return 1;}
+    if(clear_view[center]!=0xff609070u || clear_view[center+1]!=0xff505050u)return 1;
+    frame[center]=0xff36a2c5;
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error) ||
+       clear_view[center]!=frame[center])return 1;
+    scene.effects.heads[tile]=0;scene.effects.count=0;
+    scene.flags=32; scene.effects.volume_count=1;
+    scene.effects.volumes[0][0]=120; scene.effects.volumes[0][1]=120; scene.effects.volumes[0][2]=1;
+    std::fill_n(frame,320*240,0xee505050u);
+    frame[center+1]=0xfe505050u;
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error) ||
+       ((clear_view[center]>>16)&255)<=80 || clear_view[center+1]!=0xff505050u)return 1;
+    scene.flags=64; scene.effects.reflect_row=120; scene.effects.reflect_rows=1;
+    scene.effects.mirror[0][120]=(128u<<16)|1;
+    frame[center]=0xfe202020; frame[center-320]=0x3ee0e0e0;
+    if(!world_gpu_light_offscreen(&scene,frame,clear_view,check_error,sizeof check_error) ||
+       (clear_view[center]&0xffffff)!=0x808080)return 1;
+    puts("PASS: ordered particles, volumetric water mask, reflection and HUD protection.");
+    scene.flags=1;scene.count=1;
     float *light=scene.emitters[0]; light[0]=65;light[1]=60;light[2]=55;
     light[4]=3;light[5]=1;light[6]=.2f;
     std::fill_n(frame,320*240,0xfe505050u);

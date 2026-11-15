@@ -145,6 +145,17 @@ static void cinema_update(float dt)
     }
     /* A quarter-resolution scattering field. Uses cached sunlight occlusion,
      * plus bounded explosion volumes; no additional path tracing. */
+    if(gpu_light){
+        WorldEffectBatch *batch=&gpu_light->effects;
+        batch->volume_scroll=g.scroll_x[2];batch->volume_time=g.T;batch->volume_count=0;
+        if(fx->water_volume)for(int i=0;i<CINEMA_EVENTS;++i){
+            const CinemaEvent *p=cinema_events+i;
+            if(p->life<=0 || p->age>=.65f)continue;
+            float *v=batch->volumes[batch->volume_count++];
+            v[0]=p->x;v[1]=p->y;v[2]=(1-p->age/.65f)*p->power;
+        }
+        return;
+    }
     if(!fx->water_volume){memset(water_volume,0,sizeof water_volume);return;}
     if(!cinema_volume_dirty)return;
     int flashes[CINEMA_EVENTS],flash_count=0;
@@ -180,7 +191,7 @@ static uint32_t cinema_background(uint32_t c,int layer,int x,int y)
     if(layer<0 || layer>2 || (layer==0 && y>=HUD) || y>=H || (g.waterline>=0 && y<g.waterline))return c;
     int r=(c>>16)&255,gr=(c>>8)&255,b=c&255;
     if(g.fx->ocean_depth){int f=3 + water_amount(c)*(g.fx->haze?5:21)/255;r+=(5-r)*f/256;gr+=(28-gr)*f/256;b+=(52-b)*f/256;}
-    if(g.fx->water_volume){unsigned v=water_volume[y*W+x];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
+    if(g.fx->water_volume && !gpu_light){unsigned v=water_volume[y*W+x];r+=(v>>16)&255;gr+=(v>>8)&255;b+=v&255;}
     return light_rgb(r,gr,b);
 }
 
@@ -200,7 +211,12 @@ static void cinema_draw(uint32_t *out)
             int radius=(int)(6+p->age*5),alpha=(int)(fade*(p->age<.2f?p->age*5:1)*(p->seabed?48:25));
             if(fx->silt && p->seabed)alpha=alpha*2/3;
             int cx=(int)(p->x+S(i*71+(int)(p->age*70))*p->age*.012f),cy=(int)(p->y-p->age*3);
-            for(int dy=-radius/2;dy<=radius/2 && budget>0;++dy)
+            float hot=p->age<.5f?(1-p->age*2)*p->power:0;
+            if(budget>0 && gpu_stamp(cx,cy,radius,(int)(p->age*140)+i*33,
+                 stamp_colour(70+(int)(hot*120),96+(int)(hot*40),104,alpha),6,budget,
+                 cx-radius,cy-radius/2,cx+radius,cy+radius/2)){
+                budget-=(radius*2+1)*(2*(radius/2)+1);
+            }else for(int dy=-radius/2;dy<=radius/2 && budget>0;++dy)
                 for(int dx=-radius;dx<=radius && budget>0;++dx,--budget){
                     int d=dx*dx+dy*dy*4;if(d>=radius*radius)continue;
                     int curl=S(dx*27+dy*49+(int)(p->age*140)+i*33);

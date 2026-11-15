@@ -611,11 +611,15 @@ static void controls_page(uint32_t *c, const uint8_t *gfx1, const Ramp *head, co
 
 /* The title menu: the attract sequence (with the game's own logo) keeps
    playing, the choices sit on a panel over its coin prompt. */
-static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms)
+static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms, int gpu_background)
 {
     Ramp normal = steel(), picked = gold();
     for (int y = 120; y < H; ++y)                       /* darken toward the bottom */
-        shade(c, 0, y, W, 1, 0xff020a16, (unsigned)(y - 120));
+        for (int x = 0; x < W; ++x) {
+            uint32_t *pixel = c + y * W + x;
+            if (!gpu_background || (*pixel >> 24) == 255)
+                *pixel = mix(*pixel, 0xff020a16, (unsigned)(y - 120));
+        }
     fill(c, 96, 140, W - 192, 72, 0xff040e1e);
     panel(c, 96, 140, W - 192, 72);
     Item items[MAX_ITEMS];
@@ -634,11 +638,18 @@ static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, u
     }
 }
 
+int world_menu_main_title(const WorldMenu *m) { return m->title && m->page == PAGE_MAIN; }
+
+void world_menu_gpu_title(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms)
+{
+    title_screen(m, c, gfx1, now_ms, 1);
+}
+
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
                        const uint8_t *gfx1, uint32_t now_ms)
 {
     if (!m->open || m->title_hidden || m->peek || !c || !gfx1) return;
-    if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms); return; }
+    if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms, 0); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);
     int top = m->page == PAGE_QUIT ? 66 : 18, bottom = m->page == PAGE_QUIT ? 174 : 224;

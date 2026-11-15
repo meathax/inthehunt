@@ -276,7 +276,21 @@ bool create_device(Com<IDXGIFactory4> &factory, Com<ID3D12Device> &device, Com<I
                    char *error, size_t size)
 {
     if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(factory.put())))) { say(error, size, "DXGI is unavailable."); return false; }
-    if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.put())))) {
+    Com<IDXGIFactory6> preferred;
+    if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(preferred.put())))) {
+        for (UINT index=0; ; ++index) {
+            Com<IDXGIAdapter1> adapter;
+            if (FAILED(preferred->EnumAdapterByGpuPreference(index, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                            IID_PPV_ARGS(adapter.put())))) break;
+            DXGI_ADAPTER_DESC1 desc={};
+            if (FAILED(adapter->GetDesc1(&desc)) || (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) continue;
+            if (SUCCEEDED(D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.put())))) {
+                fprintf(stderr,"D3D12 effects adapter: %ls\n",desc.Description);
+                break;
+            }
+        }
+    }
+    if (!device && FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.put())))) {
         say(error, size, "Direct3D 12 is unavailable on this PC.");
         return false;
     }

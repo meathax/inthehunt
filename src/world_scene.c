@@ -46,10 +46,11 @@ void world_scene_weapons(const WeaponEmitter *emitters, unsigned count)
 
 static int new_frame;
 static int scene_cache_valid;
+static int have_history;
 static WorldLightScene *gpu_light;
 void world_scene_light_target(WorldLightScene *target)
 {
-    if (!!target != !!gpu_light) scene_cache_valid=0;
+    if (!!target != !!gpu_light) {scene_cache_valid=0;have_history=0;}
     gpu_light=target;
 }
 static int cached_scale;
@@ -67,7 +68,7 @@ static uint8_t receiver_lum[LN], receiver_opacity[LN], layer_wat[3][LN];
 
 static uint16_t sprite_px[MAXK * MAXK * N];      /* palette index | 0x8000 behind tiles */
 static uint32_t history[MAXK * MAXK * N];
-static int have_history;
+
 /* Only opaque HUD pixels are exempt; water continues behind their gaps. */
 static uint32_t hud_overlay[W * (H - HUD) * MAXK * MAXK];
 static uint32_t hot_sum[3][GW * GH];
@@ -694,7 +695,17 @@ static void build_sunlight(void)
 static void build_solid(int trace_sun)
 {
     int wl = g.waterline;
-    if (trace_sun && !gpu_light) build_sunlight();
+    if (gpu_light) {
+        for (int py=0; py<PH; ++py) {
+            int sy=2*py+1;
+            const uint8_t *opacity=receiver_opacity+(sy+MARGIN)*LW+MARGIN;
+            uint8_t *row=solid+py*PW;
+            if (wl>=0 && sy<=wl+20) memset(row,0,PW);
+            else for (int px=0; px<PW; ++px) row[px]=opacity[2*px+1]>=128;
+        }
+        return;
+    }
+    if (trace_sun) build_sunlight();
     for (int py = 0; py < PH; ++py)
         for (int px = 0; px < PW; ++px) {
             int p = py * PW + px, sx = px * 2 + 1, sy = py * 2 + 1;
@@ -710,7 +721,6 @@ static void build_solid(int trace_sun)
             albedo[1][p] = ((c >> 8) & 255) / 255.0f;
             albedo[2][p] = (c & 255) / 255.0f;
         }
-    if (gpu_light) return;
     /* Only the occupancy mask determines the distance transform. Animated
        colours and moving lights can change while that mask stays identical. */
     static uint8_t previous_solid[PN];
@@ -814,8 +824,8 @@ static void draw_weapon_flashes(uint32_t *out)
             for(int row=0;row<g.k;++row)for(int col=0;col<g.k;++col){
                 uint32_t *p=out+(size_t)(sy*g.k+row)*g.ow+sx*g.k+col;
                 unsigned c=*p;
-                *p=light_rgb(((c>>16)&255)+(int)(145*s.r*alpha),
-                    ((c>>8)&255)+(int)(145*s.g*alpha),(c&255)+(int)(145*s.b*alpha));
+                *p=(c&0xff000000u)|(0xffffff&light_rgb(((c>>16)&255)+(int)(145*s.r*alpha),
+                    ((c>>8)&255)+(int)(145*s.g*alpha),(c&255)+(int)(145*s.b*alpha)));
             }
         }
     }
@@ -991,7 +1001,7 @@ static void transport(const WorldSceneFx *fx)
     requested.lights=fx->lights || fx->glow || fx->bubble_light;
     requested.sunshadow=fx->sunshadow || fx->bubble_light;
     fx=&requested;
-    if (!fx->lights && !fx->sunshadow) {
+    if (!fx->lights && !fx->sunshadow && !(gpu_light && (fx->water_volume || fx->rays))) {
         if (fx->debris || fx->silt || fx->sparks || fx->impact_motes || fx->pressure || fx->sediment_light || fx->water_volume || fx->aftermath) build_solid(0);
         transport_valid = 0; return;
     }
@@ -1104,6 +1114,37 @@ static void cache_transport(void)
 
 /* ---- per refresh: layer colours and per-layer effects ------------------- */
 
+/* Each tile walks only the particles intersecting it, in arcade draw order. */
+static unsigned effect_tails[WORLD_EFFECT_TILES];
+static uint64_t effect_coverage[WORLD_EFFECT_TILES];
+static int gpu_stamp(int x,int y,int radius,int phase,unsigned rgba,unsigned kind,unsigned limit,
+                     int left,int top,int right,int bottom)
+{
+    if(!gpu_light)return 0;
+    if(right<0 || bottom<0 || left>=W || top>=H)return 1;
+    WorldEffectBatch *batch=&gpu_light->effects;
+    int x0=clampi(left,0,W-1)/8,x1=clampi(right,0,W-1)/8;
+    int y0=clampi(top,0,H-1)/8,y1=clampi(bottom,0,H-1)/8;
+    if(batch->count+(x1-x0+1)*(y1-y0+1)>=WORLD_EFFECT_NODES)return 0;
+    for(int row=y0;row<=y1;++row)for(int col=x0;col<=x1;++col){
+        unsigned tile=row*40+col, n=++batch->count;
+        batch->nodes[n]=(WorldEffectNode){x,y,radius,phase,rgba,kind,limit,0};
+        int xmin=clampi(left-col*8,0,7),xmax=clampi(right-col*8,0,7);
+        int ymin=clampi(top-row*8,0,7),ymax=clampi(bottom-row*8,0,7);
+        uint64_t cols=((2u<<xmax)-(1u<<xmin))*UINT64_C(0x0101010101010101);
+        uint64_t rows=(UINT64_MAX<<(8*ymin)) & (UINT64_MAX>>(8*(7-ymax)));
+        effect_coverage[tile]|=cols&rows;
+        if(batch->heads[tile])batch->nodes[effect_tails[tile]].next=n;
+        else batch->heads[tile]=n;
+        effect_tails[tile]=n;
+    }
+    return 1;
+}
+static unsigned stamp_colour(int r,int gr,int b,int a)
+{
+    return (unsigned)clamp255(a)<<24 | (unsigned)clamp255(r)<<16 |
+           (unsigned)clamp255(gr)<<8 | (unsigned)clamp255(b);
+}
 static int wf_rock(float x,float y);
 static void wf_pixel(uint32_t *out,int x,int y,int r,int gr,int b,int a,int underwater);
 #include "world_scene_cinema.h"
@@ -1210,7 +1251,7 @@ static void layer_rows_fx(int from, int to)
                         }
                     }
                 }
-                if (fx->rays && w && ray_fade) {
+                if (!gpu_light && fx->rays && w && ray_fade) {
                     int s = (wx * 2 + wy) * 8;
                     int n = F(s * 2 + g.Q) + F(s * 5 - g.Q * 2 + 2400) + F(s + g.Q / 2 + 5600);
                     if (n > 60) {
@@ -1373,7 +1414,7 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
             int cell = y1 * W + x1;
             int hud_pixel = y1 >= HUD && (id == 0 || (id == 3 && hud_sprite));
             if (y1 >= HUD) hud_overlay[(size_t)(Y - HUD*k)*ow + X] = hud_pixel ? c : 0;
-            int needs = !hud_pixel && (glint || fx->vivid);
+            int needs = !hud_pixel && (glint || (fx->vivid && !gpu_light));
             struct Memo *post=&memo[x1];uint32_t post_input=c;
             int post_tag=(cell+1)*2+(glint && id>0 && id<3 && wet>60);
             if(needs && post->post_cell==post_tag && post->input==c)c=post->result;
@@ -1384,12 +1425,16 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
                     int n = S(wx * 41 + g.T * 6) + S(wx * 17 - g.T * 4) + S(wx * 7 + y1 * 90 + g.T * 2);
                     if (n > 430) { int add = (n - 430) / 2; r += add; gr += add; b += add; }
                 }
-                if (fx->vivid) {
+                if (fx->vivid && !gpu_light) {
                     int lum = (r * 3 + gr * 5 + b * 2) / 10;
                     r = lum + (r - lum) * 17 / 16; gr = lum + (gr - lum) * 17 / 16; b = lum + (b - lum) * 17 / 16;
                 }
                 c = light_rgb(r,gr,b);
                 post->post_cell=post_tag;post->input=post_input;post->result=c;
+            }
+            if(gpu_light && !hud_pixel){
+                int volume=(fx->water_volume || fx->rays) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
+                c=(c&0xffffff)|(volume?0xee000000u:0xfe000000u);
             }
             o[X] = c;
         }
@@ -1414,9 +1459,26 @@ static void reflect_surface(uint32_t *out)
     if (wl < 12 || wl > H - 12) return;
     int reach = wl < 30 ? wl : 30;
     if (wl + reach > H) reach = H - wl;
+    if(gpu_light){gpu_light->effects.reflect_row=wl;gpu_light->effects.reflect_rows=reach;}
     for (int d = 0; d < reach; ++d) {
         int a = (int)(80.0f * (1.0f - (float)d / reach));
         int ripple = (S(d * 53 + g.T * 6) + S(d * 19 - g.T * 4)) * (d + 3) * k / 2400;
+        if(gpu_light){
+            gpu_light->effects.ripple[d]=ripple;
+            const uint8_t *wet=water_map+(wl+d)*W;
+            for(int x=0;x<W;++x){
+                unsigned bits=0;
+                if(wet[x]>=60){
+                    for(int j=0;j<k;++j)for(int i=0;i<k;++i){
+                        int sx=x*k+i+g.shake_x,sy=(wl+d)*k+j+g.shake_y;
+                        if((unsigned)sx>=(unsigned)g.ow || (unsigned)sy>=(unsigned)g.oh ||
+                           sprite_px[sy*g.ow+sx]==NONE)bits|=1u<<(j*k+i);
+                    }
+                }
+                gpu_light->effects.mirror[d][x]=bits|((unsigned)(a*wet[x]>>8)<<16);
+            }
+            continue;
+        }
         for (int sub = 0; sub < k; ++sub) {
             int Y = (wl + d) * k + sub, SY = (wl - 1 - d) * k + (k - 1 - sub);
             if (SY < 0 || Y >= g.oh) continue;
@@ -1435,7 +1497,7 @@ static void reflect_surface(uint32_t *out)
                 r += ((int)((m >> 16) & 255) - r) * t >> 8;
                 gr += ((int)((m >> 8) & 255) - gr) * t >> 8;
                 b += ((int)(m & 255) - b) * t >> 8;
-                o[X] = 0xff000000u | (uint32_t)r << 16 | (uint32_t)gr << 8 | (uint32_t)b;
+                o[X] = (q&0xff000000u) | (uint32_t)r << 16 | (uint32_t)gr << 8 | (uint32_t)b;
             }
         }
     }
@@ -1568,6 +1630,8 @@ static void build_field(const WorldSceneFx *fx, float dt)
 
 static inline void add_block(uint32_t *out, int x, int y, int size, int r, int gr, int b)
 {
+    if(gpu_stamp(x,y,size,0,stamp_colour(r,gr,b,255),3,0,x/g.k,y/g.k,
+                 (x+size-1)/g.k,(y+size-1)/g.k))return;
     for (int j = 0; j < size; ++j) {
         int py = y + j;
         if (py < 0 || py >= H*g.k) continue;
@@ -1686,6 +1750,13 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     }
     if (!cur.valid || !out) return 0;
     if (!ready) prepare();
+    if(gpu_light){
+        memset(effect_coverage,0,sizeof effect_coverage);
+        memset(gpu_light->effects.heads,0,sizeof gpu_light->effects.heads);
+        gpu_light->effects.count=0;
+        gpu_light->effects.reflect_rows=0;
+        gpu_light->effects.history_reset=!scene_cache_valid || !have_history || cached_scale!=(int)scale || !cached_fx.trails;
+    }
     int k = scale < 1 ? 1 : scale > MAXK ? MAXK : (int)scale;
     g.k = k; g.ow = W * k; g.oh = H * k; g.fx = fx;
     if (divide_k != k) {
@@ -1785,7 +1856,7 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     world_scene_waterfx_draw_ms = stamp() - waterfx_start;
     draw_particles(out, fx, dt, time_ms);
 
-    if (fx->trails) {
+    if (fx->trails && !gpu_light) {
         size_t n = (size_t)g.ow * (size_t)(H * k);
         if (have_history) {
             /* Four BGRA pixels at once. 7/16 is the exact phosphor decay. */
@@ -1805,15 +1876,46 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         }
         have_history = 1;
     } else
-        have_history = 0;
+        have_history = gpu_light && fx->trails;
     for (size_t i=0, n=(size_t)g.ow*(H-HUD)*k; i<n; ++i)
         if (hud_overlay[i]) out[(size_t)g.ow*HUD*k+i]=hud_overlay[i];
     if(gpu_light){
         gpu_light->scale=k;
-        gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u);
-        size_t band=(size_t)HUD*k*g.ow;
-        for(size_t i=0;i<(size_t)g.oh*g.ow;++i)
-            if(i<band || !hud_overlay[i-band]) out[i]=(out[i]&0xffffff)|0xfe000000u;
+        gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
+            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u);
+        gpu_light->waterline=g.waterline;
+        /* Tag visibility only in occupied tiles. Opaque UI written later stays
+           protected. Each bit follows the sampling rule of its CPU effect. */
+        for(int tile=0;gpu_light->effects.count && tile<WORLD_EFFECT_TILES;++tile){
+            if(!gpu_light->effects.heads[tile])continue;
+            int left=(tile%40)*8,top=(tile/40)*8;
+            uint64_t covered=effect_coverage[tile];
+            while(covered){
+                unsigned bit=(unsigned)__builtin_ctzll(covered);
+                covered&=covered-1;
+                int x=left+(bit&7),y=top+(bit>>3);
+                int dx=g.shake_x,dy=g.shake_y;
+                if(!(fx->pressure || fx->shock || fx->surface)){
+                    dx+=g.row_dx[y];
+                    if(field_on){dx+=field_x[y*W+x]*k/4;dy+=field_y[y*W+x]*k/4;}
+                }
+                int wet=water_map[y*W+x]>=60;
+                for(int j=0;j<k;++j)for(int i=0;i<k;++i){
+                    int xx=x*k+i,yy=y*k+j,at=yy*g.ow+xx;
+                    if((out[at]>>24)==255)continue;
+                    int u=xx+dx,v=yy+dy;
+                    unsigned mask=0;
+                    if((unsigned)u>=(unsigned)g.ow || (unsigned)v>=(unsigned)g.oh || sprite_px[v*g.ow+u]==NONE){
+                        mask=1;
+                        if(wet && (g.waterline<0 || y>=g.waterline) && (!layer_on[0] ||
+                            !(layer_col[0][divide[yy+g.off_y[0]]*LW+divide[xx+g.off_x[0]]]>>24)))mask|=2;
+                    }
+                    u=xx+g.shake_x;v=yy+g.shake_y;
+                    if(wet && ((unsigned)u>=(unsigned)g.ow || (unsigned)v>=(unsigned)g.oh || sprite_px[v*g.ow+u]==NONE))mask|=4;
+                    out[at]=(out[at]&0xffffff)|(out[at]&0xf0000000u)|(mask<<24);
+                }
+            }
+        }
     }
     cached_fx=*fx;cached_scale=k;sprite_alpha=alpha;scene_cache_valid=1;
     double t5 = stamp();

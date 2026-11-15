@@ -41,6 +41,8 @@ unsigned world_menu_update(WorldMenu *menu, WorldSettings *settings, unsigned he
                            int gamepad, uint32_t now_ms);
 /* canvas: the 320x240 ARGB game frame, replaced by the menu over it.
  * gfx1 supplies the game's own 8x8 and 16x16 lettering. */
+int world_menu_main_title(const WorldMenu *menu);
+void world_menu_gpu_title(const WorldMenu *menu, uint32_t *pixels, const uint8_t *gfx1, uint32_t now_ms);
 void world_menu_render(const WorldMenu *menu, const WorldSettings *settings,
                        uint32_t *canvas, const uint8_t *gfx1, uint32_t now_ms);
 
