@@ -1984,6 +1984,18 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         fx=&audit_fx;
     }
     if (!cur.valid || !out) return 0;
+    /* The title's logo and ice are flat artwork over the sea. Casting their
+       silhouettes into that water produces long dark bands below the logo. */
+    WorldSceneFx title_fx;
+    switch (cur.scene_id & 65535) {
+    case 0x1de6: case 0x1e6c: case 0x1ea5:
+    case 0x1f19: case 0x1f52: case 0x1f85:
+        title_fx = *fx;
+        title_fx.sunshadow = 0;
+        title_fx.contact_shade = 0;
+        fx = &title_fx;
+        break;
+    }
     if (!ready) prepare();
     if(gpu_light){
         memset(effect_coverage,0,sizeof effect_coverage);
