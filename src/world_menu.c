@@ -25,7 +25,7 @@ enum {
     ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
     ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
-    ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
+    ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
 };
 enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -235,6 +235,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     case PAGE_OPTIONS:
         ADD(ITEM_TABS, "", "LEFT/RIGHT CHANGES THE PAGE");
         if (m->tab == TAB_VIDEO) {
+            ADD(ITEM_QUALITY, "GFX QUALITY", "LOW, MEDIUM OR HIGH EFFECTS");
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
@@ -252,6 +253,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
         } else {
+            ADD(ITEM_QUALITY, "GFX QUALITY", "APPLIES A COMPLETE EFFECT PRESET");
             ADD(ITEM_FX, "ENHANCEMENTS", "TOGGLES YOUR SAVED EFFECTS");
             ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS SHINE THROUGH WATER");
             ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK AND ICE BLOCK SUNLIGHT");
@@ -311,6 +313,11 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
 {
     out[0] = 0;
     switch (id) {
+    case ITEM_QUALITY: {
+        const char *names[]={"LOW","MEDIUM","HIGH"};
+        snprintf(out,32,"%s%s",names[s->gfx_quality-1],!s->fx_enable?" (OFF)":world_settings_quality_custom(s)?" *":"");
+        break;
+    }
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
@@ -369,6 +376,9 @@ static unsigned step_percent(unsigned value, int direction)
 static unsigned adjust(WorldSettings *s, unsigned id, int d)
 {
     switch (id) {
+    case ITEM_QUALITY:
+        world_settings_apply_quality(s,1+(s->gfx_quality-1+(d>0?1:2))%3);
+        return WORLD_MENU_VIEW;
     case ITEM_DISPLAY: s->fullscreen = !s->fullscreen; return WORLD_MENU_DISPLAY;
     case ITEM_SCALE: {
         unsigned scale = s->window_scale + (d > 0 ? 1 : -1);

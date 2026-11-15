@@ -405,7 +405,7 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
         return 0;
     }
     apply(*p->chain, p->scaling, p->beam, p->width, p->height);
-    if (!p->transport.init(p->device.get())) fprintf(stderr,"GPU transport unavailable; using CPU lighting.\n");
+    if (!p->transport.init(p->device.get(),p->queue.get())) fprintf(stderr,"GPU transport unavailable; using CPU lighting.\n");
     else if(getenv("WORLD_PACING_LOG")) fprintf(stderr,"GPU path transport ready.\n");
     gpu = p.release();
     return 1;

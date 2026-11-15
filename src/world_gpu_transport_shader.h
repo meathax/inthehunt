@@ -82,11 +82,13 @@ void directPass(uint3 id:SV_DispatchThreadID){
 void indirectPass(uint3 id:SV_DispatchThreadID){
     int2 q=id.xy;if(!inside(q))return;
     float3 sum=0;int wl=asint(scene.Load(8));
-    [unroll]for(int j=0;j<4;j++){
+    uint quality=scene.Load(4);
+    int paths=(quality&2048)?1:(quality&1024)?2:4;
+    [loop]for(int j=0;j<paths;j++){
         float phase=((q.x&1)+2*(q.y&1)+.5)*.25;
-        float angle=(j+phase)*1.57079633;float2 dir=float2(cos(angle),sin(angle));
+        float angle=(j+phase)*(6.2831853/paths);float2 dir=float2(cos(angle),sin(angle));
         float2 p=q+.5;float3 throughput=1;
-        [unroll]for(int b=0;b<2;b++){
+        [loop]for(int b=0;b<(paths<4?1:2);b++){
             int2 hit;float d;float2 normal;
             if(!trace(p,dir,38,hit,d,normal))break;
             float2 hitPoint=p+d*dir;
@@ -100,7 +102,7 @@ void indirectPass(uint3 id:SV_DispatchThreadID){
         }
     }
     float4 direct=directField[indexOf(q)];
-    bounceField[indexOf(q)]=float4(direct.rgb+sum*.25,direct.a);
+    bounceField[indexOf(q)]=float4(direct.rgb+sum/paths,direct.a);
 }
 // Reconstruct the interleaved paths once per lighting update, in probe space.
 [numthreads(8,8,1)]
@@ -250,7 +252,16 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         colour+=lerp(lerp(volumes[v0.y*80+v0.x].rgb,volumes[v0.y*80+v1.x].rgb,f.x),
                      lerp(volumes[v1.y*80+v0.x].rgb,volumes[v1.y*80+v1.x].rgb,f.x),f.y);
     }
-    uint3 v=uint3(saturate(colour)*255+.5);
+    // Stochastic rounding of fractional light removes 8-bit halo contours.
+    // Anchor it to arcade pixels so static light stays still at every scale.
+    float rounding=.5;
+    if(flags&(1|2|4|32|512)){
+        uint2 pos=id.xy/k;
+        uint h=pos.x*0x9e3779b9u+pos.y*0x85ebca6bu;
+        h=(h^(h>>16))*0x7feb352du;
+        rounding=((h^(h>>15))&1023u)/1024.+.00048828125;
+    }
+    uint3 v=uint3(saturate(colour)*255+rounding);
     if((tag&15)<8){
         uint3 particles=uint3(compositeParticles(id.xy,k,tag&7,l,int3(v)));
         if(any(v!=particles))plane=255;

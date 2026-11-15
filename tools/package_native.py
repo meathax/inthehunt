@@ -28,7 +28,7 @@ After import, you can move or remove the original archive.
 
 5 = coin, 1 = start, arrows = move, Z/X = fire, F1/Esc = options.
 Xbox-style pad: Back = coin, A = start, D-pad/stick = move, A/B = fire.
-Optional enhancements are off by default; enable them in Options > Enhance.
+Select Low, Medium or High under Options > Video > GFX Quality. New installations start on High.
 
 Updates: copy .local/world into the new game folder to keep data/settings.
 Requires Windows 10/11 x64; CRT shaders require Direct3D 12.

@@ -54,3 +54,10 @@ int main() {
     return !(((clear_view[receiver]>>16)&255)>((wall_view[receiver]>>16)&255) &&
              (wall_view[receiver]&255)>(clear_view[receiver]&255));
 }
+    for(unsigned budget : {1024u, 1024u|2048u}){
+        scene.flags=1|budget;
+        if(!world_gpu_light_offscreen(&scene,frame,wall_view,error,sizeof error) ||
+           ((wall_view[receiver]>>16)&255)+6>=((clear_view[receiver]>>16)&255) ||
+           wall_view[120*320+125]!=0xff36a2c5)return 1;
+    }
+    scene.flags=1;

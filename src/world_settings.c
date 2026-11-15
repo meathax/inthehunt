@@ -14,54 +14,55 @@
 typedef struct {
     const char *key;
     size_t offset;
-    unsigned minimum, maximum;
+    unsigned minimum, maximum, first_quality;
 } NumberSetting;
 
 static const NumberSetting numbers[] = {
-    {"volume", offsetof(WorldSettings, volume), 0, 100},
-    {"fullscreen", offsetof(WorldSettings, fullscreen), 0, 1},
-    {"window_scale", offsetof(WorldSettings, window_scale), 1, 12},
-    {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1},
-    {"scaling", offsetof(WorldSettings, scaling), 0, 2},
-    {"show_fps", offsetof(WorldSettings, show_fps), 0, 1},
-    {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1},
-    {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100},
-    {"pcm_volume", offsetof(WorldSettings, pcm_volume), 0, 100},
-    {"dip_lives", offsetof(WorldSettings, dip_lives), 0, 3},
-    {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3},
-    {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1},
-    {"autofire", offsetof(WorldSettings, autofire), 0, 1},
-    {"enhance_preset_pending", offsetof(WorldSettings, enhance_preset_pending), 0, 1},
-    {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1},
-    {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1},
-    {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1},
-    {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1},
-    {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1},
-    {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1},
-    {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1},
-    {"fx_haze", offsetof(WorldSettings, fx_haze), 0, 1},
-    {"fx_sunshadow", offsetof(WorldSettings, fx_sunshadow), 0, 1},
-    {"fx_glow", offsetof(WorldSettings, fx_glow), 0, 1},
-    {"fx_reflect", offsetof(WorldSettings, fx_reflect), 0, 1},
-    {"fx_shock", offsetof(WorldSettings, fx_shock), 0, 1},
-    {"fx_particles", offsetof(WorldSettings, fx_particles), 0, 1},
-    {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1},
-    {"fx_surface", offsetof(WorldSettings, fx_surface), 0, 1},
-    {"fx_wakes", offsetof(WorldSettings, fx_wakes), 0, 1},
-    {"fx_debris", offsetof(WorldSettings, fx_debris), 0, 1},
-    {"fx_silt", offsetof(WorldSettings, fx_silt), 0, 1},
-    {"fx_splashes", offsetof(WorldSettings, fx_splashes), 0, 1},
-    {"fx_sparks", offsetof(WorldSettings, fx_sparks), 0, 1},
-    {"fx_impact_motes", offsetof(WorldSettings, fx_impact_motes), 0, 1},
-    {"fx_pressure", offsetof(WorldSettings, fx_pressure), 0, 1},
-    {"fx_sediment_light", offsetof(WorldSettings, fx_sediment_light), 0, 1},
-    {"fx_water_volume", offsetof(WorldSettings, fx_water_volume), 0, 1},
-    {"fx_ocean_depth", offsetof(WorldSettings, fx_ocean_depth), 0, 1},
-    {"fx_aftermath", offsetof(WorldSettings, fx_aftermath), 0, 1},
-    {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1},
-    {"fx_bubble_light", offsetof(WorldSettings, fx_bubble_light), 0, 1},
-    {"fx_contact_shade", offsetof(WorldSettings, fx_contact_shade), 0, 1},
-    {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1}
+    {"volume", offsetof(WorldSettings, volume), 0, 100, 0},
+    {"fullscreen", offsetof(WorldSettings, fullscreen), 0, 1, 0},
+    {"window_scale", offsetof(WorldSettings, window_scale), 1, 12, 0},
+    {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1, 0},
+    {"scaling", offsetof(WorldSettings, scaling), 0, 2, 0},
+    {"show_fps", offsetof(WorldSettings, show_fps), 0, 1, 0},
+    {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1, 0},
+    {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100, 0},
+    {"pcm_volume", offsetof(WorldSettings, pcm_volume), 0, 100, 0},
+    {"dip_lives", offsetof(WorldSettings, dip_lives), 0, 3, 0},
+    {"dip_difficulty", offsetof(WorldSettings, dip_difficulty), 0, 3, 0},
+    {"dip_demo_sound", offsetof(WorldSettings, dip_demo_sound), 0, 1, 0},
+    {"autofire", offsetof(WorldSettings, autofire), 0, 1, 0},
+    {"enhance_preset_pending", offsetof(WorldSettings, enhance_preset_pending), 0, 1, 0},
+    {"gfx_quality", offsetof(WorldSettings, gfx_quality), WORLD_GFX_LOW, WORLD_GFX_HIGH, 0},
+    {"fx_enable", offsetof(WorldSettings, fx_enable), 0, 1, 0},
+    {"fx_rays", offsetof(WorldSettings, fx_rays), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_lights", offsetof(WorldSettings, fx_lights), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_depth", offsetof(WorldSettings, fx_depth), 0, 1, WORLD_GFX_LOW},
+    {"fx_snow", offsetof(WorldSettings, fx_snow), 0, 1, WORLD_GFX_HIGH},
+    {"fx_vivid", offsetof(WorldSettings, fx_vivid), 0, 1, WORLD_GFX_LOW},
+    {"fx_trails", offsetof(WorldSettings, fx_trails), 0, 1, WORLD_GFX_HIGH},
+    {"fx_haze", offsetof(WorldSettings, fx_haze), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_sunshadow", offsetof(WorldSettings, fx_sunshadow), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_glow", offsetof(WorldSettings, fx_glow), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_reflect", offsetof(WorldSettings, fx_reflect), 0, 1, WORLD_GFX_HIGH},
+    {"fx_shock", offsetof(WorldSettings, fx_shock), 0, 1, WORLD_GFX_HIGH},
+    {"fx_particles", offsetof(WorldSettings, fx_particles), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_shake", offsetof(WorldSettings, fx_shake), 0, 1, WORLD_GFX_LOW},
+    {"fx_surface", offsetof(WorldSettings, fx_surface), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_wakes", offsetof(WorldSettings, fx_wakes), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_debris", offsetof(WorldSettings, fx_debris), 0, 1, WORLD_GFX_HIGH},
+    {"fx_silt", offsetof(WorldSettings, fx_silt), 0, 1, WORLD_GFX_HIGH},
+    {"fx_splashes", offsetof(WorldSettings, fx_splashes), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_sparks", offsetof(WorldSettings, fx_sparks), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_impact_motes", offsetof(WorldSettings, fx_impact_motes), 0, 1, WORLD_GFX_HIGH},
+    {"fx_pressure", offsetof(WorldSettings, fx_pressure), 0, 1, WORLD_GFX_HIGH},
+    {"fx_sediment_light", offsetof(WorldSettings, fx_sediment_light), 0, 1, WORLD_GFX_HIGH},
+    {"fx_water_volume", offsetof(WorldSettings, fx_water_volume), 0, 1, WORLD_GFX_HIGH},
+    {"fx_ocean_depth", offsetof(WorldSettings, fx_ocean_depth), 0, 1, WORLD_GFX_LOW},
+    {"fx_aftermath", offsetof(WorldSettings, fx_aftermath), 0, 1, WORLD_GFX_HIGH},
+    {"fx_materials", offsetof(WorldSettings, fx_materials), 0, 1, WORLD_GFX_HIGH},
+    {"fx_bubble_light", offsetof(WorldSettings, fx_bubble_light), 0, 1, WORLD_GFX_HIGH},
+    {"fx_contact_shade", offsetof(WorldSettings, fx_contact_shade), 0, 1, WORLD_GFX_HIGH},
+    {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1, WORLD_GFX_HIGH}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -85,30 +86,36 @@ static int bounded_string(const char *text, size_t size, int identifier)
     return valid_utf8(text);
 }
 
-static void all_enhancements_on(WorldSettings *settings)
+void world_settings_apply_quality(WorldSettings *s, unsigned quality)
 {
-    settings->fx_rays = settings->fx_lights = 1;
-    settings->fx_depth = settings->fx_snow = settings->fx_vivid = 1;
-    settings->fx_sunshadow = settings->fx_glow = settings->fx_reflect = 1;
-    settings->fx_haze = settings->fx_shock = settings->fx_particles = 1;
-    settings->fx_shake = settings->fx_surface = settings->fx_smooth = 1;
-    settings->fx_interp = 0;
-    settings->fx_wakes = settings->fx_debris = settings->fx_silt = settings->fx_splashes = 1;
-    settings->fx_sparks = settings->fx_impact_motes = 1;
-    settings->fx_pressure = 1;
-    settings->fx_sediment_light = 1;
-    settings->fx_water_volume = 1;
-    settings->fx_ocean_depth = 1;
-    settings->fx_aftermath = 1;
-    settings->fx_materials = 1;
-    settings->fx_bubble_light = settings->fx_contact_shade = settings->fx_blast_reflect = 1;
-    settings->fx_trails = 1;
+    if (quality<WORLD_GFX_LOW || quality>WORLD_GFX_HIGH) return;
+    s->gfx_quality=quality;
+    s->fx_enable=1;
+    s->enhance_preset_pending=0;
+    s->fx_smooth=1;
+    s->fx_interp=0; /* retired motion prediction option */
+    for (unsigned i=0; i<sizeof numbers/sizeof numbers[0]; ++i) {
+        if (!numbers[i].first_quality) continue;
+        unsigned value=quality>=numbers[i].first_quality;
+        memcpy((char *)s+numbers[i].offset,&value,sizeof value);
+    }
+}
+
+int world_settings_quality_custom(const WorldSettings *s)
+{
+    for (unsigned i=0; i<sizeof numbers/sizeof numbers[0]; ++i) {
+        if (!numbers[i].first_quality) continue;
+        unsigned value;
+        memcpy(&value,(const char *)s+numbers[i].offset,sizeof value);
+        if (value!=(unsigned)(s->gfx_quality>=numbers[i].first_quality)) return 1;
+    }
+    return 0;
 }
 
 void world_settings_activate_enhancements(WorldSettings *settings)
 {
     if (settings->fx_enable && settings->enhance_preset_pending) {
-        all_enhancements_on(settings);
+        world_settings_apply_quality(settings,WORLD_GFX_HIGH);
         settings->enhance_preset_pending = 0;
     }
 }
@@ -127,7 +134,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->dip_lives = 1;         /* factory: 3 submarines */
     settings->dip_difficulty = 2;    /* factory: normal */
     settings->dip_demo_sound = 1;
-    all_enhancements_on(settings);
+    world_settings_apply_quality(settings,WORLD_GFX_HIGH);
     strcpy(settings->shader, "pixels");
     world_input_bindings_defaults(&settings->bindings);
 }
@@ -178,7 +185,7 @@ static int number(const char *text, unsigned *value)
 }
 
 /* Returns -1 for an invalid recognized value, zero for an unknown key. */
-static int apply_setting(WorldSettings *settings, const char *key, const char *value)
+static int apply_setting(WorldSettings *settings, const char *key, const char *value, unsigned char *seen)
 {
     if (!strcmp(key, "timing_mode"))
         return world_timing_mode_parse(value, &settings->timing_mode) ? 1 : -1;
@@ -186,6 +193,7 @@ static int apply_setting(WorldSettings *settings, const char *key, const char *v
         if (strcmp(key, numbers[i].key)) continue;
         unsigned parsed;
         if (!number(value, &parsed) || parsed < numbers[i].minimum || parsed > numbers[i].maximum) return -1;
+        seen[i]=1;
         memcpy((char *)settings + numbers[i].offset, &parsed, sizeof parsed);
         return 1;
     }
@@ -233,7 +241,10 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
     if (!valid_utf8(data)) return WORLD_SETTINGS_INVALID;
     char *line = data;
     if (length >= 3 && !memcmp(data, "\xef\xbb\xbf", 3)) line += 3;
+    unsigned char seen[sizeof numbers/sizeof numbers[0]]={0};
+    int explicit_quality=0;
     WorldSettings candidate = *settings;
+    candidate.fx_enable=0; /* historical default for an existing partial file */
     unsigned version = 0, saw_version = 0;
     int invalid = 0, legacy_enhancements = 0, preset_state_saved = 0;
     while (*line) {
@@ -250,9 +261,10 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
                 /* Older full saves contain the retired switches and a mixed preset. */
                 if (!strcmp(key, "fx_vignette") || !strcmp(key, "fx_stereo")) legacy_enhancements = 1;
                 if (!strcmp(key, "enhance_preset_pending")) preset_state_saved = 1;
+                if (!strcmp(key, "gfx_quality")) explicit_quality=1;
                 if (!strcmp(key, "version")) {
                     if (saw_version++ || !number(value, &version)) invalid = 1;
-                } else if (apply_setting(&candidate, key, value) < 0) invalid = 1;
+                } else if (apply_setting(&candidate, key, value, seen) < 0) invalid = 1;
             }
         }
         if (!next) break;
@@ -260,7 +272,17 @@ WorldSettingsStatus world_settings_load(const char *path, WorldSettings *setting
     }
     if (version > WORLD_SETTINGS_VERSION) return WORLD_SETTINGS_NEWER_VERSION;
     if (invalid || !world_settings_valid(&candidate)) return WORLD_SETTINGS_INVALID;
-    if (legacy_enhancements && !preset_state_saved) candidate.enhance_preset_pending = 1;
+    if (explicit_quality) {
+        for (unsigned i=0; i<sizeof numbers/sizeof numbers[0]; ++i) {
+            if (seen[i]) continue;
+            if (numbers[i].offset==offsetof(WorldSettings,fx_enable)) candidate.fx_enable=1;
+            if (numbers[i].first_quality) {
+                unsigned value=candidate.gfx_quality>=numbers[i].first_quality;
+                memcpy((char *)&candidate+numbers[i].offset,&value,sizeof value);
+            }
+        }
+    }
+    if (!explicit_quality && legacy_enhancements && !preset_state_saved) candidate.enhance_preset_pending = 1;
     world_settings_activate_enhancements(&candidate);
     *settings = candidate;
     return WORLD_SETTINGS_OK;

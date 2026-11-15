@@ -28,6 +28,7 @@ typedef struct {
     unsigned dip_demo_sound;
     unsigned crt_shader;         /* 0 off, else 1 + index in world_gpu_preset_path */
     unsigned autofire;           /* held fire buttons repeat */
+    unsigned gfx_quality;
     unsigned fx_enable;
     unsigned enhance_preset_pending;
     unsigned fx_rays;
@@ -68,6 +69,9 @@ typedef enum {
 /* Integer scaling and the original 4:3 viewport are renderer invariants.
  * Arcade timing is the default selection. Its fidelity depends on the clock
  * and recovered routine costs supplied by the native game. */
+enum { WORLD_GFX_LOW=1, WORLD_GFX_MEDIUM, WORLD_GFX_HIGH };
+void world_settings_apply_quality(WorldSettings *settings, unsigned quality);
+int world_settings_quality_custom(const WorldSettings *settings);
 void world_settings_activate_enhancements(WorldSettings *settings);
 void world_settings_defaults(WorldSettings *settings);
 int world_settings_valid(const WorldSettings *settings);

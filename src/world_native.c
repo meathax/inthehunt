@@ -163,14 +163,15 @@ static WorldSceneFx scene_effects(void)
  * 240-line picture. */
 static int scene_scale(void)
 {
-    if (settings.crt_shader) return 1;
+    if (settings.crt_shader || (settings.fx_enable && settings.gfx_quality==WORLD_GFX_LOW)) return 1;
     int scale = world_window_scale();
     /* Two subpixel phases per arcade pixel match the two refreshes per
        board tick on 120 Hz displays. Avoid rasterizing a 4x picture when
        2x tiles divide the output exactly. Odd scales stay pixel-aligned. */
     double hz = world_window_refresh_hz();
     if (scale>=2 && scale%2==0 && hz>0 && hz<=121.0) return 2;
-    for (int k = WORLD_SCENE_MAX_K; k > 1; --k)
+    int cap=settings.fx_enable && settings.gfx_quality==WORLD_GFX_MEDIUM ? 2 : WORLD_SCENE_MAX_K;
+    for (int k = cap; k > 1; --k)
         if (scale % k == 0) return k;
     return 1;
 }
@@ -248,6 +249,7 @@ static void present_game(const uint32_t *source)
         world_menu_gpu_title(&menu, shown, gfx1, GetTickCount());
     } else if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
     overlay_notices(shown, k);
+    if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);

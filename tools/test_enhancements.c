@@ -204,6 +204,20 @@ int main(void){
     loaded.fx_enable=1; world_settings_activate_enhancements(&loaded);
     assert(!loaded.fx_depth && loaded.fx_trails);
     puts("PASS: first-enable upgrade and saved custom enhancement selection");
+    for(unsigned quality=WORLD_GFX_LOW;quality<=WORLD_GFX_HIGH;++quality){
+        world_settings_apply_quality(&loaded,quality);
+        assert(loaded.fx_enable && loaded.fx_depth && !world_settings_quality_custom(&loaded));
+        assert(loaded.fx_lights==(quality>=WORLD_GFX_MEDIUM));
+        assert(loaded.fx_trails==(quality==WORLD_GFX_HIGH));
+        assert(world_settings_save(preset_file,&loaded)==WORLD_SETTINGS_OK);
+        assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
+        assert(loaded.gfx_quality==quality && !world_settings_quality_custom(&loaded));
+    }
+    legacy=fopen(preset_file,"wb");assert(legacy);
+    fputs("version=1\nfx_trails=1\ngfx_quality=1\n",legacy);fclose(legacy);
+    assert(world_settings_load(preset_file,&loaded)==WORLD_SETTINGS_OK);
+    assert(loaded.fx_enable && loaded.fx_trails && !loaded.fx_lights && world_settings_quality_custom(&loaded));
+    puts("PASS: all three quality presets persist; explicit overrides survive partial settings files");
     /* Pan an ice overhang one native pixel across each probe-grid phase. */
     static float shadow_reference[W*H];
     layer_on[0]=layer_on[1]=layer_on[2]=1; g.waterline=-1;

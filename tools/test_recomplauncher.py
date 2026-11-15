@@ -50,7 +50,7 @@ def main():
     defaults = read_config()
     baseline = {'timing_mode': 'arcade', 'fullscreen': '0', 'scaling': '0',
                 'window_scale': '3',
-                'fx_enable': '0', 'pause_unfocused': '1', 'autofire': '0',
+                'fx_enable': '1', 'pause_unfocused': '1', 'autofire': '0',
                 'dip_lives': '1', 'dip_difficulty': '2', 'dip_demo_sound': '1',
                 'shader': 'pixels'}
     for key, value in baseline.items():

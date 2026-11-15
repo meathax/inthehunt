@@ -12,8 +12,39 @@ struct GpuTransport {
     uint32_t revision=0, flags=0;
     int scale=0;
 
-    bool init(ID3D12Device *dev)
+    Com<ID3D12QueryHeap> time_queries;
+    Com<ID3D12Resource> time_readback;
+    UINT64 frequency=0;
+    unsigned sample_counter=0, slow_samples=0, fast_samples=0;
+    bool measured[FRAMES]={}, measured_medium[FRAMES]={}, budget_mode=false, log_times=false;
+
+    // The caller already waited on this frame slot's fence.
+    void read_time(UINT frame){
+        if(!measured[frame])return;
+        measured[frame]=false;
+        D3D12_RANGE bytes={frame*16u,(frame+1)*16u};
+        void *mapped=nullptr;
+        if(FAILED(time_readback->Map(0,&bytes,&mapped)))return;
+        const UINT64 *times=static_cast<const UINT64*>(mapped)+2*frame;
+        double ms=(times[1]-times[0])*1000.0/frequency;
+        D3D12_RANGE no_writes={0,0};
+        time_readback->Unmap(0,&no_writes);
+        if(log_times)fprintf(stderr,"GPU effects sample %.3f ms\n",ms);
+        if(!measured_medium[frame])return;
+        slow_samples=ms>4.0 ? slow_samples+1 : 0;
+        fast_samples=ms<1.5 ? fast_samples+1 : 0;
+        if(slow_samples>=3)budget_mode=true;
+        if(fast_samples>=24)budget_mode=false;
+    }
+
+    bool init(ID3D12Device *dev, ID3D12CommandQueue *queue=nullptr)
     {
+        if(queue && SUCCEEDED(queue->GetTimestampFrequency(&frequency)) && frequency){
+            D3D12_QUERY_HEAP_DESC q={D3D12_QUERY_HEAP_TYPE_TIMESTAMP,2*FRAMES,0};
+            if(SUCCEEDED(dev->CreateQueryHeap(&q,IID_PPV_ARGS(time_queries.put()))))
+                buffer(dev,D3D12_HEAP_TYPE_READBACK,FRAMES*16,D3D12_RESOURCE_STATE_COPY_DEST,time_readback.put());
+            log_times=getenv("WORLD_PACING_LOG")!=nullptr;
+        }
         D3D12_ROOT_PARAMETER params[8]={};
         for(UINT i=0;i<5;i++){
             params[i].ParameterType=i<2?D3D12_ROOT_PARAMETER_TYPE_SRV:D3D12_ROOT_PARAMETER_TYPE_UAV;
@@ -63,13 +94,19 @@ struct GpuTransport {
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
-        bool changed=!have_field || revision!=data.revision || flags!=data.flags;
+        read_time(frame);
+        bool medium=(data.flags&1024)!=0 && (data.flags&23)!=0;
+        uint32_t dispatch_flags=data.flags | (medium && budget_mode ? 2048u : 0u);
+        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
+        bool measure=time_readback && (medium || log_times) && (changed || !(data.flags&23)) && (++sample_counter%16==0);
+        if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2);
         if (changed || scale!=k) {
             void *map=nullptr;
             D3D12_RANGE empty={0,0};
             if(FAILED(scene_upload[frame]->Map(0,&empty,&map)))return false;
             memcpy(map,&data,offsetof(WorldLightScene,effects));
             auto *packed=static_cast<WorldLightScene*>(map);
+            packed->flags=dispatch_flags;
             uint32_t bins[10*8][5]={};
             for(unsigned i=0;i<data.count && i<WORLD_EMITTERS;++i){
                 const float *e=data.emitters[i];
@@ -124,7 +161,7 @@ struct GpuTransport {
             cmd->SetPipelineState(resolve.get());cmd->Dispatch(20,15,1);
             cmd->ResourceBarrier(1,&sync);
         }
-        revision=data.revision;flags=data.flags;have_field=true;
+        revision=data.revision;flags=dispatch_flags;have_field=true;
         if(data.flags&(32|512)){
             cmd->SetPipelineState(volume.get());cmd->Dispatch(10,8,1);
             cmd->ResourceBarrier(1,&sync);
@@ -137,6 +174,12 @@ struct GpuTransport {
         dst.pResource=picture;dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         cmd->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
         transition(result.get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(measure){
+            cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2+1);
+            cmd->ResolveQueryData(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2,2,time_readback.get(),frame*16);
+            measured[frame]=true;
+            measured_medium[frame]=medium;
+        }
         return true;
     }
 };

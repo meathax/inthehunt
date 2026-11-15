@@ -40,7 +40,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 ## Make it yours
 
-Open **Options** for video, sound, difficulty and enhancements. Effects are **off by default** to preserve the arcade picture. Turn on **Enhancements** to start with every effect enabled. Individual choices are saved and restored when you turn the master switch back on.
+Open **Options** for video, sound, difficulty and enhancements. Choose **GFX Quality** in Video or Enhance. **Low** keeps color, depth and shake at native resolution. **Medium** adds soft shadows, colored weapon lighting, wakes and particles with a reduced tracing budget. **High** enables every enhancement and the full lighting pass. New installations start on High. An asterisk marks a preset with individual overrides. Individual choices are saved and restored when you turn the master switch back on.
 
 <details>
 <summary>Every enhancement at a glance</summary>
