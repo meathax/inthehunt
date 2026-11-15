@@ -16,6 +16,7 @@
 #include "world_surface.h"
 #include "world_gpu.h"
 #include "world_slowdown_table.h"
+#include "world_stage6_timing.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
 #include "world_ga20.h"
@@ -580,6 +581,32 @@ static unsigned long slowdown_frames, slowdown_passes, slowdown_overruns;
 static uint32_t slowdown_by_master[65536];
 static unsigned long long slowdown_sum_cycles, slowdown_sum_actors, slowdown_gameplay;
 static unsigned slowdown_actors;
+static Stage6Timing stage6_timing;
+
+/* Extra held refreshes per 50,000 estimated cycles above the quiet-scene
+ * floor, in thousandths. See docs/pcb-slowdown.md for the capture and fit. */
+static unsigned pcb_gameplay_hold(unsigned stage, unsigned scroll, uint32_t cycles,
+                                  unsigned muzzle_bombs, unsigned volley, uint64_t pass)
+{
+    /* The final stage repeats its scenery through several attack phases.
+     * Its identifiable barrages below predict holds better than scroll. */
+    static const unsigned slope[] = {65, 185, 65, 70, 85, 0};
+    if (stage >= sizeof slope / sizeof slope[0]) return 0;
+    unsigned gain = slope[stage];
+    if (stage == 2 && scroll >= 2048 && scroll < 3072) gain = 245;
+    if (stage == 4 && scroll >= 512 && scroll < 1024) gain = 335;
+
+    unsigned rate = cycles > 25000 ? (cycles - 25000) * gain / 50000 : 0;
+    if (stage == 5 && rate < muzzle_bombs * 125) rate = muzzle_bombs * 125;
+    if (stage == 5 && volley > 2) {
+        unsigned volley_rate = volley > 10 ? 850 : (volley - 2) * 100;
+        if (rate < volley_rate) rate = volley_rate;
+    }
+    /* Spread fractional holds across logic passes. Taking phase from the
+     * saved board clock also makes a restored pass choose the same hold. */
+    uint32_t phase = (uint32_t)pass * UINT32_C(2654435769);
+    return (phase >> 16) * 1000u < (uint64_t)rate * 65536u;
+}
 
 static uint32_t slowdown_routine(uint32_t address)
 {
@@ -714,6 +741,8 @@ static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
 
 static int tick(uint16_t pads, uint16_t system)
 {
+    unsigned muzzle_bombs = 0, volley = 0;
+    unsigned approach = 0, approach_enemies = 0;
     unsigned board_tick_before = word(ram + 0x276);
     world_clock_begin_pass(&board_clock);
     if (ram[0x262] & 1) {
@@ -726,6 +755,22 @@ static int tick(uint16_t pads, uint16_t system)
         while (world_dispatch_target(&pass, ram, &addr)) {
             world_clock_note_unrecovered(&board_clock);
             slowdown_estimate += slowdown_routine(addr);
+            if (addr == 0x15d98 && word(ram + 0x84) == 5) {
+                unsigned table = word(rom + 0x15e4c);
+                unsigned row = (uint16_t)(table + word(ram + pass.actor + 0x40));
+                approach = word(rom + 0x10000 + row) != 0xffff;
+            }
+            /* The surface barrage continues while the hull explodes and sinks. */
+            if (addr == 0xb5824 || addr == 0xb595d || addr == 0xb5975 || addr == 0xb59b3)
+                approach_enemies |= APPROACH_WARSHIP;
+            if (addr == 0xb1399 || addr == 0xb14bd) approach_enemies |= APPROACH_GUNSHIP;
+            /* These consecutive cases in final_boss cover one torpedo
+             * from launch through its turn. Count the ones on screen. */
+            if (addr >= 0x7be50 && addr <= 0x7bfd2) {
+                unsigned x = word(ram + pass.actor + 0x21), y = word(ram + pass.actor + 0x24);
+                if (x >= 96 && x < 416 && y >= 136 && y <= 375) ++volley;
+            }
+            if (addr == 0x7c018 || addr == 0x7c05b || addr == 0x7c0c2) ++muzzle_bombs;
             ++slowdown_actors;
             if (++calls > 65536) {
                 snprintf(failure, sizeof failure, "Actor list did not terminate at master %04X.", word(ram + 0x80));
@@ -782,8 +827,18 @@ static int tick(uint16_t pads, uint16_t system)
     slowdown_estimate += written * slowdown_per_vram_write + slowdown_master(master) +
                          ((0u - ram[0x8b26]) & 255) * slowdown_per_sprite;
     unsigned vblanks = 1;
+    int approach_hold = -1;
+    if (master == 0xb2e && approach && word(ram + 0xb700) < 4064) {
+        if (word(ram + 0xb8ac)) approach_enemies |= APPROACH_MISSILES;
+        approach_hold = stage6_approach_step(&stage6_timing, word(ram + 0xb700), approach_enemies, board_tick_before);
+    }
     if (board_clock.pass_mode == WORLD_TIMING_ARCADE && busy_system < 0) {
         vblanks = 1 + slowdown_estimate / SLOWDOWN_FRAME_CYCLES;
+        if (approach_hold >= 0)
+            vblanks = 1u + (unsigned)approach_hold;
+        else if (vblanks == 1 && master == 0xb2e && slowdown_actors)
+            vblanks += pcb_gameplay_hold(word(ram + 0x84), word(ram + 0xb700),
+                                        slowdown_estimate, muzzle_bombs, volley, board_clock.passes);
         if (vblanks > 4) vblanks = 4;
     }
     if (master == 0xb2e) {
@@ -940,11 +995,23 @@ static int restore_snapshot(const char *load_path)
             fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
             fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
             fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1;
+        memset(&stage6_timing, 0, sizeof stage6_timing);
+        if (!failed) {
+            /* Earlier diagnostic saves ended immediately after sound_state. */
+            int next = fgetc(f);
+            if (next == EOF && !ferror(f)) {
+                stage6_legacy_restore(&stage6_timing, word(ram + 0xb700));
+            } else {
+                ungetc(next, f);
+                failed = fread(&stage6_timing, sizeof stage6_timing, 1, f) != 1;
+            }
+            memcpy(slowdown_shadow, tiles, sizeof slowdown_shadow);
+        }
         if(f)fclose(f);
         return !failed;
 }
 
-static void headless_run(const char *dir, const char *script_path)
+static void headless_run(const char *dir, const char *script_path, int timing_override)
 {
     FILE *script = world_fopen(script_path, "r");
     if (!script) {
@@ -978,6 +1045,7 @@ static void headless_run(const char *dir, const char *script_path)
             return;
         }
     }
+    if (load_path && timing_override) world_clock_request_mode(&board_clock, settings.timing_mode);
     /* WORLD_SCRIPT_RELATIVE=1: script frames count from the loaded snapshot. */
     unsigned long script_base = getenv("WORLD_SCRIPT_RELATIVE") ? ticks : 0;
     at += script_base;
@@ -999,6 +1067,7 @@ static void headless_run(const char *dir, const char *script_path)
                 fwrite(&ticks, sizeof ticks, 1, f);
                 fwrite(&board_clock, sizeof board_clock, 1, f);
                 fwrite(sound_state, sizeof sound_state, 1, f);
+                fwrite(&stage6_timing, sizeof stage6_timing, 1, f);
                 fclose(f);
             }
         }
@@ -1167,6 +1236,7 @@ static void headless_run(const char *dir, const char *script_path)
                 fwrite(&ticks, sizeof ticks, 1, f);
                 fwrite(&board_clock, sizeof board_clock, 1, f);
                 fwrite(sound_state, sizeof sound_state, 1, f);
+                fwrite(&stage6_timing, sizeof stage6_timing, 1, f);
                 fclose(f);
             }
             save_path = NULL;
@@ -1410,6 +1480,7 @@ static void machine_reset(void)
     sound_frame_phase = sound_timer_phase = 0;
     sound_power_on();
     memset(slowdown_shadow, 0, sizeof slowdown_shadow);
+    memset(&stage6_timing, 0, sizeof stage6_timing);
     world_scene_reset();
 }
 
@@ -1484,10 +1555,7 @@ static int run_game(int argc, char **argv)
         }
         timing_override = 1;
     }
-    if (!headless) {
-        settings.timing_mode = WORLD_TIMING_ARCADE;
-        settings.crt_shader = 0;
-    }
+    if (!headless) settings.crt_shader = 0;
     const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
     if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) {
         desktop_fullscreen = settings.fullscreen;
@@ -1532,7 +1600,7 @@ load_game_data:
             world_timing_mode_label(settings.timing_mode));
     sound_power_on();
     if (headless) {
-        headless_run(dir, headless);
+        headless_run(dir, headless, timing_override);
         goto finished;
     }
     const char *boss_snapshot=getenv("WORLD_BOSS_BENCH_SNAPSHOT");

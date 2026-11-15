@@ -59,7 +59,7 @@ Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in
 
 To update, back up **`.local/world`**, extract the new version into a fresh folder and copy that directory across.
 
-Arcade slowdown is approximate. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
+Choose **Options → Game → Slowdown → Arcade** for PCB-calibrated slowdown. The [footage comparison and timing measurements](docs/pcb-slowdown.md) cover all six stages. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
 
 ## Build & credits
 

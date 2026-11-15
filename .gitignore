@@ -20,5 +20,6 @@ __pycache__/
 *.pdb
 *.log
 /build/
-/tools/
+/tools/*
+!/tools/fit_stage6_bursts.py
 /.codex-attachments/

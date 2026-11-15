@@ -17,7 +17,7 @@ enum {
     ITEM_VOLUME, ITEM_DEFAULTS, ITEM_BACK,
     ITEM_NO, ITEM_YES, ITEM_TABS,
     ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM, ITEM_SPATIAL,
-    ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND,
+    ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND, ITEM_SLOWDOWN,
     ITEM_FX, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
     ITEM_FX_HAZE, ITEM_FX_SHOCK,
@@ -256,6 +256,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_AUTOFIRE, "AUTOFIRE", "HOLD EITHER FIRE BUTTON TO REPEAT");
             ADD(ITEM_FOCUS, "AUTO PAUSE", "PAUSE WHEN THE WINDOW LOSES FOCUS");
             ADD(ITEM_CONTROLS, "CONTROLS", "KEYBOARD AND GAMEPAD LAYOUT");
+            ADD(ITEM_SLOWDOWN, "SLOWDOWN", "GAME SPEED IN BUSY SCENES");
             ADD(ITEM_DEFAULTS, "RESET OPTIONS", "RESTORE ALL OPTIONS");
         } else {
             ADD(ITEM_QUALITY, "GFX QUALITY", "APPLIES A COMPLETE EFFECT PRESET");
@@ -337,6 +338,7 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
     case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
+    case ITEM_SLOWDOWN: strcpy(out, s->timing_mode == WORLD_TIMING_ARCADE ? "ARCADE" : "REMOVED"); break;
     case ITEM_DIFFICULTY: {
         static const char *const names[4] = {"VERY EASY", "EASY", "NORMAL", "HARD"};
         strcpy(out, names[s->dip_difficulty & 3]);
@@ -422,6 +424,9 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
     case ITEM_SCALING: s->scaling = (s->scaling + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
     case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
     case ITEM_DIFFICULTY: s->dip_difficulty = (s->dip_difficulty + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
+    case ITEM_SLOWDOWN:
+        s->timing_mode = s->timing_mode == WORLD_TIMING_ARCADE ? WORLD_TIMING_REMOVE_SLOWDOWN : WORLD_TIMING_ARCADE;
+        return WORLD_MENU_TIMING;
     default: {
         unsigned *field = toggle_field(s, id);
         if (!field || item_disabled(s, id)) return 0;
