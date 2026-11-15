@@ -23,6 +23,7 @@ typedef struct {
     unsigned show_fps;
     unsigned pause_unfocused;
     unsigned fm_volume, pcm_volume, spatial_audio;
+    unsigned ambience_volume, reduced_bass;
     unsigned dip_lives;          /* 0..3 = 2, 3, 4, 5 submarines */
     unsigned dip_difficulty;     /* 0..3 = very easy, easy, normal, hard */
     unsigned dip_demo_sound;

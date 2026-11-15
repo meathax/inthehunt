@@ -26,6 +26,8 @@ static const NumberSetting numbers[] = {
     {"scaling", offsetof(WorldSettings, scaling), 0, 2, 0},
     {"show_fps", offsetof(WorldSettings, show_fps), 0, 1, 0},
     {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1, 0},
+    {"ambience_volume", offsetof(WorldSettings, ambience_volume), 0, 100, 0},
+    {"reduced_bass", offsetof(WorldSettings, reduced_bass), 0, 1, 0},
     {"fm_volume", offsetof(WorldSettings, fm_volume), 0, 100, 0},
     {"spatial_audio", offsetof(WorldSettings, spatial_audio), 0, 1, 0},
     {"pcm_volume", offsetof(WorldSettings, pcm_volume), 0, 100, 0},
@@ -136,6 +138,7 @@ void world_settings_defaults(WorldSettings *settings)
     settings->window_scale = 3;
     settings->achievement_popups = 1;
     settings->pause_unfocused = 1;
+    settings->ambience_volume = 70;
     settings->fm_volume = 100;
     settings->pcm_volume = 100;
     settings->spatial_audio = 1;

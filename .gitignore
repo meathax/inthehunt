@@ -23,3 +23,8 @@ __pycache__/
 /tools/*
 !/tools/fit_stage6_bursts.py
 /.codex-attachments/
+
+/docs/
+/artwork/screenshots/*
+!/artwork/screenshots/lighting-ice.png
+!/artwork/screenshots/lighting-stages.png

@@ -19,6 +19,7 @@
 #include "world_stage6_timing.h"
 #include "world_audio_driver.h"
 #include "world_audio_output.h"
+#include "world_audio_immersion.h"
 #include "world_ga20.h"
 #include "world_ym.h"
 #include "world_clock.h"
@@ -436,6 +437,7 @@ static void sound_frame(void)
     unsigned acoustic_scene=(word(ram+0x80)|(word(ram+0x84)<<16))^(settings.spatial_audio<<30);
     if(acoustic_scene!=previous_acoustic_scene){
         memset(&acoustics,0,sizeof acoustics);
+        imm_reset(word(ram+0x84),settings.spatial_audio && word(ram+0x80)==0xb2e);
         previous_acoustic_scene=acoustic_scene;
     }
     float listener=0;
@@ -447,6 +449,16 @@ static void sound_frame(void)
             listener=wl==-1?1:fmaxf(0,fminf(1,(y-wl+6)/45.f));
         }
     }
+    immersion.listener=listener;
+    for(unsigned p=0;p<2;++p){
+        unsigned actor=word(ram+0x90+2*p);
+        int present=immersion.active && actor>=0x400 && actor<=0xff00;
+        int x=present?(int16_t)word(ram+actor+0x21)-96:0;
+        int y=present?375-(int16_t)word(ram+actor+0x24):0;
+        present=present && x>=0 && x<320 && y>=0 && y<240;
+        imm_player(p,present,x,y,waterline_row());
+    }
+    imm_frame();
     /* One board frame has 424*262 pixel clocks at 6,666,666 Hz. */
     sound_frame_phase += (uint64_t)48000 * 424 * 262;
     unsigned frames = (unsigned)(sound_frame_phase / 6666666);
@@ -474,18 +486,24 @@ static void sound_frame(void)
                    Bass stays near centre for speakers and mono downmix. */
                 acoustics.bass[v]+=.0143f*(x-acoustics.bass[v]);
                 acoustics.tone[v]+=.38f*(x-acoustics.tone[v]);
-                float body=acoustics.bass[v]*wet*(.32f+.38f*listener);
-                float tone=x+wet*(.18f+.20f*listener)*(acoustics.tone[v]-x);
+                float body=acoustics.bass[v]*wet*(.32f+.38f*listener)*(settings.reduced_bass?.25f:1.f);
+                float absorption=wet*(.18f+.20f*listener)+(1-wet)*listener*.65f;
+                float tone=x+absorption*(acoustics.tone[v]-x);
                 direct[0]+=tone*(1-pan)+body;
                 direct[1]+=tone*(1+pan)+body;
                 float reflection=acoustics.tone[v]*wet*listener;
                 send[0]+=reflection*(1-pan);
                 send[1]+=reflection*(1+pan);
             }
+            float added[2];
+            imm_sample(added,settings.ambience_volume*.01f,settings.pcm_volume*.01f,settings.reduced_bass);
             unsigned pos=acoustics.cursor;
             for(int ch=0;ch<2;++ch){
-                float reflection=.075f*acoustics.echo[(pos-733)&2047][ch]+.043f*acoustics.echo[(pos-1301)&2047][1-ch];
-                float mixed=fm_gain*fm[2*i+ch]+pcm_gain*(direct[ch]+reflection);
+                unsigned stage=word(ram+0x84);
+                float space=stage==4?1.35f:stage==2?1.15f:.65f;
+                float reflection=space*(.075f*acoustics.echo[(pos-733)&2047][ch]+.043f*acoustics.echo[(pos-1301)&2047][1-ch]);
+                float music_duck=1-.10f*immersion.pressure;
+                float mixed=fm_gain*fm[2*i+ch]*music_duck+pcm_gain*(direct[ch]+reflection)+added[ch];
                 output[done+i][ch]=(int16_t)limit_audio(master*mixed);
                 acoustics.echo[pos][ch]=send[ch];
             }
@@ -790,6 +808,12 @@ static int tick(uint16_t pads, uint16_t system)
             locate_sounds(rendered_actor,sound_tail);
             observe_weapon(addr,rendered_actor,old_x,old_y);
             observe_boss(rendered_actor,sprite);
+            if(settings.spatial_audio){
+                unsigned state=(word(ram+rendered_actor)+16u*word(ram+rendered_actor+2))&0xfffff;
+                imm_actor(rendered_actor,addr,state,
+                    (int16_t)word(ram+rendered_actor+0x21)-96,
+                    375-(int16_t)word(ram+rendered_actor+0x24),waterline_row(),boss_lamp(state).kind);
+            }
         }
         weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
@@ -992,6 +1016,8 @@ static int restore_snapshot(const char *load_path)
             fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
             fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
             fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1;
+        imm_reset(word(ram+0x84),settings.spatial_audio && word(ram+0x80)==0xb2e);
+        memset(&acoustics,0,sizeof acoustics);
         memset(&stage6_timing, 0, sizeof stage6_timing);
         if (!failed) {
             /* Earlier diagnostic saves ended immediately after sound_state. */
@@ -1447,6 +1473,7 @@ static void set_cabinet_switches(void) { world_dispatch_port4 = cabinet_switches
 /* Sound board power-on: the command gate and the title's reset command. */
 static void sound_power_on(void)
 {
+    imm_reset(0,0);
     world_ym_reset();
     world_audio_reset_ym(sound_rom, sound_fm_write, NULL);
     world_audio_reset(sound_state, sound_rom, 0);

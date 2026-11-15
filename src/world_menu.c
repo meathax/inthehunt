@@ -16,7 +16,7 @@ enum {
     ITEM_DISPLAY, ITEM_SCALE, ITEM_PACING,
     ITEM_VOLUME, ITEM_DEFAULTS, ITEM_BACK,
     ITEM_NO, ITEM_YES, ITEM_TABS,
-    ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM, ITEM_SPATIAL,
+    ITEM_SCALING, ITEM_SHOWFPS, ITEM_FM, ITEM_PCM, ITEM_SPATIAL, ITEM_AMBIENCE, ITEM_BASS,
     ITEM_FOCUS, ITEM_LIVES, ITEM_DIFFICULTY, ITEM_DEMOSOUND, ITEM_SLOWDOWN,
     ITEM_FX, ITEM_FX_RAYS, ITEM_FX_LIGHTS, ITEM_FX_BLOOM,
     ITEM_FX_DEPTH, ITEM_FX_SNOW, ITEM_FX_VIVID, ITEM_FX_TRAILS, ITEM_FX_SCANLINES,
@@ -34,6 +34,7 @@ enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 static unsigned *toggle_field(WorldSettings *s, unsigned id)
 {
     switch (id) {
+    case ITEM_BASS: return &s->reduced_bass;
     case ITEM_SPATIAL: return &s->spatial_audio;
     case ITEM_SHOWFPS: return &s->show_fps;
     case ITEM_FOCUS: return &s->pause_unfocused;
@@ -248,7 +249,9 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_VOLUME, "VOLUME", "MASTER VOLUME. 0 IS MUTE");
             ADD(ITEM_SPATIAL, "UNDERWATER AUDIO", "STEREO AND WATER ACOUSTICS");
             ADD(ITEM_FM, "FM SYNTH", "YM2151 MUSIC LEVEL");
-            ADD(ITEM_PCM, "PCM SAMPLES", "GA20 SAMPLE LEVEL");
+            ADD(ITEM_PCM, "WEAPONS AND EFFECTS", "GA20 AND MECHANICAL EFFECTS LEVEL");
+            ADD(ITEM_AMBIENCE, "AMBIENCE", "WATER, SUBMARINES AND MACHINERY");
+            ADD(ITEM_BASS, "REDUCED BASS", "SOFTER UNDERWATER PRESSURE AND MOTORS");
         } else if (m->tab == TAB_GAME) {
             ADD(ITEM_DIFFICULTY, "DIFFICULTY", "CABINET SWITCH. NEXT NEW GAME");
             ADD(ITEM_LIVES, "SUBMARINES", "CABINET SWITCH. NEXT NEW GAME");
@@ -355,6 +358,7 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
 static int slider(unsigned id, const WorldSettings *s)
 {
     if (id == ITEM_VOLUME) return (int)s->volume;
+    if (id == ITEM_AMBIENCE) return (int)s->ambience_volume;
     if (id == ITEM_FM) return (int)s->fm_volume;
     if (id == ITEM_PCM) return (int)s->pcm_volume;
     return -1;
@@ -414,8 +418,8 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         s->volume = v;
         return WORLD_MENU_VOLUME;
     }
-    case ITEM_FM: case ITEM_PCM: {
-        unsigned *level = id == ITEM_FM ? &s->fm_volume : &s->pcm_volume;
+    case ITEM_FM: case ITEM_PCM: case ITEM_AMBIENCE: {
+        unsigned *level = id == ITEM_AMBIENCE ? &s->ambience_volume : id == ITEM_FM ? &s->fm_volume : &s->pcm_volume;
         unsigned v = step_percent(*level, d);
         if (v == *level) return 0;
         *level = v;
