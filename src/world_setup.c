@@ -178,7 +178,7 @@ static void paint(HWND window, Setup *s)
     label(dc,L"IN THE HUNT",33,25,800,60,42,RGB(3,22,42),1);
     label(dc,L"IN THE HUNT",31,23,800,60,42,RGB(255,233,164),1);
     label(dc,L"Choose your ROM",32,490,816,38,28,RGB(244,241,221),1);
-    label(dc,L"World edition  /  inthunt.zip or inthunt.7z",32,535,816,28,18,RGB(151,201,211),0);
+    label(dc,L"MAME ZIP or 7z  /  keep split sets beside their parent",32,535,816,28,18,RGB(151,201,211),0);
     label(dc,s->status,32,574,816,45,16,s->busy?RGB(244,220,149):RGB(199,222,222),0);
     SetMapMode(dc, MM_TEXT); BitBlt(target,0,0,r.right,r.bottom,dc,0,0,SRCCOPY);
     SelectObject(dc,old); DeleteObject(bitmap); DeleteDC(dc); EndPaint(window,&ps);
@@ -211,8 +211,8 @@ static LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp)
         if (LOWORD(wp)==1 && !s->busy) {
             wchar_t archive[32768]=L"";
             OPENFILENAMEW pick={0}; pick.lStructSize=sizeof pick; pick.hwndOwner=w;
-            pick.lpstrFilter=L"World ROM archive (*.zip; *.7z)\0*.zip;*.7z\0All files\0*.*\0";
-            pick.lpstrFile=archive; pick.nMaxFile=32768; pick.lpstrTitle=L"Choose your World In the Hunt ROM";
+            pick.lpstrFilter=L"MAME ROM archive (*.zip; *.7z)\0*.zip;*.7z\0All files\0*.*\0";
+            pick.lpstrFile=archive; pick.nMaxFile=32768; pick.lpstrTitle=L"Choose your In the Hunt ROM archive";
             pick.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR|OFN_EXPLORER;
             if(!GetOpenFileNameW(&pick)) return 0;
             s->busy=import_start(&s->job,archive,s->directory);
@@ -224,7 +224,7 @@ static LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp)
         if(s->job.process && WaitForSingleObject(s->job.process,0)==WAIT_OBJECT_0) {
             DWORD result=1; GetExitCodeProcess(s->job.process,&result); import_close(&s->job); KillTimer(w,1); s->busy=0;
             if(!result) { s->success=1; DestroyWindow(w); }
-            else { s->status=L"Import failed. Use the World ROM set and a writable game folder, then try again.";
+            else { s->status=L"Import failed. Check the archive and game folder. Split sets need the parent alongside.";
                 EnableWindow(s->browse,TRUE); EnableWindow(s->quit,TRUE); SetWindowTextW(s->browse,L"Browse for ROM..."); SetFocus(s->browse); InvalidateRect(w,NULL,FALSE); }
         } return 0;
     case WM_CLOSE: if(!s->busy) DestroyWindow(w); return 0;

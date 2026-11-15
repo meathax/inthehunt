@@ -21,10 +21,10 @@ FILES = {
 }
 INSTRUCTIONS = """IN THE HUNT - Windows edition
 
-Open InTheHunt.exe. On first launch, select your own World inthunt.zip or
-inthunt.7z archive from a merged, non-merged or split collection.
-For split sets, choose the World parent. The game checks and copies the required data into
-.local/world. You can then move or remove the original archive.
+Open InTheHunt.exe and select your In the Hunt MAME ZIP or 7z archive.
+For a split clone, keep the parent inthunt.zip or inthunt.7z alongside it.
+Complete non-merged sets and merged archives can be imported on their own.
+After import, you can move or remove the original archive.
 
 5 = coin, 1 = start, arrows = move, Z/X = fire, F1/Esc = options.
 Xbox-style pad: Back = coin, A = start, D-pad/stick = move, A/B = fire.
@@ -32,7 +32,7 @@ Optional enhancements are off by default; enable them in Options > Enhance.
 
 Updates: copy .local/world into the new game folder to keep data/settings.
 Requires Windows 10/11 x64; CRT shaders require Direct3D 12.
-World ROM set only. No game data included.
+World, US, Japanese and Korean sets all play the World edition.
 Help and enhancement guide: https://github.com/meathax/inthehunt
 """
 

@@ -19,12 +19,12 @@
 
 ## Play
 
-**Requires Windows 10/11 x64 and your own World `inthunt.zip` or `inthunt.7z` ROM archive.** No game data is included; Japanese/US sets are unsupported.
+**Requires Windows 10/11 x64 and your own In the Hunt MAME ROM archive (ZIP or 7z).**
 
 1. Download **InTheHunt-Windows-x64.zip** and extract everything.
-2. Open **InTheHunt.exe** and select your World ROM archive. The game imports it once, then starts automatically.
+2. Open **InTheHunt.exe** and select your ROM archive. The game imports it once, then starts automatically.
 
-Merged, non-merged and split MAME collections are supported. Select the World parent archive in any layout. If you select a split regional clone, keep the World parent beside it. The importer uses the verified World chips and the game runs the World edition.
+Select the merged archive, any complete non-merged set, or a split clone with its parent (`inthunt.zip` or `inthunt.7z`) in the same folder. World, US (`inthuntu`), Japan (`kaiteids`), and Korea (`inthuntk`) all run the World edition. The importer identifies chips by content, so older MAME filenames and nested folders work.
 
 No Python or compiler needed. The built-in importer uses Windows PowerShell and `tar.exe`; CRT presets need Direct3D 12. After import, the original archive can be moved or removed.
 
@@ -102,7 +102,7 @@ Requires Windows 10/11 x64, PowerShell 5+ and Windows `tar.exe`. The build downl
 Build-WorldNative -Root (Get-Location).Path
 ```
 
-The executable is written to `.local/native/InTheHunt.exe`. Open the executable to select and import your World ROM archive.
+The executable is written to `.local/native/InTheHunt.exe`. Open the executable to select and import your ROM archive.
 
 For optional CRT presets, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. The published Windows ZIP includes these runtimes. Generate the shader data with Python 3 from the pinned libretro checkout:
 

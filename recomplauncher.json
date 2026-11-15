@@ -6,7 +6,7 @@
   "inputs": [
     {
       "id": "rom",
-      "label": "Your In the Hunt World ROM archive (inthunt.zip or inthunt.7z)",
+      "label": "Your In the Hunt MAME ZIP or 7z (keep a split clone beside its parent)",
       "role": "game",
       "formats": [
         {
@@ -27,7 +27,7 @@
       "--import-rom",
       "{input:rom}"
     ],
-    "label": "Checking World ROM chips and importing game data",
+    "label": "Checking In the Hunt ROM chips and importing game data",
     "timeout": 300
   },
   "start": {
@@ -1155,6 +1155,6 @@
     }
   ],
   "exit_codes": {
-    "1": "The game could not start. Check the World ROM import and launch options; run setup again if game data is missing."
+    "1": "The game could not start. Check the ROM import and launch options; run setup again if game data is missing."
   }
 }

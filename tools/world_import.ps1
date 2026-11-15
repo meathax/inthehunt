@@ -100,7 +100,7 @@ function Test-WorldNativeRomCache {
 }
 
 function Read-WorldArchiveChips {
-    param($Archive, $Scratch, $ByHash, $Sizes, $Found)
+    param($Archive, $Scratch, $ByHash, $Alternates, $Sizes, $Found)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipPath = $Archive.FullName
     if ($Archive.Extension -ieq '.7z') {
@@ -123,13 +123,35 @@ function Read-WorldArchiveChips {
             try { $digest = [BitConverter]::ToString($sha1.ComputeHash($stream)).Replace('-', '') }
             finally { $stream.Dispose() }
             $chip = $ByHash[$digest]
-            if (!$chip -or $chip.size -ne $entry.Length -or $Found.ContainsKey($digest)) { continue }
+            $alternate = $Alternates[$digest]
+            if ($alternate) { $chip = $alternate.chip }
+            if (!$chip -or $chip.size -ne $entry.Length -or $Found.ContainsKey($chip.sha1)) { continue }
             $zipEntry = $entry.Open()
             try {
                 $file = [IO.File]::Create((Join-Path $Scratch $chip.file))
-                try { $zipEntry.CopyTo($file) } finally { $file.Dispose() }
+                try {
+                    if ($alternate) {
+                        # Each pair copies (offset, length) from this verified regional chip.
+                        # The native game's ROM table addresses use the World revision.
+                        $source = New-Object IO.MemoryStream
+                        $zipEntry.CopyTo($source)
+                        $data = $source.ToArray()
+                        $source.Dispose()
+                        $ranges = [IO.MemoryStream]::new([Convert]::FromBase64String($alternate.ranges))
+                        $gzip = [IO.Compression.GZipStream]::new($ranges, [IO.Compression.CompressionMode]::Decompress)
+                        $reader = [IO.BinaryReader]::new($gzip)
+                        try {
+                            while ($file.Length -lt $chip.size) {
+                                $offset = $reader.ReadInt32()
+                                $length = $reader.ReadInt32()
+                                if ($length -le 0 -or $length -gt $chip.size - $file.Length) { throw 'Invalid ROM copy range.' }
+                                $file.Write($data, $offset, $length)
+                            }
+                        } finally { $reader.Dispose(); $ranges.Dispose() }
+                    } else { $zipEntry.CopyTo($file) }
+                } finally { $file.Dispose() }
             } finally { $zipEntry.Dispose() }
-            $Found[$digest] = $true
+            $Found[$chip.sha1] = $true
             if ($Found.Count -eq $ByHash.Count) { break }
         }
     } finally { $sha1.Dispose(); $zip.Dispose() }
@@ -150,18 +172,22 @@ function Import-WorldNativeRom {
         if ($cached -and $cached.archiveSha256 -eq $archiveHash) { return }
         $scratch = New-Item -ItemType Directory (Join-Path $world ('import-' + [guid]::NewGuid().ToString('N'))) -ErrorAction Stop
         $byHash = @{}
+        $alternates = @{}
         $sizes = @{}
         $found = @{}
         foreach ($chip in $regions.chips) {
             $byHash[$chip.sha1] = $chip
+            foreach ($alternate in $chip.alternates) {
+                $alternates[$alternate.sha1] = @{chip=$chip; ranges=$alternate.copyRanges}
+            }
             $sizes[[long]$chip.size] = $true
         }
-        Read-WorldArchiveChips $archive $scratch.FullName $byHash $sizes $found
-        if ($found.Count -lt $byHash.Count -and $archive.BaseName -in @('inthuntu', 'kaiteids', 'inthuntk')) {
+        Read-WorldArchiveChips $archive $scratch.FullName $byHash $alternates $sizes $found
+        if ($found.Count -gt 0 -and $found.Count -lt $byHash.Count) {
             foreach ($name in 'inthunt.zip', 'inthunt.7z') {
                 $parent = Join-Path $archive.DirectoryName $name
-                if (Test-Path -LiteralPath $parent -PathType Leaf) {
-                    Read-WorldArchiveChips (Get-Item -LiteralPath $parent) $scratch.FullName $byHash $sizes $found
+                if ($parent -ne $archive.FullName -and (Test-Path -LiteralPath $parent -PathType Leaf)) {
+                    Read-WorldArchiveChips (Get-Item -LiteralPath $parent) $scratch.FullName $byHash $alternates $sizes $found
                     # A single archive hash cannot identify a two-archive import.
                     $archiveHash = ''
                     if ($found.Count -eq $byHash.Count) { break }
@@ -170,7 +196,7 @@ function Import-WorldNativeRom {
         }
         foreach ($chip in $regions.chips) {
             if (!$found.ContainsKey($chip.sha1)) {
-                throw "Missing verified World ROM $($chip.file). Select the World parent inthunt.zip or inthunt.7z."
+                throw "Missing ROM data for $($chip.file). For a split set, keep inthunt.zip or inthunt.7z beside the selected archive."
             }
         }
         $records = @()
