@@ -672,8 +672,8 @@ static void begin_weapon_pass(void)
     if(scene==weapon_scene && abs(dx)<=32 && abs(dy)<=32){
         for(unsigned i=0;i<weapon_lights_count;++i){
             WeaponEmitter e=weapon_lights[i];
-            if(e.kind>=ROCKET_PLUME || ++e.age>=5)continue;
-            e.x-=dx;e.y-=dy;
+            if(e.kind>=ROCKET_PLUME || !e.level)continue;
+            ++e.age;e.x-=dx;e.y-=dy;
             weapon_lights[keep++]=e;
         }
     }
@@ -700,7 +700,7 @@ static void observe_boss(unsigned actor,unsigned sprite)
     int y=375-(int16_t)word(ram+sprite+6)+((ram[sprite+9]&2)?-lamp.y:lamp.y);
     if(x < -64 || x >= 384 || y < -64 || y >= 304)return;
     boss_lamps[boss_lamp_count].actor=actor;
-    boss_lamps[boss_lamp_count++].light=(WeaponEmitter){x,y,0,0,lamp.kind,0};
+    boss_lamps[boss_lamp_count++].light=(WeaponEmitter){x,y,0,0,lamp.kind,0,0,0};
 }
 
 static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
@@ -715,7 +715,6 @@ static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
     if(!moving && !pulse)return;
     flight[actor].kind=moving;flight[actor].expected=next;flight[actor].pass=weapon_pass;
     WeaponEmission kind=pulse?pulse:moving;
-    if(weapon_lights_count==MAX_WEAPON_EMITTERS)return;
     int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
     if(x<0 || x>=320 || y<0 || y>=240)return;
     int vx=(int16_t)word(ram+actor+0x38),vy=-(int16_t)word(ram+actor+0x3a);
@@ -731,12 +730,9 @@ static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
     }
     float mag=fmaxf(abs(vx),abs(vy));
     int dx=(int)lroundf(64*vx/mag),dy=(int)lroundf(64*vy/mag);
-    /* A spread leaving one barrel illuminates one gas cloud. */
-    if(kind<ROCKET_PLUME)for(unsigned i=0;i<weapon_lights_count;++i){
-        WeaponEmitter e=weapon_lights[i];
-        if(!e.age && e.kind==kind && abs(e.x-x)<=2 && abs(e.y-y)<=2)return;
-    }
-    weapon_lights[weapon_lights_count++]=(WeaponEmitter){x,y,dx,dy,kind,0};
+    WeaponEmitter shot={x,y,dx,dy,kind,0,0,0};
+    if(pulse)weapon_pulse(weapon_lights,&weapon_lights_count,shot);
+    else if(weapon_lights_count<MAX_WEAPON_EMITTERS)weapon_lights[weapon_lights_count++]=shot;
 }
 
 static int tick(uint16_t pads, uint16_t system)
@@ -795,6 +791,7 @@ static int tick(uint16_t pads, uint16_t system)
             observe_weapon(addr,rendered_actor,old_x,old_y);
             observe_boss(rendered_actor,sprite);
         }
+        weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
             unsigned actor=boss_lamps[i].actor;
             unsigned state=(word(ram+actor)+16u*word(ram+actor+2))&0xfffff;

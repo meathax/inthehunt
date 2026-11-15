@@ -28,6 +28,9 @@ typedef struct {
     uint8_t ice_coverage[WORLD_PROBES]; /* four distant ice bits and four seabed interior bits */
     uint8_t sky_stop[376]; /* first roof hit + 1 per diagonal sun ray, zero for sky */
     uint8_t point_coverage[WORLD_PROBES]; /* continuous material for local-light rays */
+    /* Three float4s followed by source-texel material normals at native resolution. */
+    float stage_light[12];
+    uint32_t surface[320*240];
     WorldEffectBatch effects;
 } WorldLightScene;
 #endif

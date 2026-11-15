@@ -25,6 +25,9 @@ const char *const world_gpu_preset_path[WORLD_GPU_PRESETS] = {
     "crt/crt-hyllian.slangp", "crt/crt-easymode.slangp", "crt/crt-aperture.slangp",
     "crt/crt-consumer.slangp", "crt/crt-caligari.slangp", "crt/zfast-crt.slangp"};
 
+static_assert(offsetof(WorldLightScene,stage_light)==121692);
+static_assert(offsetof(WorldLightScene,surface)==121740);
+
 namespace {
 
 template <class T> struct Com {

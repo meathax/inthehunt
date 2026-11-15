@@ -283,8 +283,8 @@ static void draw_blast_reflections(uint32_t *out)
     for(int i=0;i<CINEMA_EVENTS;++i) {
         const CinemaEvent *e=&cinema_events[i];
         float depth=e->y-wl;
-        if(e->life<=0 || e->age>=0.5f || depth<0 || depth>=88) continue;
-        float energy=e->power*(1-2*e->age)*(1-depth/88);
+        if(e->life<=0 || e->light<.005f || depth<0 || depth>=88) continue;
+        float energy=e->light*(1-depth/88);
         int cx=(int)e->x, radius=12+(int)(depth*.28f);
         for(int d=0;d<6 && wl+d<H;++d) for(int dx=-radius;dx<=radius;++dx) {
             int x=cx+dx;

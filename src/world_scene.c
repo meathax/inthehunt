@@ -79,6 +79,10 @@ static uint32_t history[MAXK * MAXK * N];
 static uint32_t hud_overlay[W * (H - HUD) * MAXK * MAXK];
 typedef struct { unsigned weight; uint32_t x,y,r,g,b; } BlastRadiance;
 static BlastRadiance blast_radiance[MAX_SPRITES];
+/* Screen-space centres in native pixels, carried with the playfield scroll. */
+typedef struct { float x,y,r,g,b,range; } BlastLight;
+static BlastLight blast_lights[MAX_SPRITES];
+static unsigned blast_light_count;
 static uint16_t hot_count[GW * GH], hot_before[GW * GH];
 static uint8_t water_map[N];                     /* 1x: open water under this pixel */
 static int8_t field_x[N], field_y[N];            /* shockwave displacement, 1/4 px */
@@ -132,7 +136,7 @@ static uint32_t light_rgb(int r,int gr,int b)
 }
 static void light_shoulder(float *r,float *gr,float *b)
 {
-    float peak=fmaxf(*r,fmaxf(*gr,*b)),scale=1/(1+.65f*peak);
+    float peak=fmaxf(*r,fmaxf(*gr,*b)),scale=.90f/(1+1.05f*peak);
     *r*=scale;*gr*=scale;*b*=scale;
 }
 /* Length below the surface, including rays crossing the air/water boundary.
@@ -285,9 +289,19 @@ static const WaterGrade water_grades[]={
     {.47f,.62f,.80f,1.035f}, /* blue ice and snow */
     {.45f,.67f,.65f,1.025f}, /* green harbour */
     {.56f,.66f,.74f,1.018f}, /* sunlit industrial waterfront */
-    {.59f,.70f,.80f,1.025f}, /* dark caverns, preserve basalt detail */
-    {.62f,.65f,.72f,1.012f}, /* warm masonry, cool ice */
-    {.48f,.63f,.69f,1.025f}  /* flooded steelworks */
+    {.47f,.59f,.73f,1.045f}, /* dark caverns, preserve basalt detail */
+    {.58f,.58f,.72f,1.035f}, /* warm masonry, cool ice */
+    {.40f,.59f,.61f,1.045f}  /* flooded steelworks */
+};
+/* Sun RGB/ambient, scattering RGB/density, black toe/shadow/specular/shaft.
+   Fixed exposure avoids weapon-driven adaptation. Values are artistic. */
+static const float stage_lighting[6][12]={
+    {1.03f,1.06f,1.12f,.96f, .65f,.88f,1.08f,.86f, .010f,.78f,.72f,.85f},
+    {1.08f,1.03f,.88f,.92f, .59f,.90f,.78f,1.15f, .016f,.68f,.60f,.62f},
+    {1.13f,1.04f,.88f,.98f, .78f,.90f,1.02f,.72f, .008f,.72f,.68f,.72f},
+    {.75f,.88f,1.05f,.80f, .40f,.62f,.86f,1.26f, .026f,.52f,.52f,.32f},
+    {1.08f,.97f,.85f,.89f, .62f,.72f,.95f,.95f, .020f,.64f,.62f,.54f},
+    {.81f,1.02f,.96f,.84f, .43f,.78f,.74f,1.18f, .023f,.58f,.68f,.42f}
 };
 static int lighting_stage(void)
 {
@@ -441,7 +455,7 @@ void world_scene_reset(void)
     memset(rings, 0, sizeof rings);
     memset(particles, 0, sizeof particles);
     shake = 0;
-    waterfx_reset();
+    blast_light_count=0;waterfx_reset();
     scene_cache_valid=0;last_clock=0;rumble=0;
     memset(hot_before,0,sizeof hot_before);
 }
@@ -451,7 +465,7 @@ void world_scene_submit(const WorldSceneFrame *frame)
     if (!ready) prepare();
     if (!gfx1 || !gfx2) return;
     if (!cur.valid || cur.scene_id != frame->scene_id) {
-        waterfx_reset();memset(rings,0,sizeof rings);memset(particles,0,sizeof particles);
+        blast_light_count=0;waterfx_reset();memset(rings,0,sizeof rings);memset(particles,0,sizeof particles);
         memset(hot_before,0,sizeof hot_before);have_history=0;shake=0;rumble=0;
         scene_cache_valid=0;transport_valid=0;last_clock=0;
     }
@@ -479,8 +493,12 @@ void world_scene_submit(const WorldSceneFrame *frame)
     int dx = (int16_t)(cur.layers[1].scroll_x - prev.layers[1].scroll_x);
     int dy = (int16_t)(cur.layers[1].scroll_y - prev.layers[1].scroll_y);
     if (abs(dx) > 32 || abs(dy) > 32) {
-        waterfx_reset();memset(rings,0,sizeof rings);memset(particles,0,sizeof particles);
+        blast_light_count=0;waterfx_reset();memset(rings,0,sizeof rings);memset(particles,0,sizeof particles);
         memset(hot_before,0,sizeof hot_before);have_history=0;scene_cache_valid=0;dx=dy=0;
+    }
+    for(unsigned i=0;i<blast_light_count;++i){
+        blast_lights[i].x-=dx;
+        blast_lights[i].y-=dy;
     }
     waterfx_scroll(dx, dy);
     for (int i = 0; i < MAX_RINGS; ++i) { rings[i].x -= (float)dx; rings[i].y -= (float)dy; }
@@ -937,13 +955,12 @@ static const WeaponSpectrum spectra[]={
     [BOSS_CYAN]={.12f,.82f,1.24f,28,0,0}, [BOSS_VIOLET]={.64f,.21f,1.04f,23,0,0},
     [BOSS_TEAL]={.08f,1.08f,.72f,29,0,0}, [BOSS_ICE]={.38f,.88f,1.40f,31,0,0}
 };
-static const float flash_decay[]={1,.64f,.31f,.13f,.045f};
 static void gather_weapon_lights(void)
 {
     for(unsigned i=0;i<weapon_count && light_count<MAX_LIGHTS;++i){
         WeaponEmitter e=weapon_emitters[i];
         WeaponSpectrum s=spectra[e.kind];
-        float power=flash_decay[e.age];
+        float power=e.kind<ROCKET_PLUME ? e.level/255.f : .80f;
         float dx=e.dx/64.f,dy=e.dy/64.f;
         if(s.offset || s.aim){
             float length=sqrtf(dx*dx+dy*dy);
@@ -971,7 +988,7 @@ static void draw_weapon_flashes(uint32_t *out)
             float along=(x*e.dx+y*e.dy)*inv,side=fabsf((y*e.dx-x*e.dy)*inv);
             if(along < -1 || along>=length)continue;
             float taper=1-fmaxf(0,along)/length;
-            float alpha=flash_decay[e.age]*taper*(1-side/(.65f+2.2f*taper));
+            float alpha=e.level/255.f*taper*(1-side/(.65f+2.2f*taper));
             if(alpha<=0)continue;
             int cell=(sy+MARGIN)*LW+sx+MARGIN;
             if(layer_on[0] && layer_pri[0][cell])continue;
@@ -985,17 +1002,54 @@ static void draw_weapon_flashes(uint32_t *out)
     }
 }
 
-static void gather_lights(void)
+/* Combine nearby impact cels before filtering. Sprite slots may change as
+   the board animates an explosion, so match in scroll-corrected space. */
+static void update_blast_lights(void)
 {
-    light_count = 0;
-    for(unsigned i=0;i<MAX_SPRITES && light_count<MAX_LIGHTS;++i){
+    BlastLight target[MAX_SPRITES]={0};
+    for(unsigned i=0;i<MAX_SPRITES;++i){
         const BlastRadiance *f=&blast_radiance[i];
         if(!f->weight)continue;
-        float inv=1.f/f->weight;
-        float power=2.65f*f->weight/(f->weight+850.f);
-        float r=f->r*inv/255.f,g0=f->g*inv/255.f,b=f->b*inv/255.f;
-        lights[light_count++]=(Light){.x=.5f*f->x*inv,.y=.5f*f->y*inv,
-            .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=9+21*power};
+        float inv=1.f/f->weight,x=f->x*inv,y=f->y*inv;
+        unsigned slot=blast_light_count;
+        float nearest=16*16;
+        for(unsigned j=0;j<blast_light_count;++j){
+            float dx=x-blast_lights[j].x,dy=y-blast_lights[j].y;
+            float d=dx*dx+dy*dy;
+            if(d<nearest){nearest=d;slot=j;}
+        }
+        if(slot==blast_light_count){
+            if(slot==MAX_SPRITES)continue;
+            blast_lights[blast_light_count++]=(BlastLight){.x=x,.y=y};
+        }
+        float power=1.75f*f->weight/(f->weight+850.f);
+        float range=9+21*power;
+        /* The strongest overlapping cel supplies the colour and centre. */
+        if(target[slot].range>=range)continue;
+        float r=f->r*inv/255.f,gr=f->g*inv/255.f,b=f->b*inv/255.f;
+        target[slot]=(BlastLight){x,y,r*r*power,gr*gr*power,b*b*power,range};
+    }
+    unsigned keep=0;
+    for(unsigned i=0;i<blast_light_count;++i){
+        BlastLight l=blast_lights[i],t=target[i];
+        float rate=t.range?.28f:.15f;
+        l.r+=rate*(t.r-l.r);l.g+=rate*(t.g-l.g);l.b+=rate*(t.b-l.b);
+        if(t.range){
+            l.x+=.5f*(t.x-l.x);l.y+=.5f*(t.y-l.y);
+            l.range+=l.range?.28f*(t.range-l.range):t.range;
+        }
+        if(t.range || fmaxf(l.r,fmaxf(l.g,l.b))>.01f)blast_lights[keep++]=l;
+    }
+    blast_light_count=keep;
+}
+
+static void gather_lights(void)
+{
+    light_count=0;
+    for(unsigned i=0;i<blast_light_count && light_count<MAX_LIGHTS;++i){
+        const BlastLight *l=blast_lights+i;
+        lights[light_count++]=(Light){.x=.5f*l->x,.y=.5f*l->y,
+            .r=l->r,.g=l->g,.b=l->b,.range=l->range};
     }
     gather_weapon_lights();
     gather_tile_glow();
@@ -1006,12 +1060,13 @@ static void gather_lights(void)
         for(int dx=0;dx<2 && x+dx<GW;++dx){
             int at=(y+dy)*GW+x+dx;
             unsigned count=tile_glow_count[at];
-            if(count<4 || hot_count[at]>=3)continue;
+            /* Tile emission is independent of the blast crossing this cell. */
+            if(!count)continue;
             n+=count;sx+=count*(4*(x+dx)+2);sy+=count*(4*(y+dy)+2);
             for(int c=0;c<3;++c)sum[c]+=tile_glow_sum[c][at];
         }
         if(!n)continue;
-        float power=.18f+.75f*fminf(n/40.f,1);
+        float power=.56f*fminf(n/40.f,1);
         float r=sum[0]/(255.f*n),g0=sum[1]/(255.f*n),b=sum[2]/(255.f*n);
         lights[light_count++]=(Light){.x=(float)sx/n,.y=(float)sy/n,
             .r=r*r*power,.g=g0*g0*power,.b=b*b*power,.range=25};
@@ -1170,6 +1225,8 @@ static void pack_gpu_light_rows(int from,int to)
             if(sp!=NONE && !(sp&0x5000) && (!(sp&0x8000) || !layer_on[1] || !layer_pri[1][terrain]))coverage|=bit<<4;
             if(layer_on[1] && terrain_cast[terrain])coverage|=bit;
             if(layer_on[1] && terrain/LW>floor_top[terrain%LW])ice|=bit<<4;
+            gpu_light->surface[ny*W+nx]=sp!=NONE && g.fx->materials
+                ?sprite_material[(size_t)clampi(py,0,g.oh-1)*g.ow+clampi(px,0,g.ow-1)]:0;
             if(stage==0 && layer_on[2]){
                 int far_pixel=divide[clampi(py,0,g.oh-1)+g.off_y[2]]*LW+divide[clampi(px,0,g.ow-1)+g.off_x[2]];
                 if(far_ice[far_pixel])ice|=bit;
@@ -1204,20 +1261,19 @@ static void transport(const WorldSceneFx *fx)
         for(int player=0;fx->headlights && player<2;++player){
             const int *bow=cur.lamp[player];
             if(!bow[2])continue;
-            /* Place the lens just beyond the actual leading hull pixel;
-               animation poses change the bow width by several pixels. */
-            int nose=bow[0], centre=nose-17*bow[2], best=-1;
-            for(int dy=-2;dy<=2;++dy)for(int ahead=0;ahead<=25;++ahead){
-                int x=centre+ahead*bow[2],y=bow[1]+dy;
+            /* Board actor origin supplies a stable mount through hull animation.
+               Coverage validates a live hull without moving the lens per pose. */
+            int nose=bow[0],visible=0;
+            for(int dx=-12;dx<=12;++dx){
+                int x=nose-17*bow[2]+dx,y=bow[1];
                 if((unsigned)x>=W || (unsigned)y>=H)continue;
                 unsigned ink=sprite_px[(size_t)(y*g.k)*g.ow+x*g.k];
-                if(ink!=NONE && ((ink&1023)>>4)==(unsigned)(1+player) && ahead>best)best=ahead;
+                if(ink!=NONE && ((ink&1023)>>4)==(unsigned)(1+player))visible=1;
             }
-            if(best<0)continue; /* Do not leave a detached beam after the hull disappears. */
-            nose=centre+(best+2)*bow[2];
+            if(!visible)continue;
             float *e=gpu_light->emitters[lamps++];
             static const float ranges[]={124,148,174,208};
-            static const float gains[]={2,2.25f,2.55f,2.9f};
+            static const float gains[]={1.30f,1.48f,1.68f,1.90f};
             unsigned level=fx->headlight_level & 3;
             float gain=gains[level];
             e[0]=(nose-g.shake_x/g.k)*.5f;e[1]=(bow[1]-g.shake_y/g.k)*.5f;e[2]=ranges[level];e[3]=(float)bow[2];
@@ -2081,14 +2137,17 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     }
     double t1 = stamp();
     if(changed_frame || fx_changed || cached_scale!=k || ((fx->smooth || fx->interp) && sprite_alpha!=alpha))draw_sprites(alpha);
+    if(changed_frame)update_blast_lights();
     if(changed_frame || fx_changed)transport(fx);
     if(gpu_light){
         gpu_light->scale=k;
         gpu_light->flags=(fx->depth?65536u:0u)|(fx->headlights?32768u:0u)|(fx->rim?16384u:0u)|(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
-            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
+            (fx->materials?1048576u:0u)|(fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
         int stage=lighting_stage();
         WaterGrade grade=stage>=0?water_grades[stage]:(WaterGrade){.53f,.65f,.79f,1.0625f};
         memcpy(gpu_light->water_grade,&grade,sizeof grade);
+        static const float neutral_light[12]={1,1,1,1,1,1,1,1,0,1,1,1};
+        memcpy(gpu_light->stage_light,stage>=0?stage_lighting[stage]:neutral_light,sizeof neutral_light);
         if(cur.waterline<=0)gpu_light->flags|=1u<<19;
         if(stage>=0)gpu_light->flags|=1u<<17;
         if(stage==0)gpu_light->flags|=1u<<18;

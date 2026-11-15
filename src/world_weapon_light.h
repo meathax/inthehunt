@@ -89,7 +89,40 @@ enum { MAX_WEAPON_EMITTERS=128 };
 typedef struct {
     short x,y;
     signed char dx,dy;
-    unsigned char kind,age;
+    unsigned char kind,age,level,repeat;
 } WeaponEmitter;
+
+/* One lighting envelope per nearby, similarly directed volley. Advance only
+   on successful board passes, so duplicate presentations cannot pump it. */
+static inline void weapon_pulse(WeaponEmitter *list,unsigned *count,WeaponEmitter shot)
+{
+    unsigned best=*count;
+    int distance=19*19;
+    for(unsigned i=0;i<*count;++i){
+        WeaponEmitter *e=list+i;
+        if(e->kind!=shot.kind || e->dx*shot.dx+e->dy*shot.dy<=0)continue;
+        int x=e->x-shot.x,y=e->y-shot.y,d=x*x+y*y;
+        if(d<distance){best=i;distance=d;}
+    }
+    if(best==*count){
+        if(*count==MAX_WEAPON_EMITTERS)return;
+        list[(*count)++]=shot;
+    } else {
+        WeaponEmitter *e=list+best;
+        /* Keep simultaneous spread rounds attached to the first barrel. */
+        if(e->age){e->repeat=1;e->x=shot.x;e->y=shot.y;e->dx=shot.dx;e->dy=shot.dy;}
+        e->age=0;
+    }
+}
+
+static inline void weapon_envelopes(WeaponEmitter *list,unsigned count)
+{
+    for(unsigned i=0;i<count;++i){
+        WeaponEmitter *e=list+i;
+        if(e->kind>=ROCKET_PLUME)continue;
+        if(e->age<=(e->repeat?14:5))e->level+=(96-e->level+5)/6;
+        else e->level-=(e->level+7)/8;
+    }
+}
 
 #endif

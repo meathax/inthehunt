@@ -1,7 +1,7 @@
 /* Bounded presentation-only water volumes.
  * No reads/writes of gameplay actors. Native tile/sprite priorities always win. */
 enum { CINEMA_EVENTS=24, VW=W/4, VH=H/4 };
-typedef struct {float x,y,age,life,power; int seabed; unsigned tint;} CinemaEvent;
+typedef struct {float x,y,age,life,power; int seabed; unsigned tint; float light,hold;} CinemaEvent;
 static CinemaEvent cinema_events[CINEMA_EVENTS];
 static uint32_t volume_probes[VW*VH], water_volume[N];
 static unsigned cinema_emitted,cinema_samples;
@@ -84,7 +84,11 @@ static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
     int slot=-1;
     for(int i=0;i<CINEMA_EVENTS;++i){
         CinemaEvent *p=&cinema_events[i];
-        if(p->life>0 && p->age<.22f && fabsf(p->x-x)<26 && fabsf(p->y-y)<26) return;
+        if(p->life>0 && (p->hold>0 || p->light>.04f) && fabsf(p->x-x)<26 && fabsf(p->y-y)<26){
+            p->hold=.14f;
+            p->life=fmaxf(p->life,p->age+.8f);
+            return;
+        }
         if(p->life<=0 && slot<0) slot=i;
     }
     if(slot<0)return;
@@ -100,7 +104,7 @@ static void cinema_blast(float x,float y,int size,const WorldSceneFx *fx)
         nearest=dx*dx+dy*dy;
         tint=((f->r/f->weight)<<16)|((f->g/f->weight)<<8)|(f->b/f->weight);
     }
-    cinema_events[slot]=(CinemaEvent){x,y,0,3.8f, size>=110?1.0f:.65f,seabed,tint};
+    cinema_events[slot]=(CinemaEvent){x,y,0,3.8f, size>=110?1.0f:.65f,seabed,tint,0,.14f};
     ++cinema_emitted;
 }
 
@@ -131,6 +135,10 @@ static void cinema_update(float dt)
         CinemaEvent *p=&cinema_events[i];
         if(p->life<=0)continue;
         p->age+=dt;
+        float attack=fminf(dt,p->hold);
+        p->hold-=attack;
+        p->light+=(p->power-p->light)*(1-expf(-12*attack));
+        p->light*=expf(-7*(dt-attack));
         if(p->age>=p->life || p->x<-80 || p->x>W+80 || p->y>H+40)p->life=0;
     }
     if(!fx->pressure && !fx->sediment_light && !fx->water_volume && !fx->aftermath && !fx->blast_reflect)
@@ -162,16 +170,16 @@ static void cinema_update(float dt)
         batch->volume_scroll=g.scroll_x[2];batch->volume_time=g.T;batch->volume_count=0;
         if(fx->water_volume)for(int i=0;i<CINEMA_EVENTS;++i){
             const CinemaEvent *p=cinema_events+i;
-            if(p->life<=0 || p->age>=.65f)continue;
+            if(p->life<=0 || p->light<.005f)continue;
             float *v=batch->volumes[batch->volume_count++];
-            v[0]=p->x;v[1]=p->y;v[2]=(1-p->age/.65f)*p->power;v[3]=(float)p->tint;
+            v[0]=p->x;v[1]=p->y;v[2]=p->light;v[3]=(float)p->tint;
         }
         return;
     }
     if(!fx->water_volume){memset(water_volume,0,sizeof water_volume);return;}
     if(!cinema_volume_dirty)return;
     int flashes[CINEMA_EVENTS],flash_count=0;
-    for(int i=0;i<CINEMA_EVENTS;++i)if(cinema_events[i].life>0 && cinema_events[i].age<=.65f)flashes[flash_count++]=i;
+    for(int i=0;i<CINEMA_EVENTS;++i)if(cinema_events[i].life>0 && cinema_events[i].light>=.005f)flashes[flash_count++]=i;
     for(int yy=0;yy<VH;++yy)for(int xx=0;xx<VW;++xx){
         int x=xx*4+2,y=yy*4+2,at=yy*VW+xx;
         if(g.waterline>=0 && y<g.waterline){volume_probes[at]=0;continue;}
@@ -189,7 +197,7 @@ static void cinema_update(float dt)
         for(int i=0;i<flash_count;++i){
             CinemaEvent *p=&cinema_events[flashes[i]];
             float dx=x-p->x,dy=y-p->y,d=dx*dx+dy*dy;
-            float f=(1-p->age/.65f)*p->power*900/(900+d);
+            float f=p->light*900/(900+d);
             int wet=submerged_path(y,p->y,sqrtf(d));
             f*=18.f/255;
             r+=f*(p->tint>>16)*light_absorb[0][wet];
@@ -226,7 +234,7 @@ static void cinema_draw(uint32_t *out)
             int radius=(int)(6+p->age*5),alpha=(int)(fade*(p->age<.2f?p->age*5:1)*(p->seabed?48:25));
             if(fx->silt && p->seabed)alpha=alpha*2/3;
             int cx=(int)(p->x+S(i*71+(int)(p->age*70))*p->age*.012f),cy=(int)(p->y-p->age*3);
-            float hot=p->age<.5f?(1-p->age*2)*p->power:0;
+            float hot=p->light;
             if(budget>0 && gpu_stamp(cx,cy,radius,(int)(p->age*140)+i*33,
                  stamp_colour(70+(int)(hot*120),96+(int)(hot*40),104,alpha),6,budget,
                  cx-radius,cy-radius/2,cx+radius,cy+radius/2)){
@@ -237,7 +245,7 @@ static void cinema_draw(uint32_t *out)
                     int curl=S(dx*27+dy*49+(int)(p->age*140)+i*33);
                     int a=alpha*(radius*radius-d)/(radius*radius)*(210+curl/6)/256;
                     int x=cx+dx,y=cy+dy;if(x<0||x>=W||y<0||y>=H)continue;
-                    float hot=p->age<.5f?(1-p->age*2)*p->power:0;
+                    float hot=p->light;
                     PixelLight *l=&pixel_light[y*W+x];
                     int r=70+(int)(hot*120)+(transport_valid?(int)(l->r*45):0);
                     int gr=96+(int)(hot*40)+(transport_valid?(int)(l->g*35):0);

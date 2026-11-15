@@ -12,6 +12,9 @@ uint indexOf(int2 p){ return p.y*160+p.x; }
 bool inside(int2 p){return all(p>=0)&&all(p<size);}
 uint cell(int2 p){return scene.Load(4496+4*indexOf(p));}
 float3 rgb(uint c){return float3((c>>16)&255,(c>>8)&255,c&255)/255.;}
+float4 stageLight(uint group){
+    return (scene.Load(4)&131072)?asfloat(scene.Load4(121692+16*group)):float4(1,1,1,1);
+}
 float3 transmission(float distance){return exp2(-distance*float3(.021,.009,.004));}
 // Grid traversal visits each crossed cell, including thin silhouettes.
 // Starting inside a receiver permits rays to escape through its near face.
@@ -80,10 +83,10 @@ float pointVisibility(float2 receiver,float2 emitter,bool bow){
         if(!bow || abs(receiver.x-emitter.x)<12)return row<0?1:0;
         // The bow lens is vertical in side view. Fixed taps keep tiny nearby
         // silhouette details from switching the entire distant beam on/off.
-        float2 rim=float2(0,1.5);
+        float2 rim=float2(0,3.0);
         int top=pointBlockerRow(receiver,emitter-rim);
         int bottom=pointBlockerRow(receiver,emitter+rim);
-        return .375*(top<0)+.25*(row<0)+.375*(bottom<0);
+        return .25*(top<0)+.50*(row<0)+.25*(bottom<0);
     }
     // Sky fill keeps local-light shadows from airborne blockers very faint.
     // Sample a small area of the source for a stable feathered boundary.
@@ -140,8 +143,8 @@ void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
         // and retain a visible umbra all the way to the bottom.
         float visibility=1;
         if(lane>=firstIceRow && !caster(p))visibility=.72+.13*saturate((y-int(firstIceRow))/150.);
-        if(lane>=firstShadowRow)visibility=min(visibility,.48+.24*saturate((y-int(firstShadowRow))/120.));
-        if(lane>=firstSolidRow)visibility=min(visibility,.26*saturate((y-int(firstSolidRow))/180.));
+        if(lane>=firstShadowRow)visibility=min(visibility,.64+.17*saturate((y-int(firstShadowRow))/120.));
+        if(lane>=firstSolidRow)visibility=min(visibility,.18+.22*saturate((y-int(firstSolidRow))/180.));
         directField[19200+y*320+p.x]=float4(0,0,0,visibility);
     }
 }
@@ -186,7 +189,19 @@ void directPass(uint3 id:SV_DispatchThreadID){
             float3 emission=asfloat(scene.Load3(32+32*i));
             if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
             float vis=pointVisibility(origin,2*e.xy,headlamp);
-            energy+=emission*fall*vis*((headlamp || (flags&1))?1:.10);
+            float response=1;
+            if(flags&1048576){
+                uint m=scene.Load(121740+4*(pixel.y*320+pixel.x));
+                uint kind=m&255;
+                if(kind>0 && kind<10){
+                    float2 normal=float2(int(m<<16)>>24,int(m<<8)>>24)/128.;
+                    float facing=saturate(.72+dot(normal,dir)*.45);
+                    float rough=(kind==3 || kind==8)?.18:(kind==7 || kind==9)?.9:.55;
+                    float spec=pow(saturate(.82+dot(normal,dir)*.35),lerp(24,4,rough));
+                    response=facing+spec*(1-rough)*.24*stageLight(2).z;
+                }
+            }
+            energy+=emission*fall*vis*response*((headlamp || (flags&1))?1:.10);
         }
     }
     float4 light=float4(energy,sky?sun:0);
@@ -256,8 +271,11 @@ void volumePass(uint3 id:SV_DispatchThreadID){
     float beam=.5+.28*sin(x*.026+t*.003)+.19*sin(x*.051+q.y*.006-t*.0021);
     float shaft=skyReaches(q)*beam*beam*l.a*exp2(-max(0.,q.y-max(0,wl))*.009);
     uint flags=scene.Load(4);
-    float3 colour=shaft*float3(3,11,15)*((flags&512)?1.:.32);
-    if(flags&32)colour+=l.rgb*float3(9,10,12)*((flags&4)?.65:1);
+    float4 water=stageLight(1);
+    float3 colour=shaft*float3(3,11,15)*water.rgb*stageLight(2).w*((flags&512)?1.:.32);
+    if(flags&32)colour+=l.rgb*float3(9,10,12)*water.rgb*((flags&4)?.65:1);
+    // One extinction field is shared by downwelling and local light.
+    colour*=exp2(-max(0.,q.y-max(0,wl))*.0015*water.w);
     [loop]for(uint i=0;i<effects.Load(4816);++i){
         float4 e=asfloat(effects.Load4(4824+i*16));float2 delta=q-e.xy;
         float d2=dot(delta,delta),wet=wl<0?1:saturate((max(q.y,e.y)-wl)/max(.01,abs(delta.y)));
@@ -425,7 +443,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     int wl=asint(scene.Load(8));
     float wet=wl<0?1:saturate((float(native.y)-wl)/8);
     float depth=wet*saturate((native.y-(wl==-1?0:wl))/195.);
-    float3 energy=l.rgb/(1+.42*max(l.r,max(l.g,l.b)));
+    float3 energy=l.rgb/(1+.90*max(l.r,max(l.g,l.b)));
     float3 colour=base;
     if(flags&65536)colour*=lerp(1,(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79),depth);
     bool surface=caster(native)!=0;
@@ -435,8 +453,24 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         float3 deepTint=(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79);
         float deepContrast=dot(deepTint,float3(.25,.50,.25));
         float receive=(surface?1:wet)*lerp(1,deepContrast,depth);
-        colour*=lerp(float3(1.02,1.01,1),occluded,(1-l.a)*receive);
+        colour*=lerp(float3(1.02,1.01,1),occluded,(1-l.a)*receive*stageLight(2).y);
     }
+    if((flags&131072) && (flags&65536)){
+        float4 sunStyle=stageLight(0),finish=stageLight(2);
+        float enclosure=surface?1:depth;
+        colour*=lerp(float3(1,1,1),sunStyle.rgb*sunStyle.w,wet*.65);
+        // Smooth black toe applied to ambient only, before lamps and scattering.
+        float peak=max(colour.r,max(colour.g,colour.b));
+        colour*=peak/(peak+finish.x*enclosure+.00001);
+    }
+    if((flags&131072) && (flags&1048576) && (flags&262144)){
+        // Thin distant ice receives blue transmitted daylight. Foreground
+        // terrain and hulls keep their own depth and occlusion.
+        uint ice=terrainFlags(native);
+        float edge=(ice&1) && !surface ? .012*l.a : 0;
+        colour+=edge*float3(.30,.72,1)*wet;
+    }
+    float3 ambient=colour;
     if(flags&(1|32768)){
         // The bow beam is seen in profile. Most light goes onto the hull
         // or cliff it strikes; suspended particles reveal its path in water.
@@ -455,6 +489,10 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         float3 rim=rimLight(id.xy,k,extent,flags,terrainRim);
         colour+=rim*(1-saturate(colour))*(.82+.18*sqrt(base));
     }
+    // Compress the combined light against the remaining highlight headroom.
+    float3 added=max(0,colour-ambient);
+    float3 load=added/max(.001,1-ambient);
+    colour=ambient+added/(1+max(load.r,max(load.g,load.b)));
     // Stochastic rounding of fractional light removes 8-bit halo contours.
     // Anchor it to arcade pixels so static light stays still at every scale.
     float rounding=.5;
