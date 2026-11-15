@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "world_boss_light.h"
 #include "world_boot.h"
 #include "world_dispatch.h"
 #include "world_frame.h"
@@ -545,12 +546,18 @@ static uint32_t slowdown_palette(void)
 static WeaponEmitter weapon_lights[MAX_WEAPON_EMITTERS];
 static unsigned weapon_lights_count, weapon_scene;
 static int weapon_scroll_x,weapon_scroll_y;
+/* Key flight provenance by the board actor address and expected dispatch.
+   A recycled slot cannot inherit the light of the previous round. */
+static struct { unsigned expected,pass; WeaponEmission kind; } flight[65536];
+static unsigned weapon_pass;
 static void begin_weapon_pass(void)
 {
     unsigned scene=word(ram+0x80) | ((unsigned)word(ram+0x84)<<16);
     int x=word(ram+0xb70a),y=word(ram+0xb70c);
     int dx=(int16_t)(x-weapon_scroll_x),dy=(int16_t)(y-weapon_scroll_y);
     unsigned keep=0;
+    ++weapon_pass;
+    if(scene!=weapon_scene)memset(flight,0,sizeof flight);
     if(scene==weapon_scene && abs(dx)<=32 && abs(dy)<=32){
         for(unsigned i=0;i<weapon_lights_count;++i){
             WeaponEmitter e=weapon_lights[i];
@@ -562,16 +569,50 @@ static void begin_weapon_pass(void)
     weapon_lights_count=keep;weapon_scene=scene;weapon_scroll_x=x;weapon_scroll_y=y;
 }
 
-static void observe_weapon(unsigned entry,unsigned actor)
+static int weapon_position(unsigned address)
+{
+    return (word(ram+address+1)<<8)|ram[address];
+}
+
+/* The renderer can temporarily move a part to draw it. Anchor to the
+   submitted sprite and check the owner's final state after all actors run. */
+static struct { uint16_t actor; WeaponEmitter light; } boss_lamps[MAX_WEAPON_EMITTERS];
+static unsigned boss_lamp_count;
+
+static void observe_boss(unsigned actor,unsigned sprite)
+{
+    if(sprite==word(ram+0x9e04) || boss_lamp_count==MAX_WEAPON_EMITTERS)return;
+    unsigned state=(word(ram+actor)+16u*word(ram+actor+2))&0xfffff;
+    BossLamp lamp=boss_lamp(state);
+    if(!lamp.kind)return;
+    int x=(int16_t)word(ram+sprite+4)-96+((ram[sprite+9]&1)?-lamp.x:lamp.x);
+    int y=375-(int16_t)word(ram+sprite+6)+((ram[sprite+9]&2)?-lamp.y:lamp.y);
+    if(x < -64 || x >= 384 || y < -64 || y >= 304)return;
+    boss_lamps[boss_lamp_count].actor=actor;
+    boss_lamps[boss_lamp_count++].light=(WeaponEmitter){x,y,0,0,lamp.kind,0};
+}
+
+static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
 {
     unsigned next=(word(ram+actor)+16u*word(ram+actor+2))&0xfffff;
-    if(next==0x1b4c)return;
-    WeaponEmission kind=weapon_launch(entry,next);
-    if(!kind)kind=weapon_flight(entry);
-    if(!kind || weapon_lights_count==MAX_WEAPON_EMITTERS)return;
+    if(next==0x1b4c){flight[actor].kind=WEAPON_DARK;return;}
+    WeaponEmission pulse=weapon_launch(entry,next);
+    WeaponEmission moving=weapon_flight(entry);
+    if(!moving)moving=round_from_launch(pulse);
+    if(!moving && flight[actor].expected==entry && flight[actor].pass==weapon_pass-1)
+        moving=flight[actor].kind;
+    if(!moving && !pulse)return;
+    flight[actor].kind=moving;flight[actor].expected=next;flight[actor].pass=weapon_pass;
+    WeaponEmission kind=pulse?pulse:moving;
+    if(weapon_lights_count==MAX_WEAPON_EMITTERS)return;
     int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
     if(x<0 || x>=320 || y<0 || y>=240)return;
     int vx=(int16_t)word(ram+actor+0x38),vy=-(int16_t)word(ram+actor+0x3a);
+    int moved_x=weapon_position(actor+0x20)-old_x;
+    int moved_y=old_y-weapon_position(actor+0x23);
+    if(!pulse && (moved_x || moved_y) && abs(moved_x)<32*256 && abs(moved_y)<32*256){
+        vx=moved_x;vy=moved_y;
+    }
     if(!vx && !vy){
         if(kind==RACK_PULSE)vy=1;
         else if(entry==0x9fa1 || entry==0x9e73 || entry==0xbb40 || entry==0x1d0be)vy=-1;
@@ -579,7 +620,6 @@ static void observe_weapon(unsigned entry,unsigned actor)
     }
     float mag=fmaxf(abs(vx),abs(vy));
     int dx=(int)lroundf(64*vx/mag),dy=(int)lroundf(64*vy/mag);
-    if(kind==ROCKET_PLUME){x-=dx*4/64;y-=dy*4/64;}
     /* A spread leaving one barrel illuminates one gas cloud. */
     if(kind<ROCKET_PLUME)for(unsigned i=0;i<weapon_lights_count;++i){
         WeaponEmitter e=weapon_lights[i];
@@ -590,10 +630,11 @@ static void observe_weapon(unsigned entry,unsigned actor)
 
 static int tick(uint16_t pads, uint16_t system)
 {
-    begin_weapon_pass();
     unsigned board_tick_before = word(ram + 0x276);
     world_clock_begin_pass(&board_clock);
     if (ram[0x262] & 1) {
+        begin_weapon_pass();
+        boss_lamp_count=0;
         WorldDispatch pass;
         uint32_t addr;
         world_dispatch_begin(&pass, ram);
@@ -606,14 +647,22 @@ static int tick(uint16_t pads, uint16_t system)
                 snprintf(failure, sizeof failure, "Actor list did not terminate at master %04X.", word(ram + 0x80));
                 return 0;
             }
-            uint16_t rendered_actor=pass.actor;
+            uint16_t rendered_actor=pass.actor,sprite=word(ram+0x9e04);
+            int old_x=weapon_position(rendered_actor+0x20),old_y=weapon_position(rendered_actor+0x23);
             if (!world_dispatch_native_video(&pass, ram, rom, tiles)) {
                 snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.%s%s",
                          (unsigned long)addr, pass.actor, word(ram + 0x80),
                          *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
             }
-            observe_weapon(addr,rendered_actor);
+            observe_weapon(addr,rendered_actor,old_x,old_y);
+            observe_boss(rendered_actor,sprite);
+        }
+        for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
+            unsigned actor=boss_lamps[i].actor;
+            unsigned state=(word(ram+actor)+16u*word(ram+actor+2))&0xfffff;
+            if(boss_lamp(state).kind==boss_lamps[i].light.kind)
+                weapon_lights[weapon_lights_count++]=boss_lamps[i].light;
         }
     }
     world_scene_weapons(weapon_lights,weapon_lights_count);
@@ -1246,7 +1295,7 @@ static void machine_reset(void)
     world_dispatch_reset();
     world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
     memcpy(layer_master, title_master_controls, sizeof layer_master);
-    weapon_lights_count=0;
+    weapon_lights_count=0;memset(flight,0,sizeof flight);
     ticks = 0;
     world_clock_reset(&board_clock, settings.timing_mode);
     world_ga20_reset(&pcm, samples, sizeof samples);

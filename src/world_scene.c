@@ -577,7 +577,7 @@ static void draw_sprites(double alpha)
  * Everything is presentation only. */
 enum { PW = W / 2, PH = H / 2, PN = PW * PH, MAX_LIGHTS = 140, BOUNCE_RAYS = 3 };
 
-typedef struct { float x, y, r, g, b, range, radius2, inv_range, peak; } Light;
+typedef struct { float x, y, r, g, b, range, radius2, inv_range, peak, axis_x, axis_y; } Light;
 
 static uint8_t solid[PN];                 /* rock in the playfield, below the surface */
 static float albedo[3][PN];               /* rock colour, 0..1 */
@@ -791,13 +791,26 @@ static void gather_tile_glow(void)
 /* Linear RGB and reach in half-resolution light probes. Tube and rack
    discharges scatter a little blue-green light in water. Powder is warm;
    rocket exhaust has a pale hot core and a shorter amber flight plume. */
-typedef struct { float r,g,b,range; } WeaponSpectrum;
+typedef struct { float r,g,b,range,offset,aim; } WeaponSpectrum;
 static const WeaponSpectrum spectra[]={
-    [TUBE_PULSE]={.48f,.93f,1.08f,29}, [HEAVY_TUBE]={.95f,1.44f,1.55f,38},
-    [RACK_PULSE]={.12f,.28f,.30f,15}, [GUN_FLASH]={2.75f,1.52f,.58f,48},
-    [MORTAR_FLASH]={3.65f,1.58f,.43f,64}, [ROCKET_IGNITION]={2.9f,1.63f,.76f,52},
-    [ARC_FLASH]={.65f,1.68f,2.7f,44}, [ROCKET_PLUME]={.88f,.38f,.09f,23},
-    [BURNING_FUEL]={1.65f,.52f,.08f,36}, [ARC_GLOW]={.24f,.70f,1.2f,32}
+    [TUBE_PULSE]={.48f,.93f,1.08f,29,0,0}, [HEAVY_TUBE]={.95f,1.44f,1.55f,38,0,0},
+    [RACK_PULSE]={.12f,.28f,.30f,15,0,0}, [GUN_FLASH]={2.75f,1.52f,.58f,48,0,0},
+    [MORTAR_FLASH]={3.65f,1.58f,.43f,64,0,0}, [ROCKET_IGNITION]={2.9f,1.63f,.76f,52,0,0},
+    [ARC_FLASH]={.65f,1.68f,2.7f,44,0,0}, [ROCKET_PLUME]={.82f,.36f,.085f,15,-4,-1},
+    [BURNING_FUEL]={1.65f,.52f,.08f,36,0,0}, [ARC_GLOW]={.24f,.70f,1.2f,27,0,0},
+    /* Range is in probes; offset is native pixels along the flight axis.
+       A zero aim is a round lamp; signed aim points forward or astern. */
+    [TORPEDO_LENS]={.56f,.035f,.019f,10,5,0},
+    [HEAVY_LENS]={.68f,.085f,.025f,14,6,0},
+    [CHARGE_FUSE]={.37f,.22f,.035f,9,0,0},
+    [TRACER]={.53f,.25f,.075f,9,-1,-1},
+    [SHELL_FUSE]={.52f,.12f,.035f,11,2,0},
+    [HOT_FRAGMENT]={.35f,.105f,.025f,7,0,0},
+    [BEAM_CORE]={.13f,.44f,.78f,14,1,0},
+    [ICE_SHARD]={.085f,.21f,.32f,7,0,0},
+    [BOSS_AMBER]={1.12f,.52f,.13f,24,0,0}, [BOSS_RED]={1.28f,.12f,.045f,25,0,0},
+    [BOSS_CYAN]={.12f,.82f,1.24f,28,0,0}, [BOSS_VIOLET]={.64f,.21f,1.04f,23,0,0},
+    [BOSS_TEAL]={.08f,1.08f,.72f,29,0,0}, [BOSS_ICE]={.38f,.88f,1.40f,31,0,0}
 };
 static const float flash_decay[]={1,.64f,.31f,.13f,.045f};
 static void gather_weapon_lights(void)
@@ -806,8 +819,13 @@ static void gather_weapon_lights(void)
         WeaponEmitter e=weapon_emitters[i];
         WeaponSpectrum s=spectra[e.kind];
         float power=flash_decay[e.age];
-        lights[light_count++]=(Light){.x=e.x*.5f,.y=e.y*.5f,.r=s.r*power,
-            .g=s.g*power,.b=s.b*power,.range=s.range};
+        float dx=e.dx/64.f,dy=e.dy/64.f;
+        if(s.offset || s.aim){
+            float length=sqrtf(dx*dx+dy*dy);
+            if(length>0){dx/=length;dy/=length;}
+        }
+        lights[light_count++]=(Light){.x=(e.x+dx*s.offset)*.5f,.y=(e.y+dy*s.offset)*.5f,.r=s.r*power,
+            .g=s.g*power,.b=s.b*power,.range=s.range,.axis_x=dx*s.aim,.axis_y=dy*s.aim};
     }
 }
 
@@ -918,6 +936,11 @@ static void transport_rows(int from, int to)
                     if (d2 > l->radius2) continue;
                     float d = sqrtf(d2), cut = 1.0f - d * l->inv_range;
                     float fall = cut * cut / (1.0f + d2 * 0.012f);
+                    if((l->axis_x || l->axis_y) && d>.001f){
+                        float facing=-(dx*l->axis_x+dy*l->axis_y)/d;
+                        float t=fminf(1,fmaxf(0,(facing+.15f)/.95f));
+                        fall*=.18f+.82f*t*t*(3-2*t);
+                    }
                     /* Bound the unoccluded contribution before tracing: distant
                        explosion cells otherwise spend most of a busy frame on
                        shadow rays for less than 1% light per colour channel. */
@@ -1059,13 +1082,14 @@ static void transport(const WorldSceneFx *fx)
             nose=centre+(best+2)*bow[2];
             float *e=gpu_light->emitters[lamps++];
             e[0]=(nose-g.shake_x/g.k)*.5f;e[1]=(bow[1]-g.shake_y/g.k)*.5f;e[2]=62;e[3]=(float)bow[2];
-            e[4]=2.8f;e[5]=1.94f;e[6]=.94f;
+            e[4]=2.8f;e[5]=1.94f;e[6]=.94f;e[7]=0;
         }
         gpu_light->count=lamps+light_count;
         if(gpu_light->count>WORLD_EMITTERS)gpu_light->count=WORLD_EMITTERS;
         gpu_light->waterline=g.waterline;
         for(int i=0;i<(int)(gpu_light->count-lamps);++i){
-            float *e=gpu_light->emitters[lamps+i];e[3]=0; const Light *l=lights+i;
+            float *e=gpu_light->emitters[lamps+i];const Light *l=lights+i;
+            e[3]=(l->axis_x || l->axis_y)?4+l->axis_x:0;e[7]=l->axis_y;
             e[0]=l->x-.5f*g.shake_x/g.k;e[1]=l->y-.5f*g.shake_y/g.k;e[2]=l->range;
             e[4]=l->r;e[5]=l->g;e[6]=l->b;
         }

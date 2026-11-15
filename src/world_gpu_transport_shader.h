@@ -69,7 +69,11 @@ float pointVisibility(float2 receiver,float2 emitter){
     }
     return 1;
 }
-float cone(float facing,float2 toLight){
+float cone(float facing,float2 toLight,uint emitter){
+    if(facing>2){
+        float2 axis=float2(facing-4,asfloat(scene.Load(44+32*emitter)));
+        return .18+.82*smoothstep(-.15,.80,-dot(axis,toLight));
+    }
     return facing==0?1:smoothstep(.885,.975,-toLight.x*facing);
 }
 // One group follows one parallel shaft of sunlight through the side view.
@@ -104,16 +108,17 @@ void directPass(uint3 id:SV_DispatchThreadID){
         [loop]while(bits){
             uint i=w*32+firstbitlow(bits);bits&=bits-1;
             float4 e=asfloat(scene.Load4(16+32*i));
-            if(e.w==0 && !(flags&(1|4|16)))continue;
+            bool headlamp=abs(e.w)==1;
+            if(!headlamp && !(flags&(1|4|16)))continue;
             float2 delta=e.xy-p;
             float d=length(delta);
             if(d>=e.z)continue;
             float2 dir=delta/max(.001,d);
-            float fall=cone(e.w,dir)*pow(saturate(1-d/e.z),2)/(1+d*d*(e.w==0?.0032:.00045));
+            float fall=cone(e.w,dir,i)*pow(saturate(1-d/e.z),2)/(1+d*d*(headlamp?.00045:.0032));
             float3 emission=asfloat(scene.Load3(32+32*i));
             if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
             float vis=pointVisibility(origin,2*e.xy);
-            energy+=emission*fall*vis*((e.w!=0 || (flags&1))?1:.10);
+            energy+=emission*fall*vis*((headlamp || (flags&1))?1:.10);
         }
     }
     float4 light=float4(energy,sun);
@@ -293,7 +298,7 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
             float2 delta=e.xy-p;float d2=dot(delta,delta);
             if(d2>=e.z*e.z)continue;
             float d=sqrt(max(.0001,d2));float2 dir=delta/d;
-            float strength=cone(e.w,dir)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.0032*d2);
+            float strength=cone(e.w,dir,i)*facingLight(sides,dir)*pow(saturate(1-d/e.z),2)/(1+.0032*d2);
             if(strength<.002)continue;
             float wet=saturate((max(p.y,e.y)-surface)/max(.01,abs(delta.y)));
             float3 colour=asfloat(scene.Load3(32+32*i));

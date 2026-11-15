@@ -5,7 +5,8 @@
    a rack or tube produces a brief disturbance, a burning motor stays bright. */
 typedef enum {
     WEAPON_DARK, TUBE_PULSE, HEAVY_TUBE, RACK_PULSE, GUN_FLASH, MORTAR_FLASH,
-    ROCKET_IGNITION, ARC_FLASH, ROCKET_PLUME, BURNING_FUEL, ARC_GLOW
+    ROCKET_IGNITION, ARC_FLASH, ROCKET_PLUME, BURNING_FUEL, ARC_GLOW,
+    TORPEDO_LENS, HEAVY_LENS, CHARGE_FUSE, TRACER, SHELL_FUSE, HOT_FRAGMENT, BEAM_CORE, ICE_SHARD, BOSS_AMBER, BOSS_RED, BOSS_CYAN, BOSS_VIOLET, BOSS_TEAL, BOSS_ICE
 } WeaponEmission;
 
 static inline WeaponEmission weapon_launch(unsigned entry, unsigned next)
@@ -40,6 +41,33 @@ static inline WeaponEmission weapon_flight(unsigned entry)
     case 0x7b8bc: return ROCKET_PLUME;
     case 0x1d2ea: case 0xad81: return BURNING_FUEL;
     case 0xbbda2: case 0xbbdb2: case 0xbbe4b: return ARC_GLOW;
+    case 0x9c33: case 0x9c82: case 0x13656: case 0x13664: case 0x13716:
+    case 0x7beaa: case 0x7bee0: case 0x7b7a8: case 0x7b7f8: return TORPEDO_LENS;
+    case 0xa80b5: case 0xa80ea: case 0xac0e: case 0xac65: case 0xafd3: return HEAVY_LENS;
+    case 0xa0a9: case 0x1388f: case 0x1389d: case 0xbe5dd: case 0xb75e9: return CHARGE_FUSE;
+    case 0x9fcd: case 0x9fda: case 0x139d9: case 0xb7d9c: case 0xb7e4f:
+    case 0xbc993: case 0xbc9e5: case 0x76aaa: case 0x76b07: return TRACER;
+    case 0xb2224: case 0xb2238: case 0xb22e7: case 0xb66bb: case 0xb62cc:
+    case 0x7c05b: case 0x1d0eb: return SHELL_FUSE;
+    case 0x7c0ef: case 0x7c13f: case 0x7c14f: case 0x7c195: case 0x7c1ac:
+    case 0xb0c4: case 0xb1da: case 0xb234: case 0xb2ab: return HOT_FRAGMENT;
+    case 0x79dd9: case 0x79e1a: return ICE_SHARD;
+    case 0x132a3: case 0x132ad: case 0x13308: case 0x13315: case 0x78680:
+    case 0xb0caf: case 0xb0d24: return BEAM_CORE;
+    default: return WEAPON_DARK;
+    }
+}
+
+static inline WeaponEmission round_from_launch(WeaponEmission pulse)
+{
+    switch(pulse){
+    case TUBE_PULSE: return TORPEDO_LENS;
+    case HEAVY_TUBE: return HEAVY_LENS;
+    case RACK_PULSE: return CHARGE_FUSE;
+    case GUN_FLASH: return TRACER;
+    case MORTAR_FLASH: return SHELL_FUSE;
+    case ROCKET_IGNITION: return ROCKET_PLUME;
+    case ARC_FLASH: return ARC_GLOW;
     default: return WEAPON_DARK;
     }
 }
