@@ -62,6 +62,7 @@ unsigned world_scene_take_rumble(void);
 /* Screen row where water effects began in the last render, for tests. */
 int world_scene_waterline(void);
 void world_scene_reset(void);
+extern void (*world_scene_light_ready)(const WorldLightScene *);
 void world_scene_light_target(WorldLightScene *target);
 /* Test view of the light transport (320x240): rock in its own colour,
    open water grey by sun visibility, plus the traced light. */

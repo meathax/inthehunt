@@ -242,8 +242,10 @@ static void present_game(const uint32_t *source)
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
         settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid || settings.fx_ocean_depth)
         && world_gpu_transport_available();
+    world_scene_light_ready=trace && !title && settings.gfx_quality==WORLD_GFX_HIGH ? world_gpu_prepare_lights : NULL;
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
+    world_scene_light_ready=NULL;
     if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (title && trace && lights.scale == k) {
         lights.flags |= 256u;

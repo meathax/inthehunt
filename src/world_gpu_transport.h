@@ -8,7 +8,7 @@ struct GpuTransport {
     Com<ID3D12PipelineState> direct, indirect, shade, volume, resolve;
     Com<ID3D12Resource> effect_upload[FRAMES], history, volume_field, effect_device, input_device;
     Com<ID3D12Resource> scene_upload[FRAMES], scene, direct_field, bounce_field, result;
-    bool ready=false, have_field=false;
+    bool ready=false, have_field=false, have_inputs=false;
     uint32_t revision=0, flags=0;
     int scale=0;
 
@@ -16,17 +16,20 @@ struct GpuTransport {
     Com<ID3D12Resource> time_readback;
     UINT64 frequency=0;
     unsigned sample_counter=0, slow_samples=0, fast_samples=0;
+    bool early_sample[FRAMES]={}, split_sample[FRAMES]={};
     bool measured[FRAMES]={}, measured_medium[FRAMES]={}, budget_mode=false, log_times=false;
 
     // The caller already waited on this frame slot's fence.
     void read_time(UINT frame){
         if(!measured[frame])return;
         measured[frame]=false;
-        D3D12_RANGE bytes={frame*16u,(frame+1)*16u};
+        D3D12_RANGE bytes={frame*32u,(frame+1)*32u};
         void *mapped=nullptr;
         if(FAILED(time_readback->Map(0,&bytes,&mapped)))return;
-        const UINT64 *times=static_cast<const UINT64*>(mapped)+2*frame;
-        double ms=(times[1]-times[0])*1000.0/frequency;
+        const UINT64 *times=static_cast<const UINT64*>(mapped)+4*frame;
+        UINT64 ticks=times[3]-times[2];
+        if(split_sample[frame])ticks+=times[1]-times[0];
+        double ms=ticks*1000.0/frequency;
         D3D12_RANGE no_writes={0,0};
         time_readback->Unmap(0,&no_writes);
         if(log_times)fprintf(stderr,"GPU effects sample %.3f ms\n",ms);
@@ -40,9 +43,9 @@ struct GpuTransport {
     bool init(ID3D12Device *dev, ID3D12CommandQueue *queue=nullptr)
     {
         if(queue && SUCCEEDED(queue->GetTimestampFrequency(&frequency)) && frequency){
-            D3D12_QUERY_HEAP_DESC q={D3D12_QUERY_HEAP_TYPE_TIMESTAMP,2*FRAMES,0};
+            D3D12_QUERY_HEAP_DESC q={D3D12_QUERY_HEAP_TYPE_TIMESTAMP,4*FRAMES,0};
             if(SUCCEEDED(dev->CreateQueryHeap(&q,IID_PPV_ARGS(time_queries.put()))))
-                buffer(dev,D3D12_HEAP_TYPE_READBACK,FRAMES*16,D3D12_RESOURCE_STATE_COPY_DEST,time_readback.put());
+                buffer(dev,D3D12_HEAP_TYPE_READBACK,FRAMES*32,D3D12_RESOURCE_STATE_COPY_DEST,time_readback.put());
             log_times=getenv("WORLD_PACING_LOG")!=nullptr;
         }
         D3D12_ROOT_PARAMETER params[8]={};
@@ -88,22 +91,19 @@ struct GpuTransport {
         return ready;
     }
 
-    bool record(ID3D12GraphicsCommandList *cmd,UINT frame,int k,const WorldLightScene &data,
-                ID3D12Resource *source,ID3D12Resource *picture)
-    {
+    bool needs_light(const WorldLightScene &data) const {
+        return !have_field || revision!=data.revision || flags!=data.flags || scale!=data.scale;
+    }
+    bool prepare(ID3D12GraphicsCommandList *cmd,ID3D12Resource *upload,int k,
+                 const WorldLightScene &data,uint32_t dispatch_flags){
+        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
-        read_time(frame);
-        bool medium=(data.flags&1024)!=0 && (data.flags&23)!=0;
-        uint32_t dispatch_flags=data.flags | (medium && budget_mode ? 2048u : 0u);
-        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
-        bool measure=time_readback && (medium || log_times) && (changed || !(data.flags&23)) && (++sample_counter%16==0);
-        if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2);
         if (changed || scale!=k) {
             void *map=nullptr;
             D3D12_RANGE empty={0,0};
-            if(FAILED(scene_upload[frame]->Map(0,&empty,&map)))return false;
+            if(FAILED(upload->Map(0,&empty,&map)))return false;
             memcpy(map,&data,offsetof(WorldLightScene,effects));
             auto *packed=static_cast<WorldLightScene*>(map);
             packed->flags=dispatch_flags;
@@ -119,13 +119,44 @@ struct GpuTransport {
                     bins[y*10+x][i/32]|=1u<<(i%32);
             }
             memcpy(packed->light_bins,bins,sizeof bins);
-            scene_upload[frame]->Unmap(0,nullptr);
+            upload->Unmap(0,nullptr);
             if(have_field)
                 transition(scene.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
-            cmd->CopyBufferRegion(scene.get(),0,scene_upload[frame].get(),0,offsetof(WorldLightScene,effects));
+            cmd->CopyBufferRegion(scene.get(),0,upload,0,offsetof(WorldLightScene,effects));
             transition(scene.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             scale=k;
         }
+        if (changed && (data.flags&23)) {
+            cmd->SetComputeRootSignature(root.get());
+            cmd->SetComputeRootShaderResourceView(0,scene->GetGPUVirtualAddress());
+            cmd->SetComputeRootUnorderedAccessView(2,direct_field->GetGPUVirtualAddress());
+            cmd->SetComputeRootUnorderedAccessView(3,bounce_field->GetGPUVirtualAddress());
+            D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
+            cmd->ResourceBarrier(1,&sync);
+            cmd->SetPipelineState(direct.get());cmd->Dispatch(20,15,1);
+            cmd->ResourceBarrier(1,&sync);
+            cmd->SetPipelineState(indirect.get());cmd->Dispatch(20,15,1);
+            cmd->ResourceBarrier(1,&sync);
+            cmd->SetPipelineState(resolve.get());cmd->Dispatch(20,15,1);
+            cmd->ResourceBarrier(1,&sync);
+        }
+        revision=data.revision;flags=dispatch_flags;have_field=true;
+        return true;
+    }
+
+    bool record(ID3D12GraphicsCommandList *cmd,UINT frame,int k,const WorldLightScene &data,
+                ID3D12Resource *source,ID3D12Resource *picture)
+    {
+        auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
+            auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
+        };
+        read_time(frame);
+        bool medium=(data.flags&1024)!=0 && (data.flags&23)!=0;
+        uint32_t dispatch_flags=data.flags | (medium && budget_mode ? 2048u : 0u);
+        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
+        bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&23)) && (++sample_counter%16==0));
+        if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2);
+        if(!prepare(cmd,scene_upload[frame].get(),k,data,dispatch_flags))return false;
         void *effect_map=nullptr;
         D3D12_RANGE empty={0,0};
         if(FAILED(effect_upload[frame]->Map(0,&empty,&effect_map)))return false;
@@ -134,10 +165,11 @@ struct GpuTransport {
         effect_upload[frame]->Unmap(0,nullptr);
         // A scaled frame is sampled repeatedly by neighboring shader lanes.
         // Stage it and the particle lists in local GPU memory before dispatch.
-        if(have_field){
+        if(have_inputs){
             transition(input_device.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
             transition(effect_device.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
         }
+        have_inputs=true;
         cmd->CopyBufferRegion(input_device.get(),0,source,0,W*H*k*k*4);
         cmd->CopyBufferRegion(effect_device.get(),0,effect_upload[frame].get(),0,bytes);
         transition(input_device.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -153,15 +185,6 @@ struct GpuTransport {
         cmd->SetComputeRootUnorderedAccessView(7,volume_field->GetGPUVirtualAddress());
         D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
         cmd->ResourceBarrier(1,&sync);
-        if (changed && (data.flags&23)) {
-            cmd->SetPipelineState(direct.get());cmd->Dispatch(20,15,1);
-            cmd->ResourceBarrier(1,&sync);
-            cmd->SetPipelineState(indirect.get());cmd->Dispatch(20,15,1);
-            cmd->ResourceBarrier(1,&sync);
-            cmd->SetPipelineState(resolve.get());cmd->Dispatch(20,15,1);
-            cmd->ResourceBarrier(1,&sync);
-        }
-        revision=data.revision;flags=dispatch_flags;have_field=true;
         if(data.flags&(32|512)){
             cmd->SetPipelineState(volume.get());cmd->Dispatch(10,8,1);
             cmd->ResourceBarrier(1,&sync);
@@ -175,8 +198,10 @@ struct GpuTransport {
         cmd->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
         transition(result.get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         if(measure){
-            cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2+1);
-            cmd->ResolveQueryData(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*2,2,time_readback.get(),frame*16);
+            cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+3);
+            cmd->ResolveQueryData(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2,2,time_readback.get(),frame*32+16);
+            split_sample[frame]=early_sample[frame];
+            early_sample[frame]=false;
             measured[frame]=true;
             measured_medium[frame]=medium;
         }

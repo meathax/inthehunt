@@ -158,6 +158,11 @@ void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
 
 struct Presenter {
     GpuTransport transport;
+    Com<ID3D12CommandAllocator> light_alloc[FRAMES];
+    Com<ID3D12GraphicsCommandList> light_cmd;
+    Com<ID3D12Resource> light_upload[FRAMES];
+    UINT64 light_fence[FRAMES]={};
+    bool early_light_failed=false;
     const WorldLightScene *light_frame=nullptr;
     HWND parent = nullptr;
     Com<IDXGIFactory4> factory;
@@ -436,6 +441,52 @@ extern "C" void world_gpu_show(int show)
     gpu->shown = show != 0;
 }
 
+// Queue geometry-dependent lighting while CPU sprite/layer composition runs.
+extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
+{
+    Presenter *p=gpu;
+    if(!p || !data || !p->transport.ready || p->early_light_failed ||
+       !(data->flags&23) || !p->transport.needs_light(*data))return;
+    UINT f=p->frame_index;
+    if(p->fence->GetCompletedValue()<std::max(p->light_fence[f],p->frame_fence[f]))return;
+    if(!p->light_alloc[f] &&
+       (FAILED(p->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(p->light_alloc[f].put()))) ||
+        FAILED(buffer(p->device.get(),D3D12_HEAP_TYPE_UPLOAD,offsetof(WorldLightScene,effects),
+                      D3D12_RESOURCE_STATE_GENERIC_READ,p->light_upload[f].put())))){
+        p->early_light_failed=true;return;
+    }
+    if(!p->light_cmd){
+        if(FAILED(p->device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,p->light_alloc[f].get(),
+                                              nullptr,IID_PPV_ARGS(p->light_cmd.put())))){p->early_light_failed=true;return;}
+    }else if(FAILED(p->light_alloc[f]->Reset()) || FAILED(p->light_cmd->Reset(p->light_alloc[f].get(),nullptr))){
+        p->early_light_failed=true;return;
+    }
+    auto &transport=p->transport;
+    transport.read_time(f);
+    bool sample=transport.time_readback && transport.log_times && ++transport.sample_counter%16==0;
+    auto *cmd=p->light_cmd.get();
+    if(sample)cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4);
+    bool had_field=transport.have_field;
+    auto old_revision=transport.revision,old_flags=transport.flags;
+    int old_scale=transport.scale;
+    bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,data->flags);
+    if(sample){
+        cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4+1);
+        cmd->ResolveQueryData(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4,2,
+                              transport.time_readback.get(),f*32);
+    }
+    if(FAILED(cmd->Close()) || !ok){
+        transport.have_field=had_field;
+        transport.revision=old_revision;transport.flags=old_flags;transport.scale=old_scale;
+        p->early_light_failed=true;
+        return;
+    }
+    transport.early_sample[f]=sample;
+    ID3D12CommandList *lists[]={p->light_cmd.get()};
+    p->queue->ExecuteCommandLists(1,lists);
+    p->light_fence[f]=++p->fence_value;
+    if(FAILED(p->queue->Signal(p->fence.get(),p->light_fence[f])))p->early_light_failed=true;
+}
 extern "C" int world_gpu_transport_available(void) { return gpu && gpu->shown && gpu->transport.ready; }
 extern "C" void world_gpu_light_frame(const WorldLightScene *frame) { if(gpu) gpu->light_frame=frame; }
 

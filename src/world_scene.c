@@ -47,6 +47,7 @@ void world_scene_weapons(const WeaponEmitter *emitters, unsigned count)
 static int new_frame;
 static int scene_cache_valid;
 static int have_history;
+void (*world_scene_light_ready)(const WorldLightScene *);
 static WorldLightScene *gpu_light;
 void world_scene_light_target(WorldLightScene *target)
 {
@@ -1832,6 +1833,13 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     double t1 = stamp();
     if(changed_frame || fx_changed || cached_scale!=k || ((fx->smooth || fx->interp) && sprite_alpha!=alpha))draw_sprites(alpha);
     if(changed_frame || fx_changed)transport(fx);
+    if(gpu_light){
+        gpu_light->scale=k;
+        gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
+            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
+        gpu_light->waterline=g.waterline;
+        if (world_scene_light_ready) world_scene_light_ready(gpu_light);
+    }
     if (new_frame) {
         waterfx_begin_frame();
         waterfx_motion(fx);
@@ -1900,10 +1908,6 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
     for (size_t i=0, n=(size_t)g.ow*(H-HUD)*k; i<n; ++i)
         if (hud_overlay[i]) out[(size_t)g.ow*HUD*k+i]=hud_overlay[i];
     if(gpu_light){
-        gpu_light->scale=k;
-        gpu_light->flags=(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
-            (fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u);
-        gpu_light->waterline=g.waterline;
         /* Tag visibility only in occupied tiles. Opaque UI written later stays
            protected. Each bit follows the sampling rule of its CPU effect. */
         for(int tile=0;gpu_light->effects.count && tile<WORLD_EFFECT_TILES;++tile){

@@ -23,6 +23,7 @@ int world_gpu_open(void *parent, char *error, size_t error_size);
 void world_gpu_close(void);
 int world_gpu_active(void);
 int world_gpu_transport_available(void);
+void world_gpu_prepare_lights(const WorldLightScene *scene);
 void world_gpu_light_frame(const WorldLightScene *frame);
 /* Hide or show the view; while hidden the window draws itself with GDI. */
 void world_gpu_show(int show);
