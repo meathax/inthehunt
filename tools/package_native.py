@@ -19,7 +19,7 @@ FILES = {
     "LICENSES/dxcompiler-MIT.txt": "LICENSES/dxcompiler-MIT.txt",
     "LICENSES/BlurBusters-CRT-Beam-Simulator-MIT.txt": "LICENSES/BlurBusters-CRT-Beam-Simulator-MIT.txt",
 }
-INSTRUCTIONS = """IN THE HUNT - Windows edition
+INSTRUCTIONS = """IN THE HUNT - Windows edition ({version})
 
 Open InTheHunt.exe and select your In the Hunt MAME ZIP or 7z archive.
 For a split clone, keep the parent inthunt.zip or inthunt.7z alongside it.
@@ -55,6 +55,6 @@ if __name__ == "__main__":
         for f in sorted(shaders.rglob("*")):
             if f.is_file():
                 archive.write(f, "shaders/" + f.relative_to(shaders).as_posix())
-        archive.writestr("START-HERE.txt", INSTRUCTIONS)
+        archive.writestr("START-HERE.txt", INSTRUCTIONS.format(version=(ROOT / "VERSION").read_text().strip()))
     temporary.replace(output)
     print(output)

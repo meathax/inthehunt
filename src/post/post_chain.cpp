@@ -68,6 +68,7 @@ cbuffer C : register(b0) {
     float4 geom;       // curvature x, curvature y, corner radius (fraction of height), sharpen 0..1
     float4 beam;       // raster position 0..1, display refreshes per emulated refresh, gain, gamma
     uint4 mode2;       // background encode, bezel on, keep caller's background, unused
+    float4 camera;
     float4 uvs;        // valid region of t0 / texture size (x, y); 1 = whole texture
 };
 Texture2D tex : register(t0);
@@ -141,7 +142,17 @@ float3 sharpen(float2 uv, float3 e) {
 
 float4 ps_pixels(float4 pos : SV_Position) : SV_Target {
     float2 uv = (pos.xy - dst_rect.xy) / (dst_rect.zw - dst_rect.xy);
-    return float4(tex.SampleLevel(s_point, uv, 0).rgb, 1);
+    float4 base=tex.SampleLevel(s_point,uv,0);
+    if(mode2.w){
+        uint plane=(uint)round(base.a*255);
+        if(plane==251 || plane==252){
+            float2 shift=plane==251 ? camera.xy : camera.zw;
+            float4 shifted=tex.SampleLevel(s_point,uv+shift*src_size.zw,0);
+            // Never pull sprite, HUD or other-plane colour across an edge.
+            if(shifted.a==base.a)base=shifted;
+        }
+    }
+    return float4(base.rgb,1);
 }
 
 float4 ps(float4 pos : SV_Position) : SV_Target {
@@ -218,6 +229,7 @@ struct Constants {
     float geom[4];
     float beam[4];
     uint32_t mode2[4];
+    float camera[4];
     float uvs[4];
 };
 
@@ -531,6 +543,7 @@ struct PostChain::Impl {
         Filter filter = kNearest;
         Encode encode = kCopy;
         Encode background = kSdr;
+        const float *camera_offsets=nullptr;
         bool pixels = false;
         bool final_pass = false;            // adjustments, curvature and bezel apply
         bool beam = false;
@@ -579,6 +592,10 @@ struct PostChain::Impl {
             c.mode2[2] = s.keep_background && !s.bezel ? 1u : 0u;
         }
         c.mode2[0] = a.background;
+        if(a.camera_offsets){
+            std::copy_n(a.camera_offsets,4,c.camera);
+            c.mode2[3]=std::any_of(c.camera,c.camera+4,[](float v){return v!=0;});
+        }
         c.beam[0] = a.beam_pos;
         c.beam[1] = a.beam_fph;
         c.beam[2] = std::clamp(s.beam.gain, 0.05f, 1.0f);
@@ -1077,7 +1094,7 @@ void PostChain::process(ID3D12GraphicsCommandList* cmd, ID3D12Resource* input, u
 }
 
 void PostChain::present_pixels(ID3D12GraphicsCommandList* cmd, ID3D12Resource* src,
-                               uint32_t width, uint32_t height, const Output& out) {
+                               uint32_t width, uint32_t height, const Output& out, const float *camera_offsets) {
     Impl& m=*impl_;
     m.collect_retired();
     Impl::DrawArgs a;
@@ -1086,6 +1103,7 @@ void PostChain::present_pixels(ID3D12GraphicsCommandList* cmd, ID3D12Resource* s
     a.final_pass=true;
     a.filter=width>(a.rect.x1-a.rect.x0)*1.5f || height>(a.rect.y1-a.rect.y0)*1.5f ? kBox : kNearest;
     a.pixels=a.filter==kNearest;
+    a.camera_offsets=camera_offsets;
     a.background=kSdr;
     a.encode=kSdr;
     m.draw(cmd,a,out.rtv,out.format,out.width,out.height);

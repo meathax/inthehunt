@@ -46,6 +46,9 @@ void world_scene_weapons(const WeaponEmitter *emitters, unsigned count)
 
 static int new_frame;
 static int scene_cache_valid;
+static float *camera_output;
+static int camera_fractional;
+void world_scene_camera_output(float offsets[4]) { camera_output=offsets; }
 static int have_history;
 void (*world_scene_light_ready)(const WorldLightScene *);
 static WorldLightScene *gpu_light;
@@ -1440,6 +1443,12 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
                 int volume=(fx->water_volume || fx->rays || fx->ocean_depth) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
                 c=(c&0xffffff)|(volume?0xee000000u:0xfe000000u);
             }
+            /* In the GPU input tag, retain the five volume/particle bits
+               alongside the plane. Sprites and UI keep their original tag. */
+            if(camera_fractional && !hud_pixel && (id==1 || id==2)){
+                unsigned tag=gpu_light ? ((unsigned)id<<5)|((c>>24)&31) : 250u+id;
+                c=(c&0xffffffu)|(tag<<24);
+            }
             o[X] = c;
         }
     }
@@ -1802,7 +1811,13 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         if (layer_rows[layer]) x = 0;                 /* per-row scroll: left as the game set it */
         g.off_x[layer] = (int)floor(x * k + 0.5) + MARGIN * k;
         g.off_y[layer] = (int)floor(y * k + 0.5) + MARGIN * k;
+        if(camera_output && layer){
+            camera_output[2*(layer-1)]=(float)(x*k-(g.off_x[layer]-MARGIN*k));
+            camera_output[2*(layer-1)+1]=(float)(y*k-(g.off_y[layer]-MARGIN*k));
+        }
     }
+
+    camera_fractional=camera_output && (camera_output[0] || camera_output[1] || camera_output[2] || camera_output[3]);
 
     /* Ripples stay local to the surface; full-screen shimmer was removed. */
     for (int y = 0; y < H; ++y) {

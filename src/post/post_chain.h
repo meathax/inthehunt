@@ -267,7 +267,7 @@ public:
     // present(): once per DISPLAY REFRESH.
     // Present the game's complete SDR image directly with its pixel-art filter.
     void present_pixels(ID3D12GraphicsCommandList* cmd, ID3D12Resource* src,
-                        uint32_t width, uint32_t height, const Output& out);
+                        uint32_t width, uint32_t height, const Output& out, const float *camera_offsets=nullptr);
     void present(ID3D12GraphicsCommandList* cmd, const Output& out, const RefreshTiming& timing = RefreshTiming{});
     // present() for an exact multiple: sub-frame `subframe` of `total` per
     // emulated refresh; a call with subframe == 0 starts the next refresh.

@@ -308,6 +308,12 @@ int main(void){
     world_scene_render(picture,2,1.5,&fx,8250); assert(g.off_x[1]==MARGIN*2-2);
     frame.layers[1].scroll_x+=100; world_scene_submit(&frame);
     world_scene_render(picture,2,2,&fx,8300); assert(g.off_x[1]==MARGIN*2);
+    fixture(); frame.frac[2]=64;world_scene_submit(&frame);
+    float offsets[4]={0};
+    world_scene_camera_output(offsets);
+    world_scene_render(picture,2,1,&fx,8400);
+    assert(fabs((g.off_x[2]-MARGIN*2)+offsets[2]-.5)<1e-6);
+    world_scene_camera_output(NULL);
     puts("PASS: immediate sprite pose and camera-only prediction on pans, stops, reversals and cuts");
     /* Off-screen tile memory can contain different artwork. Shaking toward
        the top must keep sampling the first displayed row at every scale. */

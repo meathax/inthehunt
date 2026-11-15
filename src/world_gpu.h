@@ -24,6 +24,7 @@ void world_gpu_close(void);
 int world_gpu_active(void);
 int world_gpu_transport_available(void);
 void world_gpu_prepare_lights(const WorldLightScene *scene);
+void world_gpu_camera_offsets(const float *offsets);
 void world_gpu_light_frame(const WorldLightScene *frame);
 /* Hide or show the view; while hidden the window draws itself with GDI. */
 void world_gpu_show(int show);
@@ -52,6 +53,8 @@ int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refres
 
 /* Headless: render frame through preset (path or "") at width x height into
  * out (ARGB). Creates and releases its own device. */
+int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
+                               unsigned scale,char *error,size_t size);
 int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,char *error,size_t size);
 int world_gpu_render_offscreen(const uint32_t *frame, const char *preset, int scaling,
                                unsigned width, unsigned height, uint32_t *out,

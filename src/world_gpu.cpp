@@ -164,6 +164,7 @@ struct Presenter {
     UINT64 light_fence[FRAMES]={};
     bool early_light_failed=false;
     const WorldLightScene *light_frame=nullptr;
+    const float *camera_offsets=nullptr;
     HWND parent = nullptr;
     Com<IDXGIFactory4> factory;
     Com<ID3D12Device> device;
@@ -489,6 +490,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
     if(FAILED(p->queue->Signal(p->fence.get(),p->light_fence[f])))p->early_light_failed=true;
 }
 extern "C" int world_gpu_transport_available(void) { return gpu && gpu->shown && gpu->transport.ready; }
+extern "C" void world_gpu_camera_offsets(const float *offsets) { if(gpu) gpu->camera_offsets=offsets; }
 extern "C" void world_gpu_light_frame(const WorldLightScene *frame) { if(gpu) gpu->light_frame=frame; }
 
 extern "C" int world_gpu_visible(void) { return gpu && gpu->shown; }
@@ -666,7 +668,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     timing.source_time = source_time;
     timing.span = span;
     if (fresh && !p->beam && p->chain->preset_path().empty())
-        p->chain->present_pixels(cmd,fresh,W*k,H*k,out);
+        p->chain->present_pixels(cmd,fresh,W*k,H*k,out,p->camera_offsets);
     else
         p->chain->frame(cmd, fresh, out, timing);
     D3D12_RESOURCE_BARRIER t = barrier(target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -699,7 +701,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     p->last_present = now;
 }
 
-static int render_offscreen(const WorldLightScene *lighting, const uint32_t *frame, const char *preset, int scaling, unsigned width,
+static int render_offscreen(const float *offsets,const WorldLightScene *lighting, const uint32_t *frame, const char *preset, int scaling, unsigned width,
                                           unsigned height, uint32_t *out_pixels, char *error, size_t error_size)
 {
     Com<IDXGIFactory4> factory;
@@ -767,7 +769,8 @@ static int render_offscreen(const WorldLightScene *lighting, const uint32_t *fra
             alloc->Reset();
             cmd->Reset(alloc.get(), nullptr);
         }
-        chain->frame(cmd.get(), i == 0 ? picture.get() : picture.get(), out);
+        if(offsets)chain->present_pixels(cmd.get(),picture.get(),W,H,out,offsets);
+        else chain->frame(cmd.get(),picture.get(),out);
     }
     t = barrier(target.get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
     cmd->ResourceBarrier(1, &t);
@@ -795,11 +798,17 @@ static int render_offscreen(const WorldLightScene *lighting, const uint32_t *fra
 extern "C" int world_gpu_render_offscreen(const uint32_t *frame,const char *preset,int scaling,
                                           unsigned width,unsigned height,uint32_t *out,char *error,size_t size)
 {
-    return render_offscreen(nullptr,frame,preset,scaling,width,height,out,error,size);
+    return render_offscreen(nullptr,nullptr,frame,preset,scaling,width,height,out,error,size);
 }
 
 extern "C" int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
                                          char *error,size_t size)
 {
-    return render_offscreen(scene,pixels,"",0,W,H,out,error,size);
+    return render_offscreen(nullptr,scene,pixels,"",0,W,H,out,error,size);
+}
+
+extern "C" int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
+                                          unsigned scale,char *error,size_t size)
+{
+    return render_offscreen(offsets,nullptr,pixels,"",0,W*scale,H*scale,out,error,size);
 }

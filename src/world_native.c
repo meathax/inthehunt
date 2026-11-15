@@ -231,6 +231,8 @@ static void beam_step(void)
     world_window_set_source_time(beam_time);
 }
 
+static float displayed_camera_offsets[4];
+
 static void present_game(const uint32_t *source)
 {
     /* The title menu sits over the running attract sequence, at 1x. */
@@ -242,6 +244,9 @@ static void present_game(const uint32_t *source)
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
         settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid || settings.fx_ocean_depth)
         && world_gpu_transport_available();
+    float offsets[4]={0};
+    int pixel_camera=!title && !settings.crt_shader && world_gpu_visible();
+    world_scene_camera_output(pixel_camera ? offsets : NULL);
     world_scene_light_ready=trace && !title && settings.gfx_quality==WORLD_GFX_HIGH ? world_gpu_prepare_lights : NULL;
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
@@ -260,7 +265,11 @@ static void present_game(const uint32_t *source)
         world_menu_draw_text(shown, 320u * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
     }
     world_gpu_light_frame(trace && lights.scale==k ? &lights : NULL);
+    memcpy(displayed_camera_offsets,offsets,sizeof offsets);
+    world_gpu_camera_offsets(pixel_camera ? offsets : NULL);
     world_window_present(shown, k);
+    world_gpu_camera_offsets(NULL);
+    world_scene_camera_output(NULL);
     world_gpu_light_frame(NULL);
 }
 

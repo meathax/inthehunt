@@ -5,6 +5,26 @@
 static WorldLightScene scene={};
 static uint32_t frame[320*240], clear_view[320*240], wall_view[320*240];
 int main() {
+    // At 4x, a quarter-source-texel pan must advance an edge one output
+    // pixel per refresh. The two planes move independently of a fixed sprite.
+    static uint32_t scaled[1280*960];
+    char camera_error[512]={};
+    for(int step=-2;step<=2;++step){
+        for(int y=0;y<240;++y)for(int x=0;x<320;++x){
+            unsigned tag=y<80?251:y<160?252:255;
+            frame[y*320+x]=(tag<<24)|(x>=100?0xffffff:0);
+        }
+        float offsets[4]={step*.25f,0,-step*.25f,0};
+        if(!world_gpu_camera_offscreen(offsets,frame,scaled,4,camera_error,sizeof camera_error)){
+            puts(camera_error);return 1;
+        }
+        for(int band=0;band<3;++band){
+            const uint32_t *row=scaled+1280*(band*320+80);
+            int edge=0;while(edge<1280 && !(row[edge]&0xffffff))++edge;
+            if(edge!=400+(band==0?-step:band==1?step:0))return 1;
+        }
+    }
+    puts("PASS: quarter-texel camera steps advance exactly one display pixel in both directions; fixed sprites stay still.");
     scene.scale=1;scene.waterline=-1;
     unsigned center=120*320+120, tile=(120/8)*40+120/8;
     std::fill_n(frame,320*240,0xf7505050u);

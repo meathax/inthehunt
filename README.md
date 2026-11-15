@@ -1,8 +1,8 @@
 # IN THE HUNT
 
-**0.9.3 Beta** Ãƒâ€šÃ‚Â· An unofficial native Windows port of IremÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s submarine shooter.
+**0.9.4 Beta** | An unofficial native Windows port of Irem's submarine shooter.
 
-[**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) Ãƒâ€šÃ‚Â· [Release notes](https://github.com/meathax/inthehunt/releases/latest) Ãƒâ€šÃ‚Â· [Report a bug](https://github.com/meathax/inthehunt/issues)
+[**Download for Windows**](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) | [Release notes](https://github.com/meathax/inthehunt/releases/latest) | [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 - All six stages, both endings and local two-player co-op.
 - Keyboard and Xbox-style controllers, saved settings and pause menus.
@@ -16,6 +16,13 @@
   <img src="artwork/screenshots/ice-cavern.png" alt="Submarine combat beneath the ice" width="49%">
   <img src="artwork/screenshots/minefield.png" alt="Navigating an underwater minefield" width="49%">
 </p>
+
+## New in 0.9.4
+
+- Choose Low, Medium or High graphics quality. High is the default, and each effect can still be toggled individually.
+- Direct3D 12 now handles underwater lighting, shadows, water effects and fractional camera movement. On High, the GPU can trace lighting while the CPU composes the scene, reducing the work that must finish in sequence before each frame.
+- EXACT keeps arcade speed and supports VRR in focused borderless fullscreen. SMOOTH follows compatible fixed-refresh displays.
+- Import any supported In the Hunt MAME set layout: merged, non-merged or split, in ZIP or 7z format. See the regional and parent-set details below.
 
 ## Play
 
@@ -121,4 +128,4 @@ Game and host source live in `src/`; `tools/` contains build, import and runtime
 
 </details>
 
-In the Hunt Ãƒâ€šÃ‚Â© 1993 Irem. Unofficial and unaffiliated; a top-level project licence is not yet settled. Thanks to MAME, ymfm, CPS-2 Recomp, FinalBurn Neo, the MiSTer Irem M92 project, librashader, Libretro shader authors, DirectX Shader Compiler and Blur Busters. Dependency notices remain with the source and packaged libraries.
+In the Hunt (c) 1993 Irem. Unofficial and unaffiliated; a top-level project licence is not yet settled. Thanks to MAME, ymfm, CPS-2 Recomp, FinalBurn Neo, the MiSTer Irem M92 project, librashader, Libretro shader authors, DirectX Shader Compiler and Blur Busters. Dependency notices remain with the source and packaged libraries.

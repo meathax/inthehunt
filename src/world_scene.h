@@ -62,6 +62,8 @@ unsigned world_scene_take_rumble(void);
 /* Screen row where water effects began in the last render, for tests. */
 int world_scene_waterline(void);
 void world_scene_reset(void);
+/* Fractional source-texel offsets for the two scrolling planes. */
+void world_scene_camera_output(float offsets[4]);
 extern void (*world_scene_light_ready)(const WorldLightScene *);
 void world_scene_light_target(WorldLightScene *target);
 /* Test view of the light transport (320x240): rock in its own colour,
