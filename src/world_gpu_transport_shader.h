@@ -344,7 +344,9 @@ float rimMask(int2 pixel,int2 extent,bool scenery){
     pixel=clamp(pixel,0,extent-1);
     uint tag=picture.Load(4*(pixel.y*extent.x+pixel.x))>>24;
     // Occluding sprites and HUD cover the scenery; never outline their cutouts.
-    return ((tag&240)==160 || tag==255 || (scenery && tag>=96 && tag<128))?1.:0.;
+    // Destructible sprite panels and terrain form one visible facade.
+    // Both sides must recognize the union, including the inner rim tap.
+    return ((tag&240)==160 || tag==255 || (tag>=96 && tag<160))?1.:0.;
 }
 float4 exposedSides(int2 p,int2 extent,int width,bool scenery){
     int2 dx=int2(width,0),dy=int2(0,width);
@@ -399,9 +401,9 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(any(id.xy>=extent))return;
     uint offset=(id.y*extent.x+id.x)*4,c=picture.Load(offset);float3 base=rgb(c);
     uint tag=c>>24,flags=scene.Load(4);
-    bool terrainRim=tag>=96 && tag<128;
+    bool terrainRim=tag>=96 && tag<160;
     uint plane=255;
-    if(terrainRim){plane=251;tag=224+(tag&31);}
+    if(terrainRim){plane=tag>=128?250:251;tag=224+(tag&31);}
     if(tag>=32 && tag<96){
         plane=250+(tag>>5);
         tag=224+(tag&31);

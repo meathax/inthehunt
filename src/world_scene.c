@@ -1715,10 +1715,11 @@ static inline __attribute__((always_inline)) void compose_scaled_rows(int from, 
             }
             if(gpu_light && !hud_pixel){
                 int volume=(fx->water_volume || fx->rays || fx->ocean_depth) && id>=0 && id<3 && (g.waterline<0 || y1>=g.waterline);
-                // Tag the middle scenery plane before lighting. Its opaque pens
-                // form the cliffs, wrecks and pillars in front of the backdrop.
-                int terrain_rim=fx->rim && id==1;
-                unsigned tag=terrain_rim?(volume?0x6e:0x7e):rim_receiver?0xae:volume?0xee:0xfe;
+                // Foreground destructible tiles and middle scenery share
+                // the facade silhouette while retaining their drawing planes.
+                int terrain_rim=fx->rim && (id==0 || id==1);
+                unsigned scenery_tag=(id==0?0x80:0x60)|(volume?0x0e:0x1e);
+                unsigned tag=terrain_rim?scenery_tag:rim_receiver?0xae:volume?0xee:0xfe;
                 c=(c&0xffffffu)|(tag<<24);
             }
             /* In the GPU input tag, retain the five volume/particle bits
