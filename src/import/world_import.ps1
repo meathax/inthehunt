@@ -102,18 +102,25 @@ function Test-WorldNativeRomCache {
 function Read-WorldArchiveChips {
     param($Archive, $Scratch, $ByHash, $Alternates, $Sizes, $Found)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zipPath = $Archive.FullName
-    if ($Archive.Extension -ieq '.7z') {
-        # Repack in scratch so ZIP and solid 7z use the same member validation.
-        # Archive-controlled names never become filesystem destinations.
-        Copy-Item -LiteralPath $zipPath -Destination (Join-Path $Scratch 'source.7z') -Force -ErrorAction Stop
-        Push-Location -LiteralPath $Scratch
+    if ($Archive.Extension -ine '.7z') {
         try {
-            & (Get-WorldTar) -cf 'members.zip' --format zip '@source.7z'
-            if ($LASTEXITCODE) { throw "Cannot read $($Archive.Name)." }
-        } finally { Pop-Location }
-        $zipPath = Join-Path $Scratch 'members.zip'
+            Read-WorldZipChips $Archive.FullName $Scratch $ByHash $Alternates $Sizes $Found
+            return
+        } catch [IO.InvalidDataException] {
+            # Windows PowerShell cannot decode some valid ZIP methods (e.g. LZMA).
+            # Retry through bsdtar, retaining chips already verified in this import.
+        }
     }
+    Push-Location -LiteralPath $Scratch
+    try {
+        & (Get-WorldTar) -cf 'members.zip' --format zip ('@' + $Archive.FullName)
+        if ($LASTEXITCODE) { throw "Cannot decode $($Archive.Name). Check that the archive is complete and readable." }
+    } finally { Pop-Location }
+    Read-WorldZipChips (Join-Path $Scratch 'members.zip') $Scratch $ByHash $Alternates $Sizes $Found
+}
+
+function Read-WorldZipChips {
+    param($zipPath, $Scratch, $ByHash, $Alternates, $Sizes, $Found)
     $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
     $sha1 = [Security.Cryptography.SHA1]::Create()
     try {
