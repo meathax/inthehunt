@@ -1,12 +1,16 @@
 # In the Hunt
 
-**0.9.9 Beta** Â· An unofficial native Windows port of Iremâ€™s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.10 Beta** Â· An unofficial native Windows port of Iremâ€™s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
 [Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) Â· [Release notes](https://github.com/meathax/inthehunt/releases/latest) Â· [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
 
-## New in 0.9.9
+## New in 0.9.10
+
+Fixed visible lighting seams on destructible buildings. Foreground tiles, scenery and destructible sprite panels now share one continuous edge-lighting silhouette. Destroyed openings still receive their own edge lighting.
+
+## Lighting and sound
 
 Each stage now has its own lighting palette, water colour, shadow balance and scattering. Caverns and enclosed ruins have deeper blacks, while sunlight, metal highlights and bow lamps retain their detail.
 
