@@ -237,12 +237,15 @@ struct Presenter {
         if (!w || !h || (w == width && h == height)) return;
         wait_all();
         release_buffers();
-        swap->ResizeBuffers(BUFFERS, w, h, DXGI_FORMAT_B8G8R8A8_UNORM,
+        HRESULT resized = swap->ResizeBuffers(BUFFERS, w, h, DXGI_FORMAT_B8G8R8A8_UNORM,
                             (tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0) |
                             DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
-        width = w;
-        height = h;
-        buffers();
+        /* On failure the old buffers remain; keep their size and re-acquire them. */
+        if (SUCCEEDED(resized)) {
+            width = w;
+            height = h;
+        }
+        if (!buffers()) release_buffers();
         if (chain) apply(*chain, scaling, beam, width, height);
     }
 };
@@ -630,6 +633,8 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
         /* Never reset an allocator the GPU may still be using: skip this refresh. */
         if (p->fence->GetCompletedValue() < p->frame_fence[f]) return;
     }
+    /* No back buffer after a failed resize: skip rather than record into null. */
+    if (!p->back[p->swap->GetCurrentBackBufferIndex()]) return;
     p->alloc[f]->Reset();
     ID3D12GraphicsCommandList *cmd = p->cmd.get();
     cmd->Reset(p->alloc[f].get(), nullptr);

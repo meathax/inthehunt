@@ -522,6 +522,9 @@ static void sound_frame(void)
        queue near 50 ms. Linear interpolation; the phase carries over. */
 
     const double target = 2400.0;
+    /* After a stall the 0.5 percent controller would take about a minute to
+       drain a full FIFO; drop the backlog instead of carrying the latency. */
+    if (world_audio_output_level() > 2 * (unsigned)target) world_audio_output_trim((unsigned)target);
     double level = (double)world_audio_output_level();
     double error = (level - target) / target;
     if (error > 1.0) error = 1.0;
@@ -1760,6 +1763,9 @@ load_game_data:
                 fabs(hz / multiple * arcade_period / rate.QuadPart - 1.0) <= 0.006)
                 period = rate.QuadPart * multiple / hz;
         }
+        /* A stall (window drag, sleep, debugger) must not fast-forward the
+           board to catch up: beyond a few frames, rejoin the clock instead. */
+        if ((double)now.QuadPart - deadline > 4.0 * period) deadline = (double)now.QuadPart;
         /* Immediate presents do not throttle the loop. Wait before polling
            gameplay input and keep the deadline on the absolute board clock. */
         if (vrr) {

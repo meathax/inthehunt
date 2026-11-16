@@ -11,5 +11,7 @@ int world_audio_output_submit(const int16_t *samples, size_t count);
 void world_audio_output_pump(void);
 /* Samples queued but not yet played (FIFO plus device blocks). */
 unsigned world_audio_output_level(void);
+/* Drop the oldest FIFO samples until the level is at most keep. */
+void world_audio_output_trim(unsigned keep);
 void world_audio_output_close(void);
 #endif

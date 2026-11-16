@@ -105,3 +105,13 @@ unsigned world_audio_output_level(void)
 {
     return device ? fifo_count + in_flight * BLOCK : 0;
 }
+
+void world_audio_output_trim(unsigned keep)
+{
+    unsigned queued = in_flight * BLOCK;
+    unsigned allowed = keep > queued ? keep - queued : 0;
+    if (!device || fifo_count <= allowed) return;
+    unsigned drop = fifo_count - allowed;
+    fifo_read = (fifo_read + drop) % FIFO;
+    fifo_count -= drop;
+}

@@ -300,6 +300,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM l
     case WM_SYSKEYDOWN:
     case WM_SYSKEYUP:
         if (message == WM_SYSKEYDOWN) button_activity = 1;
+        /* A key released while Alt is held arrives here, not as WM_KEYUP. */
+        else if (wp < sizeof keys) keys[wp] = 0;
         /* F10 and Alt arrive as system keys; keep them out of the menu bar. */
         if (wp == VK_F10 && wp < sizeof keys) { keys[wp] = message == WM_SYSKEYDOWN; return 0; }
         return DefWindowProcW(hwnd, message, wp, lp);

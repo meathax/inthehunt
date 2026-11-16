@@ -162,7 +162,7 @@ static void paint(HWND window, Setup *s)
     HGDIOBJ old = SelectObject(dc, bitmap);
     HBRUSH background=CreateSolidBrush(RGB(5,20,31)); FillRect(dc,&r,background); DeleteObject(background);
     int art_height=r.bottom*470/700;
-    if(s->art) {
+    if(s->art && r.right > 0 && art_height > 0) {
         BITMAPINFO info={0}; info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
         info.bmiHeader.biWidth=s->art_width; info.bmiHeader.biHeight=-(LONG)s->art_height;
         info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=32;
