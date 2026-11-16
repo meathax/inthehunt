@@ -1,14 +1,18 @@
 # In the Hunt
 
-**0.9.11 Beta** Â· An unofficial native Windows port of Iremâ€™s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.12 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
-[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) Â· [Release notes](https://github.com/meathax/inthehunt/releases/latest) Â· [Report a bug](https://github.com/meathax/inthehunt/issues)
+[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
 
-## New in 0.9.11
+## New in 0.9.12
 
-The launcher now accepts LZMA-compressed ZIPs containing supported In the Hunt ROM chips. Select the archive as usual. The importer verifies each required chip before installing the game data.
+- After a pause in the game window (dragging the window, waking from sleep), play now resumes at normal speed instead of rushing through the missed time. Sound no longer lags behind the picture afterwards.
+- Keys released while Alt is held no longer stay pressed.
+- Fixed rare crashes when the ROM setup screen is minimised or the game window fails to resize.
+
+0.9.11 added import support for LZMA-compressed ROM ZIPs.
 
 ## Lighting and sound
 
@@ -46,7 +50,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 ## Graphics and frame pacing
 
-Open **Options â†’ Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
+Open **Options → Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
 Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
@@ -54,7 +58,7 @@ Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in
 
 To update, back up **`.local/world`**, extract the new version into a fresh folder and copy that directory across.
 
-Choose **Options â†’ Game â†’ Slowdown â†’ Arcade** for PCB-calibrated slowdown. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
+Choose **Options → Game → Slowdown → Arcade** for PCB-calibrated slowdown. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
 
 ## Build & credits
 
