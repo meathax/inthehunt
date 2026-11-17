@@ -1,18 +1,17 @@
 # In the Hunt
 
-**0.9.13 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.14 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
 [Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
 
-## New in 0.9.13
+## New in 0.9.14
 
-- **Caustics:** rippling sunlight on the sunlit seabed and rock.
-- **Strength sliders** for light shafts, caustics, sun shadows, point lights, depth and rim lighting (**Options → Enhance**).
-- **Brightness**, **ambient side borders** and **auto quality** (eases High lighting if the GPU falls behind) under **Options → Video**.
-- Story, ranking and name-entry screens keep their arcade colours.
-- About 20% less GPU lighting work and up to 1 ms less CPU time per frame at High, with the same picture.
+- **Smoother fullscreen:** EXACT pacing now checks that variable refresh is really active. On a fixed-refresh display it switches to vsync pacing (notice: *NO VRR: VSYNC PACING*) instead of showing torn, unevenly held frames.
+- **Ambient side borders** cost far less at 4K.
+
+0.9.13 added caustics, effect strength sliders, brightness, ambient borders and auto quality.
 
 ## Lighting and sound
 
@@ -52,7 +51,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 Open **Options → Enhance** to choose a preset, toggle any effect or set its strength. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
-Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
+Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver; without active VRR the game uses vsync pacing. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
 ## Updates & beta status
 
