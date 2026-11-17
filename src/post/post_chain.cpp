@@ -339,7 +339,7 @@ struct PostChain::Impl {
     uint32_t rtv_size = 0, srv_size = 0, srv_next = 0;
     static constexpr uint32_t kSrvTriples = 64;
 
-    Tex prep, latest, crt, subtex, prev1, prev2, beamtex;
+    Tex prep, latest, crt, subtex, prev1, prev2, beamtex, ambtex;
     Com<ID3D12Fence> fence;
     uint64_t fence_value = 0;
     HANDLE fence_event = nullptr;
@@ -400,7 +400,7 @@ struct PostChain::Impl {
         rtv_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         srv_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         prep.rtv_slot = 0; crt.rtv_slot = 1; subtex.rtv_slot = 2; latest.rtv_slot = 3;
-        prev1.rtv_slot = 4; prev2.rtv_slot = 5; beamtex.rtv_slot = 6;
+        prev1.rtv_slot = 4; prev2.rtv_slot = 5; beamtex.rtv_slot = 6; ambtex.rtv_slot = 7;
 
         Com<ID3DBlob> err;
         auto compile = [&](const char* entry, const char* target, Com<ID3DBlob>& out) {
@@ -649,16 +649,32 @@ struct PostChain::Impl {
     }
 
     // Fill the bars around the picture rectangle, before the picture itself.
+    // The glow is smooth, so it is blurred at 1/8 resolution and stretched:
+    // a 4K output pays for about 130,000 blur pixels instead of 8 million.
     void draw_ambient(ID3D12GraphicsCommandList* cmd, const DrawArgs& picture, const Output& out) {
         const Rect& r = picture.rect;
         if (!settings.ambient_borders || (r.x0 <= 0.5f && r.y0 <= 0.5f && r.x1 >= out.width - 0.5f && r.y1 >= out.height - 0.5f))
             return;
+        const uint32_t aw = std::max(1u, (out.width + 7) / 8), ah = std::max(1u, (out.height + 7) / 8);
+        const float sx = static_cast<float>(aw) / static_cast<float>(out.width);
+        const float sy = static_cast<float>(ah) / static_cast<float>(out.height);
+        ensure(ambtex, aw, ah, DXGI_FORMAT_R8G8B8A8_UNORM);
+        transition(cmd, ambtex, D3D12_RESOURCE_STATE_RENDER_TARGET);
         DrawArgs a = picture;
         a.ambient = true;
         a.pixels = false;
         a.final_pass = false;
         a.beam = false;
-        draw(cmd, a, out.rtv, out.format, out.width, out.height);
+        a.rect = {r.x0 * sx, r.y0 * sy, r.x1 * sx, r.y1 * sy};
+        draw(cmd, a, rtv(ambtex), ambtex.fmt, aw, ah);
+        transition(cmd, ambtex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        DrawArgs up;
+        up.src = ambtex.res.get(); up.sw = aw; up.sh = ah;
+        up.rect = {0, 0, static_cast<float>(out.width), static_cast<float>(out.height)};
+        up.filter = kBilinear;
+        up.encode = kCopy;
+        up.background = picture.background;
+        draw(cmd, up, out.rtv, out.format, out.width, out.height);
     }
 
     // 1:1 copy of a module texture into another (same size).

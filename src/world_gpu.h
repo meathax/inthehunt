@@ -55,6 +55,10 @@ int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refres
  * out (ARGB). Creates and releases its own device. */
 int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
                                unsigned scale,char *error,size_t size);
+/* VRR was requested but the display kept its fixed refresh; vsync is used. */
+int world_gpu_vrr_failed(void);
+/* Probe VRR again (after a display or mode change). */
+void world_gpu_retry_vrr(void);
 /* Fill the bars beside the picture with a dim blur of its edges (else black). */
 void world_gpu_set_ambient_borders(int on);
 int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,char *error,size_t size);

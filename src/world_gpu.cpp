@@ -191,6 +191,11 @@ struct Presenter {
     UINT width = 0, height = 0;
     bool tearing = false;
     bool vrr = false;
+    // Tearing support does not mean the display follows our presents. While
+    // VRR is requested, compare the measured refresh period with the mode's.
+    bool vrr_failed = false, vrr_probing = false;
+    int64_t vrr_qpc0 = 0;
+    UINT vrr_refresh0 = 0;
     int scaling = 0, beam = 0, vsync = 1;
     std::unique_ptr<PostChain> chain;
     LARGE_INTEGER last_present = {};
@@ -564,10 +569,43 @@ extern "C" void world_gpu_set_options(int scaling, int beam, int vsync)
 
 extern "C" int world_gpu_request_vrr(int enable)
 {
-    if (!gpu) return 0;
-    gpu->vrr = enable && gpu->shown && gpu->tearing && !gpu->beam;
-    return gpu->vrr;
+    Presenter *p = gpu;
+    if (!p) return 0;
+    bool want = enable && p->shown && p->tearing && !p->beam && !p->vrr_failed;
+    if (!want) { p->vrr_probing = false; p->vrr = false; return 0; }
+    // A display that really follows 60 Hz presents refreshes at about our rate;
+    // a fixed-rate one keeps refreshing at its mode rate (e.g. 120 Hz) and
+    // shows torn, unevenly held frames. Fall back to vsync pacing then.
+    DXGI_FRAME_STATISTICS st = {};
+    if (SUCCEEDED(p->swap->GetFrameStatistics(&st)) && st.SyncQPCTime.QuadPart) {
+        if (!p->vrr_probing) {
+            p->vrr_probing = true;
+            p->vrr_qpc0 = st.SyncQPCTime.QuadPart;
+            p->vrr_refresh0 = st.SyncRefreshCount;
+        } else if (st.SyncRefreshCount - p->vrr_refresh0 >= 90) {
+            LARGE_INTEGER rate;
+            QueryPerformanceFrequency(&rate);
+            double measured = (double)(st.SyncRefreshCount - p->vrr_refresh0) * rate.QuadPart /
+                              (double)(st.SyncQPCTime.QuadPart - p->vrr_qpc0);
+            DEVMODEW mode = {};
+            mode.dmSize = sizeof mode;
+            double nominal = EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) ? mode.dmDisplayFrequency : 0;
+            if (nominal > 75 && measured > 0.85 * nominal) {
+                p->vrr_failed = true;
+                fprintf(stderr, "VRR not active (display at %.1f Hz of %.0f Hz): using vsync pacing.%c", measured, nominal, 10);
+                p->vrr = false;
+                return 0;
+            }
+            p->vrr_qpc0 = st.SyncQPCTime.QuadPart;
+            p->vrr_refresh0 = st.SyncRefreshCount;
+        }
+    }
+    p->vrr = true;
+    return 1;
 }
+
+extern "C" int world_gpu_vrr_failed(void) { return gpu && gpu->vrr_failed; }
+extern "C" void world_gpu_retry_vrr(void) { if (gpu) { gpu->vrr_failed = false; gpu->vrr_probing = false; } }
 
 extern "C" double world_gpu_refresh_hz(void) { return gpu ? gpu->refresh_hz : 0.0; }
 

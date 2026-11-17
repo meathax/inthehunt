@@ -343,6 +343,7 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
     if (result & WORLD_MENU_DISPLAY) {
         launch_fullscreen_override = 0; /* An explicit player choice supersedes launch mode. */
         world_window_set_display(settings.fullscreen, settings.window_scale);
+        world_gpu_retry_vrr();          /* a new display mode may support VRR */
     }
     if (result & WORLD_MENU_VIEW) {
         apply_view();
@@ -1806,7 +1807,13 @@ load_game_data:
         /* Board deadlines advance only by elapsed arcade vblanks. Display
            refreshes may repeat a state, but never stage the next input frame. */
         QueryPerformanceCounter(&now);
-        int vrr = world_gpu_request_vrr(settings.pacing && settings.fullscreen && focused);
+        /* WORLD_TEST_VRR=1 (developer): request VRR in a window, to exercise
+           the fixed-refresh detection without taking over the display. */
+        static int test_vrr = -1;
+        if (test_vrr < 0) test_vrr = getenv("WORLD_TEST_VRR") != NULL;
+        int vrr = world_gpu_request_vrr(settings.pacing && ((settings.fullscreen && focused) || test_vrr));
+        static int told_vrr;
+        if (!told_vrr && world_gpu_vrr_failed()) { show_notice("NO VRR: VSYNC PACING"); told_vrr = 1; }
         double period = arcade_period;
         if (!settings.pacing) {
             double hz = world_window_refresh_hz();
@@ -1829,6 +1836,7 @@ load_game_data:
             }
         }
         int advanced = 0;
+        unsigned passes = 0;            /* logged: two in one refresh would be judder */
         while ((double)now.QuadPart >= deadline) {
             if (!world_window_poll(&pads, &system)) goto end_loop;
             if (hold_input) {
@@ -1842,6 +1850,7 @@ load_game_data:
             ticks += elapsed_board_frames;
             counted += elapsed_board_frames;
             advanced = 1;
+            ++passes;
         }
         LARGE_INTEGER after_tick, after_submit, after_present;
         if (pacing_log) QueryPerformanceCounter(&after_tick);
@@ -1869,6 +1878,7 @@ load_game_data:
             fprintf(pacing_log, "%.4f %lu %.5f %u\n",
                     (double)now.QuadPart * 1000.0 / rate.QuadPart,ticks,scene_alpha,word(ram + 0xb70a));
             fprintf(pacing_log,"audio %u\n",world_audio_output_level());
+            fprintf(pacing_log,"passes %u %u\n",passes,elapsed_board_frames);
             fprintf(pacing_log,"camera %u %u %.5f %.5f %d\n",drawn_layers[1].scroll_x,
                     drawn_layers[2].scroll_x,displayed_camera_offsets[0],displayed_camera_offsets[2],focused);
             unsigned shown_present, shown_refresh, made;
