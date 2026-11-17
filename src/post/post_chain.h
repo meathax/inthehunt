@@ -90,6 +90,7 @@ struct Settings {
     bool keep_background = false;  // In the Hunt port: leave the output outside the picture as the
                                    // caller drew it (border art) instead of painting black bars
     bool preset_curvature = true;   // false: switch the loaded preset's own curvature parameters off
+    bool ambient_borders = false;   // In the Hunt port: fill the bars with a dim blur of the picture's edges
 
     // --- preset handling
     bool auto_progressive_fix = true;  // set the known interlace-detection parameters of the loaded

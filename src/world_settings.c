@@ -69,7 +69,17 @@ static const NumberSetting numbers[] = {
     {"fx_rim", offsetof(WorldSettings, fx_rim), 0, 1, WORLD_GFX_LOW},
     {"fx_bubble_light", offsetof(WorldSettings, fx_bubble_light), 0, 1, WORLD_GFX_HIGH},
     {"fx_contact_shade", offsetof(WorldSettings, fx_contact_shade), 0, 1, WORLD_GFX_HIGH},
-    {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1, WORLD_GFX_HIGH}
+    {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1, WORLD_GFX_HIGH},
+    {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1, WORLD_GFX_MEDIUM},
+    {"brightness", offsetof(WorldSettings, brightness), 70, 150, 0},
+    {"auto_quality", offsetof(WorldSettings, auto_quality), 0, 1, 0},
+    {"ambient_borders", offsetof(WorldSettings, ambient_borders), 0, 1, 0},
+    {"light_strength", offsetof(WorldSettings, light_strength), 25, 200, 0},
+    {"shadow_strength", offsetof(WorldSettings, shadow_strength), 25, 200, 0},
+    {"depth_strength", offsetof(WorldSettings, depth_strength), 25, 200, 0},
+    {"shaft_strength", offsetof(WorldSettings, shaft_strength), 25, 200, 0},
+    {"rim_strength", offsetof(WorldSettings, rim_strength), 25, 200, 0},
+    {"caustic_strength", offsetof(WorldSettings, caustic_strength), 25, 200, 0}
 };
 static const char *const actions[8] = {
     "right", "left", "down", "up", "fire1", "fire2", "start", "coin"
@@ -145,6 +155,11 @@ void world_settings_defaults(WorldSettings *settings)
     settings->dip_lives = 1;         /* factory: 3 submarines */
     settings->dip_difficulty = 2;    /* factory: normal */
     settings->dip_demo_sound = 1;
+    settings->brightness = 100;
+    settings->auto_quality = 1;
+    settings->ambient_borders = 1;
+    settings->light_strength = settings->shadow_strength = settings->depth_strength = 100;
+    settings->shaft_strength = settings->rim_strength = settings->caustic_strength = 100;
     world_settings_apply_quality(settings,WORLD_GFX_HIGH);
     strcpy(settings->shader, "pixels");
     world_input_bindings_defaults(&settings->bindings);

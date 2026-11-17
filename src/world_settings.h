@@ -55,6 +55,12 @@ typedef struct {
     unsigned fx_sparks, fx_impact_motes;
     unsigned fx_pressure, fx_sediment_light, fx_water_volume, fx_ocean_depth, fx_aftermath, fx_materials;
     unsigned headlight_level, fx_headlights, fx_rim, fx_bubble_light, fx_contact_shade, fx_blast_reflect;
+    unsigned brightness;         /* picture brightness curve, percent (100 = arcade) */
+    unsigned auto_quality;       /* lighten High lighting when the GPU falls behind */
+    unsigned ambient_borders;    /* fill the bars beside the picture with its blurred colours */
+    unsigned fx_caustics;        /* sunlit seabed caustics */
+    /* Effect strengths in percent (25..200, 100 = as designed). */
+    unsigned light_strength, shadow_strength, depth_strength, shaft_strength, rim_strength, caustic_strength;
     char shader[WORLD_SETTINGS_ID_SIZE];
     WorldInputBindings bindings;
 } WorldSettings;

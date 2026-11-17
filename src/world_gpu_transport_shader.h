@@ -86,6 +86,8 @@ float decodeVisibility(uint code){
 }
 uint pointVisibilityCode(float2 receiver,float2 emitter,bool bow){
     int row=pointBlockerRow(receiver,emitter),wl=asint(scene.Load(8));
+    // Budget mode (automatic quality): one ray instead of soft three-ray edges.
+    if(scene.Load(4)&2048)return row<0 || (wl>0 && row<wl && min(receiver.y,emitter.y)<wl)?5:1;
     if(wl<=0 || min(receiver.y,emitter.y)>=wl || row>=wl){
         if(!bow || abs(receiver.x-emitter.x)<12)return row<0?5:1;
         // The bow lens is vertical in side view. Fixed taps keep tiny nearby
@@ -425,6 +427,23 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
     }
     return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));
 }
+// Player strength settings: 1 = as designed (zero, from older callers, reads as 1).
+float strength(uint i){float v=asfloat(scene.Load(428940+4*i));return v>0?v:1;}
+// Scales an attenuation factor; exactly unchanged at strength 1.
+float3 strengthen(float3 f,float s){return s==1?f:pow(max(f,0),s);}
+// Sunlight focused by the moving surface: two sheets of warped ridges in
+// world space, sharpened into bright filaments. Evaluated per arcade pixel.
+float causticRidges(float2 p,float t){
+    float2 w=p+.85*float2(sin(p.y*.83+t*1.07),sin(p.x*.71-t*.93));
+    float v=sin(w.x+t*.62)*sin(w.y*1.27-t*.48)+.6*sin((w.x+w.y)*.69+t*.55);
+    return pow(saturate(1-abs(v)*1.55),5);
+}
+float caustics(int2 native){
+    int scroll=asint(effects.Load(4820));
+    float2 world=float2(native)+float2(scroll&65535,(scroll>>16)&65535);
+    float t=asint(effects.Load(4812))*.012;
+    return .62*causticRidges(world*.085,t)+.45*causticRidges(world*.137+float2(3.1,1.7),t*1.31);
+}
 [numthreads(8,8,1)]
 void shadePass(uint3 id:SV_DispatchThreadID){
     uint k=scene.Load(12);uint2 extent=uint2(320,240)*k;
@@ -447,6 +466,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
             int cool=clamp((max(v.g,v.b)-v.r)*3,0,255);
             int water=min(255,cool*(255-lum)/200);
             int f=3+water*((flags&8192)?5:21)/255;
+            if(strength(2)!=1)f=min(256,int(f*strength(2)+.5));
             base=(v+(int3(5,28,52)-v)*f/256)/255.;
         }
     }
@@ -475,9 +495,11 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     int wl=asint(scene.Load(8));
     float wet=wl<0?1:saturate((float(native.y)-wl)/8);
     float depth=wet*saturate((native.y-(wl==-1?0:wl))/195.);
-    float3 energy=l.rgb/(1+.90*max(l.r,max(l.g,l.b)));
+    float lightS=strength(0);
+    float3 lit=l.rgb*lightS;
+    float3 energy=lit/(1+.90*max(lit.r,max(lit.g,lit.b)));
     float3 colour=base;
-    if(flags&65536)colour*=lerp(1,(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79),depth);
+    if(flags&65536)colour*=strengthen(lerp(1,(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79),depth),strength(2));
     bool surface=caster(native)!=0;
     if((flags&2) && !(flags&524288) && skyReaches(native)){
         float3 occluded=surface?float3(.49,.55,.72):float3(.87,.91,.95);
@@ -485,7 +507,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         float3 deepTint=(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79);
         float deepContrast=dot(deepTint,float3(.25,.50,.25));
         float receive=(surface?1:wet)*lerp(1,deepContrast,depth);
-        colour*=lerp(float3(1.02,1.01,1),occluded,(1-l.a)*receive*stageLight(2).y);
+        colour*=strengthen(lerp(float3(1.02,1.01,1),occluded,(1-l.a)*receive*stageLight(2).y),strength(1));
     }
     if((flags&131072) && (flags&65536)){
         float4 sunStyle=stageLight(0),finish=stageLight(2);
@@ -493,7 +515,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         colour*=lerp(float3(1,1,1),sunStyle.rgb*sunStyle.w,wet*.65);
         // Smooth black toe applied to ambient only, before lamps and scattering.
         float peak=max(colour.r,max(colour.g,colour.b));
-        colour*=peak/(peak+finish.x*enclosure+.00001);
+        colour*=peak/(peak+finish.x*enclosure*strength(2)+.00001);
     }
     if((flags&131072) && (flags&1048576) && (flags&262144)){
         // Thin distant ice receives blue transmitted daylight. Foreground
@@ -509,17 +531,26 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         float3 response=pointCaster(native)!=0?.20+.98*base:.105+.49*base;
         colour+=response*energy;
     }
-    if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb;
+    if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb*lightS;
     if(flags&4)colour+=wet*energy*float3(.042,.049,.056);
     if((flags&(32|512)) && (tag&240)==224){
         float2 pos=clamp((float2(id.xy/k)-2)*.25,0,float2(79,59));
         uint2 v0=uint2(pos),v1=min(v0+1,uint2(79,59));float2 f=frac(pos);
         colour+=.52*lerp(lerp(volumes[v0.y*80+v0.x].rgb,volumes[v0.y*80+v1.x].rgb,f.x),
-                     lerp(volumes[v1.y*80+v0.x].rgb,volumes[v1.y*80+v1.x].rgb,f.x),f.y);
+                     lerp(volumes[v1.y*80+v0.x].rgb,volumes[v1.y*80+v1.x].rgb,f.x),f.y)*strength(3);
+    }
+    // Caustics land on sunlit rock, seabed and structures below the surface:
+    // the two world layers (planes 250..252). Sprites include on-screen
+    // lettering such as the CONTINUE count, so they never receive them.
+    if((flags&4194304) && !(flags&524288) && wl>=0 && wet>0 && l.a>0 &&
+       plane>=250 && plane<=252 && skyReaches(native)){
+        float fade=exp2(-max(0.,float(native.y)-wl)*.009);
+        float3 sun=(flags&131072)?stageLight(0).rgb*stageLight(0).w:float3(1,1,1);
+        colour+=caustics(native)*.62*fade*wet*l.a*strength(5)*(.30+.70*base)*lerp(float3(.85,1,1),sun,.5);
     }
     if((flags&16384) && ((tag&240)==160 || terrainRim)){
         float3 rim=rimLight(id.xy,k,extent,flags,terrainRim);
-        colour+=rim*(1-saturate(colour))*(.82+.18*sqrt(base));
+        colour+=rim*strength(4)*(1-saturate(colour))*(.82+.18*sqrt(base));
     }
     // Compress the combined light against the remaining highlight headroom.
     float3 added=max(0,colour-ambient);

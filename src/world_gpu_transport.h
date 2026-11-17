@@ -6,6 +6,7 @@ static_assert(offsetof(WorldLightScene,light_bins)==81300);
 static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,ocean_rows)==43736 && offsetof(WorldEffectBatch,nodes)==43768 && sizeof(WorldEffectNode)==32);
 
 static_assert(offsetof(WorldLightScene,point_coverage)==102492);
+static_assert(offsetof(WorldLightScene,strengths)==428940 && offsetof(WorldEffectBatch,playfield_scroll)==4820);
 
 // Close single-pixel stipple holes in each material independently. Four
 // native pixels and both materials are processed together in each byte.
@@ -162,8 +163,16 @@ struct GpuTransport {
         return ready;
     }
 
+    // Medium, or High with automatic quality, lightens the lighting while
+    // measured GPU time stays over budget. Early and frame recording agree.
+    static bool adaptive(const WorldLightScene &data){
+        return (data.flags&(1024|2097152))!=0 && (data.flags&(23|32768|16384))!=0;
+    }
+    uint32_t dispatch_flags(const WorldLightScene &data) const {
+        return data.flags | (adaptive(data) && budget_mode ? 2048u : 0u);
+    }
     bool needs_light(const WorldLightScene &data) const {
-        return !have_field || revision!=data.revision || flags!=data.flags || scale!=data.scale;
+        return !have_field || revision!=data.revision || flags!=dispatch_flags(data) || scale!=data.scale;
     }
     bool prepare(ID3D12GraphicsCommandList *cmd,ID3D12Resource *upload,int k,
                  const WorldLightScene &data,uint32_t dispatch_flags,UINT frame=0){
@@ -234,13 +243,13 @@ struct GpuTransport {
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
         read_time(frame);
-        bool medium=(data.flags&1024)!=0 && (data.flags&(23|32768|16384))!=0;
-        uint32_t dispatch_flags=data.flags | (medium && budget_mode ? 2048u : 0u);
-        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
+        bool medium=adaptive(data);
+        uint32_t dispatch=dispatch_flags(data);
+        bool changed=!have_field || revision!=data.revision || flags!=dispatch;
         bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&(23|32768|16384))) && (++sample_counter%16==0));
         if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2);
         pass_read(frame);
-        if(!prepare(cmd,scene_upload[frame].get(),k,data,dispatch_flags,frame))return false;
+        if(!prepare(cmd,scene_upload[frame].get(),k,data,dispatch,frame))return false;
         pass_mark(cmd,frame,"begin-record");
         void *effect_map=nullptr;
         D3D12_RANGE empty={0,0};

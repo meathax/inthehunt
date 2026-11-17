@@ -139,6 +139,8 @@ UINT64 upload_size(ID3D12Device *device, ID3D12Resource *dst)
     return total;
 }
 
+static bool ambient_borders;
+
 void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
 {
     gdl::post::Settings &s = chain.settings();
@@ -150,6 +152,7 @@ void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
     s.display_aspect = scaling == 2 && out_h ? (float)out_w / (float)out_h : 4.0f / 3.0f;
     s.passthrough_filter = gdl::post::PassThroughFilter::Nearest;
     s.keep_background = true;
+    s.ambient_borders = ambient_borders;
     s.auto_progressive_fix = true;
     s.beam.enabled = beam != 0;
     s.preset_curvature = false;           // flat screen, no vignette, in every preset
@@ -479,7 +482,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
     bool had_field=transport.have_field;
     auto old_revision=transport.revision,old_flags=transport.flags;
     int old_scale=transport.scale;
-    bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,data->flags,f);
+    bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,transport.dispatch_flags(*data),f);
     if(sample){
         cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4+1);
         cmd->ResolveQueryData(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4,2,
@@ -502,6 +505,12 @@ extern "C" void world_gpu_camera_offsets(const float *offsets) { if(gpu) gpu->ca
 extern "C" void world_gpu_light_frame(const WorldLightScene *frame) { if(gpu) gpu->light_frame=frame; }
 
 extern "C" int world_gpu_visible(void) { return gpu && gpu->shown; }
+
+extern "C" void world_gpu_set_ambient_borders(int on)
+{
+    ambient_borders = on != 0;
+    if (gpu && gpu->chain) gpu->chain->settings().ambient_borders = ambient_borders;
+}
 
 extern "C" int world_gpu_set_preset(const char *path, char *error, size_t error_size)
 {

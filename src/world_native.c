@@ -91,6 +91,7 @@ static void apply_view(void)
 {
     /* 2 = locked to the display: the loop waits for VBlank itself. */
     world_window_set_view((int)settings.scaling, 2);
+    world_gpu_set_ambient_borders((int)settings.ambient_borders);
     char preset[1200] = "", error[256] = "", folder[1024];
     if (settings.crt_shader) {
         if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
@@ -172,6 +173,14 @@ static WorldSceneFx scene_effects(void)
     fx.bubble_light = settings.fx_bubble_light;
     fx.contact_shade = settings.fx_contact_shade;
     fx.blast_reflect = settings.fx_blast_reflect;
+    fx.caustics = settings.fx_caustics;
+    fx.auto_quality = settings.auto_quality;
+    fx.light_strength = settings.light_strength;
+    fx.shadow_strength = settings.shadow_strength;
+    fx.depth_strength = settings.depth_strength;
+    fx.shaft_strength = settings.shaft_strength;
+    fx.rim_strength = settings.rim_strength;
+    fx.caustic_strength = settings.caustic_strength;
     return fx;
 }
 
@@ -251,6 +260,28 @@ static void beam_step(void)
 
 static float displayed_camera_offsets[4];
 
+/* Brightness: a power curve on each channel that lifts (or deepens) dark and
+   middle tones while black and white stay fixed. Plane tags in the top byte
+   pass through for the GPU lighting. */
+static void apply_brightness(uint32_t *picture, size_t count)
+{
+    static uint32_t curve[3][256];
+    static unsigned built;
+    if (settings.brightness == 100) return;
+    if (built != settings.brightness) {
+        double exponent = 100.0 / settings.brightness;
+        for (unsigned i = 0; i < 256; ++i) {
+            uint32_t v = (uint32_t)lround(255.0 * pow(i / 255.0, exponent));
+            curve[0][i] = v << 16; curve[1][i] = v << 8; curve[2][i] = v;
+        }
+        built = settings.brightness;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        uint32_t c = picture[i];
+        picture[i] = (c & 0xff000000u) | curve[0][(c >> 16) & 255] | curve[1][(c >> 8) & 255] | curve[2][c & 255];
+    }
+}
+
 static void present_game(const uint32_t *source)
 {
     /* The title menu sits over the running attract sequence, at 1x. */
@@ -269,6 +300,7 @@ static void present_game(const uint32_t *source)
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
     world_scene_light_ready=NULL;
+    apply_brightness(shown, (size_t)320 * 240 * k * k);
     if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (title && trace && lights.scale == k) {
         lights.flags |= 256u;
@@ -1118,7 +1150,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             static uint32_t still[320*240];
             memcpy(still, pixels, sizeof still);
             static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0},
-                                                {1,0,6,0},{1,2,3,0},{1,3,1,0},{1,3,9,0}};
+                                                {1,0,6,0},{1,2,3,0},{1,3,1,0},{1,3,9,0},{1,0,8,0},{1,3,4,0}};
             for (unsigned i = 0; i < sizeof pages / sizeof pages[0]; ++i) {
                 world_menu_open(&menu, 0, i & 1, 0);
                 menu.page = pages[i][0];

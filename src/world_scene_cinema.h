@@ -168,6 +168,7 @@ static void cinema_update(float dt)
     if(gpu_light){
         WorldEffectBatch *batch=&gpu_light->effects;
         batch->volume_scroll=g.scroll_x[2];batch->volume_time=g.T;batch->volume_count=0;
+        batch->playfield_scroll=(int)((g.scroll_x[1]&0xffff)|((unsigned)(g.scroll_y[1]&0xffff)<<16));
         if(fx->water_volume)for(int i=0;i<CINEMA_EVENTS;++i){
             const CinemaEvent *p=cinema_events+i;
             if(p->life<=0 || p->light<.005f)continue;

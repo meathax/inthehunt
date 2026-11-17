@@ -173,6 +173,68 @@
       }
     },
     {
+      "id": "brightness",
+      "label": "Brightness",
+      "group": "Video",
+      "slider": {
+        "key": "brightness",
+        "min": 70,
+        "max": 150,
+        "step": 5,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "brightness": "100"
+      },
+      "help": "Lifts or deepens dark and middle tones. 100% is the arcade picture."
+    },
+    {
+      "id": "ambient_borders",
+      "label": "Side borders",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Black",
+          "set": {
+            "ambient_borders": "0"
+          }
+        },
+        {
+          "label": "Ambient",
+          "set": {
+            "ambient_borders": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "ambient_borders": "1"
+      },
+      "help": "Fill the bars beside the picture with a dim glow of its edges."
+    },
+    {
+      "id": "auto_quality",
+      "label": "Auto quality",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "auto_quality": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "auto_quality": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "auto_quality": "1"
+      },
+      "help": "Lighten High lighting while the GPU falls behind."
+    },
+    {
       "id": "show_fps",
       "label": "Show FPS",
       "group": "Video",
@@ -324,7 +386,8 @@
             "fx_contact_shade": "0",
             "fx_blast_reflect": "0",
             "fx_rim": "1",
-            "fx_headlights": "1"
+            "fx_headlights": "1",
+            "fx_caustics": "0"
           }
         },
         {
@@ -363,7 +426,8 @@
             "fx_contact_shade": "0",
             "fx_blast_reflect": "0",
             "fx_rim": "1",
-            "fx_headlights": "1"
+            "fx_headlights": "1",
+            "fx_caustics": "1"
           }
         },
         {
@@ -402,7 +466,8 @@
             "fx_contact_shade": "1",
             "fx_blast_reflect": "1",
             "fx_rim": "1",
-            "fx_headlights": "1"
+            "fx_headlights": "1",
+            "fx_caustics": "1"
           }
         }
       ],
@@ -784,6 +849,152 @@
       "when": {
         "fx_enable": "1"
       }
+    },
+    {
+      "id": "fx_caustics",
+      "label": "Caustics",
+      "group": "Enhance",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "fx_caustics": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "fx_caustics": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fx_caustics": "1"
+      },
+      "when": {
+        "fx_enable": "1"
+      },
+      "help": "Rippling sunlight on the sunlit seabed, rock and hulls."
+    },
+    {
+      "id": "light_strength",
+      "label": "Light strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "light_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "light_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_lights": "1"
+      },
+      "help": "Brightness of weapon, blast and headlight light."
+    },
+    {
+      "id": "shadow_strength",
+      "label": "Shadow strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "shadow_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "shadow_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_sunshadow": "1"
+      },
+      "help": "How dark sun shadows fall."
+    },
+    {
+      "id": "depth_strength",
+      "label": "Depth strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "depth_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "depth_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_depth": "1"
+      },
+      "help": "How much deep water darkens and tints the scene."
+    },
+    {
+      "id": "shaft_strength",
+      "label": "Shaft strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "shaft_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "shaft_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_rays": "1"
+      },
+      "help": "Brightness of sunbeams and light scattered in the water."
+    },
+    {
+      "id": "rim_strength",
+      "label": "Rim strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "rim_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "rim_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_rim": "1"
+      },
+      "help": "Brightness of edge highlights on hulls and rock."
+    },
+    {
+      "id": "caustic_strength",
+      "label": "Caustic strength",
+      "group": "Enhance",
+      "slider": {
+        "key": "caustic_strength",
+        "min": 25,
+        "max": 200,
+        "step": 25,
+        "format": "%.0f"
+      },
+      "defaults": {
+        "caustic_strength": "100"
+      },
+      "when": {
+        "fx_enable": "1",
+        "fx_caustics": "1"
+      },
+      "help": "Brightness of the rippling seabed light."
     },
     {
       "id": "fx_rim",

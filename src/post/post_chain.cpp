@@ -194,6 +194,32 @@ float4 ps(float4 pos : SV_Position) : SV_Target {
     return float4(lerp(bg, pic, alpha), 1.0);
 }
 
+// Ambient borders: each bar pixel shows a wide, dim blur of the picture region
+// mirrored just inside the nearest edge, fading with distance from it.
+float4 ps_ambient(float4 pos : SV_Position) : SV_Target {
+    float2 size = dst_rect.zw - dst_rect.xy;
+    float2 uv = (pos.xy - dst_rect.xy) / size;
+    float2 inside = saturate(uv);
+    float2 away = abs(uv - inside) * size / size.y;            // in picture heights
+    float d = max(away.x, away.y);
+    float2 centre = saturate(inside - (uv - inside) * 0.35);
+    // Gaussian over a tall footprint: wide enough vertically that lettering and
+    // striped scenery leave no bands in the glow.
+    // A per-pixel jitter of the tap grid turns any remaining banding into grain.
+    float jitter = frac(52.9829189 * frac(dot(pos.xy, float2(0.06711056, 0.00583715)))) - 0.5;
+    float3 sum = 0.0;
+    float total = 0.0;
+    [unroll] for (int y = -6; y <= 6; ++y)
+        [unroll] for (int x = -2; x <= 2; ++x) {
+            float w = exp(-0.5 * (x * x / 1.6 + y * y / 12.0));
+            float2 p = saturate(centre + (float2(x, y) + jitter) * float2(0.03, 0.03));
+            sum += w * pow(tex.SampleLevel(s_linear, p * uvs.xy, 0).rgb, 2.2);
+            total += w;
+        }
+    float3 c = pow(sum / total, 1.0 / 2.2) * (0.42 * exp(-d * 2.2));
+    return float4(encode(c, mode2.x), 1.0);
+}
+
 // ---- CRT beam simulator (port of the Blur Busters / Timothy Lottes shader) ----
 float3 beam_dec(float3 c) {
     return lerp(c / 12.92, pow((c + 0.055) / 1.055, beam.w), step(0.04045, c));
@@ -307,7 +333,7 @@ struct PostChain::Impl {
     bool params_dirty = true;
 
     Com<ID3D12RootSignature> root;
-    Com<ID3DBlob> vs_blob, ps_blob, ps_beam_blob, ps_pixels_blob;
+    Com<ID3DBlob> vs_blob, ps_blob, ps_beam_blob, ps_pixels_blob, ps_ambient_blob;
     std::unordered_map<uint32_t, Com<ID3D12PipelineState>> psos;
     Com<ID3D12DescriptorHeap> rtv_heap, srv_heap;
     uint32_t rtv_size = 0, srv_size = 0, srv_next = 0;
@@ -386,6 +412,7 @@ struct PostChain::Impl {
         };
         compile("vs", "vs_5_0", vs_blob);
         compile("ps_pixels", "ps_5_0", ps_pixels_blob);
+        compile("ps_ambient", "ps_5_0", ps_ambient_blob);
         compile("ps", "ps_5_0", ps_blob);
         compile("ps_beam", "ps_5_0", ps_beam_blob);
 
@@ -421,11 +448,12 @@ struct PostChain::Impl {
         fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     }
 
-    ID3D12PipelineState* pso_for(DXGI_FORMAT fmt, bool beam, bool pixels) {
-        const uint32_t key = static_cast<uint32_t>(fmt) | (beam ? 0x10000u : 0u) | (pixels ? 0x20000u : 0u);
+    ID3D12PipelineState* pso_for(DXGI_FORMAT fmt, bool beam, bool pixels, bool ambient = false) {
+        const uint32_t key = static_cast<uint32_t>(fmt) | (beam ? 0x10000u : 0u) | (pixels ? 0x20000u : 0u) |
+                             (ambient ? 0x40000u : 0u);
         auto it = psos.find(key);
         if (it != psos.end()) return it->second.get();
-        ID3DBlob* pixel = pixels ? ps_pixels_blob.get() : beam ? ps_beam_blob.get() : ps_blob.get();
+        ID3DBlob* pixel = ambient ? ps_ambient_blob.get() : pixels ? ps_pixels_blob.get() : beam ? ps_beam_blob.get() : ps_blob.get();
         D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
         d.pRootSignature = root.get();
         d.VS = {vs_blob->GetBufferPointer(), vs_blob->GetBufferSize()};
@@ -545,6 +573,7 @@ struct PostChain::Impl {
         Encode background = kSdr;
         const float *camera_offsets=nullptr;
         bool pixels = false;
+        bool ambient = false;               // ambient border fill (whole target)
         bool final_pass = false;            // adjustments, curvature and bezel apply
         bool beam = false;
         float beam_pos = 0, beam_fph = 1;
@@ -589,7 +618,7 @@ struct PostChain::Impl {
             c.geom[2] = std::clamp(s.corner_radius, 0.0f, 0.25f);
             c.geom[3] = a.encode == kCopy ? 0.0f : std::clamp(s.sharpen, 0.0f, 1.0f);
             c.mode2[1] = s.bezel ? 1u : 0u;
-            c.mode2[2] = s.keep_background && !s.bezel ? 1u : 0u;
+            c.mode2[2] = (s.keep_background || s.ambient_borders) && !s.bezel ? 1u : 0u;
         }
         c.mode2[0] = a.background;
         if(a.camera_offsets){
@@ -605,7 +634,7 @@ struct PostChain::Impl {
         ID3D12DescriptorHeap* heaps[] = {srv_heap.get()};
         cmd->SetDescriptorHeaps(1, heaps);
         cmd->SetGraphicsRootSignature(root.get());
-        cmd->SetPipelineState(pso_for(fmt, a.beam, a.pixels));
+        cmd->SetPipelineState(pso_for(fmt, a.beam, a.pixels, a.ambient));
         cmd->SetGraphicsRoot32BitConstants(0, sizeof(Constants) / 4, &c, 0);
         cmd->SetGraphicsRootDescriptorTable(1, gpu);
         const D3D12_VIEWPORT vp{0, 0, static_cast<float>(tw), static_cast<float>(th), 0, 1};
@@ -617,6 +646,19 @@ struct PostChain::Impl {
         cmd->OMSetRenderTargets(1, &target, FALSE, nullptr);
         cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmd->DrawInstanced(3, 1, 0, 0);
+    }
+
+    // Fill the bars around the picture rectangle, before the picture itself.
+    void draw_ambient(ID3D12GraphicsCommandList* cmd, const DrawArgs& picture, const Output& out) {
+        const Rect& r = picture.rect;
+        if (!settings.ambient_borders || (r.x0 <= 0.5f && r.y0 <= 0.5f && r.x1 >= out.width - 0.5f && r.y1 >= out.height - 0.5f))
+            return;
+        DrawArgs a = picture;
+        a.ambient = true;
+        a.pixels = false;
+        a.final_pass = false;
+        a.beam = false;
+        draw(cmd, a, out.rtv, out.format, out.width, out.height);
     }
 
     // 1:1 copy of a module texture into another (same size).
@@ -1106,6 +1148,7 @@ void PostChain::present_pixels(ID3D12GraphicsCommandList* cmd, ID3D12Resource* s
     a.camera_offsets=camera_offsets;
     a.background=kSdr;
     a.encode=kSdr;
+    m.draw_ambient(cmd,a,out);
     m.draw(cmd,a,out.rtv,out.format,out.width,out.height);
     ++m.stats.source_frames;
     ++m.stats.presents;
@@ -1230,6 +1273,7 @@ void PostChain::present(ID3D12GraphicsCommandList* cmd, const Output& out, const
     if (s.curvature > 0.0f && a.filter == kNearest) a.filter = kBilinear;
     a.background = s.color_space == OutputColorSpace::HDR10 ? kHdr10 : s.color_space == OutputColorSpace::scRGB ? kScRgb : kSdr;
     a.encode = m.chain_encodes_hdr ? kCopy : a.background;
+    m.draw_ambient(cmd, a, out);
     m.draw(cmd, a, out.rtv, out.format, out.width, out.height);
 }
 

@@ -25,9 +25,25 @@ enum {
     ITEM_FX_WAKES, ITEM_FX_DEBRIS, ITEM_FX_SILT, ITEM_FX_SPLASHES, ITEM_FX_SPARKS, ITEM_FX_MOTES,
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
     ITEM_FX_HEADLIGHTS, ITEM_HEADLIGHT_LEVEL, ITEM_FX_RIM, ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
-    ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT
+    ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
+    ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
+    ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC
 };
-enum { MAX_ITEMS = 48, VISIBLE_ROWS = 6, ROW_STEP = 15 };
+enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
+
+/* An effect strength item: its percentage and the switch it scales. */
+static unsigned *strength_field(WorldSettings *s, unsigned id, unsigned **effect)
+{
+    switch (id) {
+    case ITEM_STR_LIGHT: *effect = &s->fx_lights; return &s->light_strength;
+    case ITEM_STR_SHADOW: *effect = &s->fx_sunshadow; return &s->shadow_strength;
+    case ITEM_STR_DEPTH: *effect = &s->fx_depth; return &s->depth_strength;
+    case ITEM_STR_SHAFT: *effect = &s->fx_rays; return &s->shaft_strength;
+    case ITEM_STR_RIM: *effect = &s->fx_rim; return &s->rim_strength;
+    case ITEM_STR_CAUSTIC: *effect = &s->fx_caustics; return &s->caustic_strength;
+    default: return NULL;
+    }
+}
 
 
 /* The on/off switch behind an item, or NULL. */
@@ -72,6 +88,8 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_CONTACT_SHADE: return &s->fx_contact_shade;
     case ITEM_FX_BLAST_REFLECT: return &s->fx_blast_reflect;
     case ITEM_FX_MATERIALS: return &s->fx_materials;
+    case ITEM_FX_CAUSTICS: return &s->fx_caustics;
+    case ITEM_AUTO_QUALITY: return &s->auto_quality;
 
     default: return NULL;
     }
@@ -244,6 +262,9 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_PACING, "FRAME PACING", "DISPLAY LOCK OR EXACT ARCADE VRR");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
+            ADD(ITEM_BRIGHTNESS, "BRIGHTNESS", "LIFTS OR DEEPENS DARK TONES");
+            ADD(ITEM_BORDERS, "SIDE BORDERS", "GLOW OR BLACK BESIDE THE PICTURE");
+            ADD(ITEM_AUTO_QUALITY, "AUTO QUALITY", "EASES LIGHTING IF THE GPU LAGS");
             ADD(ITEM_SHOWFPS, "SHOW FPS", "FRAME RATE AND GAME SPEED");
         } else if (m->tab == TAB_SOUND) {
             ADD(ITEM_VOLUME, "VOLUME", "MASTER VOLUME. 0 IS MUTE");
@@ -265,10 +286,16 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_QUALITY, "GFX QUALITY", "APPLIES A COMPLETE EFFECT PRESET");
             ADD(ITEM_FX, "ENHANCEMENTS", "TOGGLES YOUR SAVED EFFECTS");
             ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS SHINE THROUGH WATER");
+            ADD(ITEM_STR_SHAFT, "  SHAFT STRENGTH", "BRIGHTNESS OF SUNBEAMS IN WATER");
+            ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING SUNLIGHT ON THE SEABED");
+            ADD(ITEM_STR_CAUSTIC, "  CAUSTIC STRENGTH", "BRIGHTNESS OF THE RIPPLING LIGHT");
             ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK AND ICE BLOCK SUNLIGHT");
+            ADD(ITEM_STR_SHADOW, "  SHADOW STRENGTH", "HOW DARK SUN SHADOWS FALL");
             ADD(ITEM_FX_LIGHTS, "POINT LIGHTS", "WEAPONS LIGHT NEARBY OBJECTS");
+            ADD(ITEM_STR_LIGHT, "  LIGHT STRENGTH", "WEAPON AND LAMP LIGHT BRIGHTNESS");
             ADD(ITEM_FX_GLOW, "WATER GLOW", "WATER GLOWS NEAR EXPLOSIONS");
             ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED LIGHT FADES WITH DEPTH");
+            ADD(ITEM_STR_DEPTH, "  DEPTH STRENGTH", "HOW MUCH DEEP WATER DARKENS");
             ADD(ITEM_FX_SNOW, "MARINE SNOW", "FINE SPECKS DRIFT IN WATER");
             ADD(ITEM_FX_VIVID, "VIVID COLOR", "BOOSTS COLOR SATURATION");
             ADD(ITEM_FX_TRAILS, "MOTION TRAILS", "MOVING OBJECTS LEAVE TRAILS");
@@ -292,6 +319,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX_HEADLIGHTS, "SUB HEADLIGHTS", "BOW LAMPS CAST PIXEL SHADOWS");
             ADD(ITEM_HEADLIGHT_LEVEL, "HEADLIGHT POWER", "BOW BEAM LENGTH AND INTENSITY");
             ADD(ITEM_FX_RIM, "RIM LIGHTING", "SUN AND FIRE LIGHT HULL EDGES");
+            ADD(ITEM_STR_RIM, "  RIM STRENGTH", "BRIGHTNESS OF EDGE HIGHLIGHTS");
             ADD(ITEM_FX_BUBBLE_LIGHT, "BUBBLE LIGHTING", "WAKES AND BUBBLES CATCH LIGHT");
             ADD(ITEM_FX_CONTACT_SHADE, "CONTACT SHADOWS", "SHADOWS DEEPEN IN CREVICES");
             ADD(ITEM_FX_BLAST_REFLECT, "BLAST REFLECTIONS", "BLAST LIGHT GLINTS ON WAVES");
@@ -318,7 +346,9 @@ static int item_disabled(const WorldSettings *s, unsigned id)
     if ((id > ITEM_FX && id <= ITEM_FX_SCANLINES) || (id >= ITEM_FX_HAZE && id <= ITEM_FX_SURFACE))
         return !s->fx_enable;
     if (id >= ITEM_FX_WAKES && id <= ITEM_FX_BLAST_REFLECT) return !s->fx_enable;
-    if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT) return !s->fx_enable;
+    if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT || id == ITEM_FX_CAUSTICS) return !s->fx_enable;
+    unsigned *effect = NULL;
+    if (strength_field((WorldSettings *)s, id, &effect)) return !s->fx_enable || !*effect;
     return 0;
 }
 
@@ -337,6 +367,14 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
         break;
     }
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
+    case ITEM_BRIGHTNESS: snprintf(out, 32, "%u%%", s->brightness); break;
+    case ITEM_BORDERS: strcpy(out, s->ambient_borders ? "AMBIENT" : "BLACK"); break;
+    case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
+    case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {
+        unsigned *effect = NULL;
+        snprintf(out, 32, "%u%%", *strength_field((WorldSettings *)s, id, &effect));
+        break;
+    }
     case ITEM_PACING: strcpy(out, s->pacing ? "EXACT" : "SMOOTH"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
@@ -405,6 +443,22 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         world_settings_apply_quality(s,1+(s->gfx_quality-1+(d>0?1:2))%3);
         return WORLD_MENU_VIEW;
     case ITEM_DISPLAY: s->fullscreen = !s->fullscreen; return WORLD_MENU_DISPLAY;
+    case ITEM_BRIGHTNESS: {
+        unsigned v = d > 0 ? (s->brightness >= 145 ? 150 : s->brightness + 5) : (s->brightness <= 75 ? 70 : s->brightness - 5);
+        if (v == s->brightness) return 0;
+        s->brightness = v;
+        return WORLD_MENU_VIEW;
+    }
+    case ITEM_BORDERS: s->ambient_borders = !s->ambient_borders; return WORLD_MENU_VIEW;
+    case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
+    case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {
+        unsigned *effect = NULL, *level = strength_field(s, id, &effect);
+        if (item_disabled(s, id)) return 0;
+        unsigned v = d > 0 ? (*level >= 175 ? 200 : *level + 25) : (*level <= 50 ? 25 : *level - 25);
+        if (v == *level) return 0;
+        *level = v;
+        return WORLD_MENU_VIEW;
+    }
     case ITEM_PACING: s->pacing = !s->pacing; return WORLD_MENU_VIEW;
     case ITEM_SCALE: {
         unsigned scale = s->window_scale + (d > 0 ? 1 : -1);

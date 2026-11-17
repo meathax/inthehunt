@@ -10,7 +10,8 @@ typedef struct { int x,y,radius,phase; uint32_t rgba,kind,limit,next; } WorldEff
 typedef struct {
     uint32_t heads[WORLD_EFFECT_TILES], count, history_reset;
     int volume_scroll,volume_time;
-    uint32_t volume_count,padding;
+    uint32_t volume_count;
+    int playfield_scroll;   /* playfield scroll x | y << 16, anchors seabed caustics */
     float volumes[24][4];
     int reflect_row,reflect_rows,ripple[30];
     uint32_t mirror[30][320];
@@ -31,6 +32,9 @@ typedef struct {
     /* Three float4s followed by source-texel material normals at native resolution. */
     float stage_light[12];
     uint32_t surface[320*240];
+    /* Light, shadow, depth, shaft, rim and caustic strengths (1 = as designed;
+       zero reads as 1), then brightness unused, padding. */
+    float strengths[8];
     WorldEffectBatch effects;
 } WorldLightScene;
 #endif
