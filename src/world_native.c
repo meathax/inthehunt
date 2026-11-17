@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <math.h>
+#include <xmmintrin.h>
 #include <stdio.h>
 #include <string.h>
 #include "world_boss_light.h"
@@ -428,7 +429,19 @@ static void sound_fm_write(void *context, uint8_t reg, uint8_t value)
 
 static WorldAudioBus sound_bus = { &pcm, sound_busy, sound_write, sound_reply, sound_unrecovered, sound_fm_write, sound_created, sound_selected };
 
+static void sound_frame_body(void);
+/* The mixer's decaying filters and echo tails reach denormal floats, which
+   the FPU processes about a hundred times more slowly. Flush them to zero
+   (far below 16-bit output precision) for the mixer only. */
 static void sound_frame(void)
+{
+    unsigned csr = _mm_getcsr();
+    _mm_setcsr(csr | 0x8040u);          /* FTZ | DAZ */
+    sound_frame_body();
+    _mm_setcsr(csr);
+}
+
+static void sound_frame_body(void)
 {
     int16_t output[1024][2],voices[1024][4],mono[1024];
     int32_t fm[2048];
@@ -524,7 +537,7 @@ static void sound_frame(void)
     const double target = 2400.0;
     /* After a stall the 0.5 percent controller would take about a minute to
        drain a full FIFO; drop the backlog instead of carrying the latency. */
-    if (world_audio_output_level() > 2 * (unsigned)target) world_audio_output_trim((unsigned)target);
+    if (world_audio_output_level() > 3 * (unsigned)target) world_audio_output_trim((unsigned)target);
     double level = (double)world_audio_output_level();
     double error = (level - target) / target;
     if (error > 1.0) error = 1.0;
@@ -1322,6 +1335,13 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 char name[40];
                 snprintf(name,sizeof name,"lighting-%06lu",ticks);
                 shot_source=readback;headless_shot(dir,name);shot_source=pixels;
+                /* WORLD_LIGHT_DUMP=1: keep the exact GPU inputs for offline benchmarks. */
+                if(getenv("WORLD_LIGHT_DUMP")){
+                    char path[4096];
+                    snprintf(path,sizeof path,"%s/light-%06lu.bin",dir,ticks);
+                    FILE *f=world_fopen(path,"wb");
+                    if(f){fwrite(&capture,sizeof capture,1,f);fwrite(shown,sizeof(uint32_t),320*240,f);fclose(f);}
+                }
             }
             world_scene_light_target(NULL);
         }
@@ -1424,7 +1444,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             snprintf(log_path, sizeof log_path, "%s/headless-scroll.txt", dir);
             FILE *log = world_fopen(log_path, "a");
             if (log) {
-                fprintf(log, "%06lu stage %u", ticks, word(ram + 0x84));
+                fprintf(log, "%06lu stage %u master %04x", ticks, word(ram + 0x84), word(ram + 0x80));
                 for (unsigned i = 0; i < 3; ++i)
                     fprintf(log, " L%u %04x %04x m%04x", i, word(ram + 0xb706 + 4*i), word(ram + 0xb708 + 4*i), layer_master[i]);
                 fprintf(log, " vc %04x water %d\n", word(ram + 0x8b28), with_fx ? world_scene_waterline() : -1);
@@ -1816,6 +1836,7 @@ load_game_data:
             fputc(10,pacing_log);
             fprintf(pacing_log, "%.4f %lu %.5f %u\n",
                     (double)now.QuadPart * 1000.0 / rate.QuadPart,ticks,scene_alpha,word(ram + 0xb70a));
+            fprintf(pacing_log,"audio %u\n",world_audio_output_level());
             fprintf(pacing_log,"camera %u %u %.5f %.5f %d\n",drawn_layers[1].scroll_x,
                     drawn_layers[2].scroll_x,displayed_camera_offsets[0],displayed_camera_offsets[2],focused);
             unsigned shown_present, shown_refresh, made;

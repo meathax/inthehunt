@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <vector>
 #include <string>
 
 using gdl::post::PostChain;
@@ -471,13 +472,14 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
     }
     auto &transport=p->transport;
     transport.read_time(f);
+    transport.pass_read(f);
     bool sample=transport.time_readback && transport.log_times && ++transport.sample_counter%16==0;
     auto *cmd=p->light_cmd.get();
     if(sample)cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4);
     bool had_field=transport.have_field;
     auto old_revision=transport.revision,old_flags=transport.flags;
     int old_scale=transport.scale;
-    bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,data->flags);
+    bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,data->flags,f);
     if(sample){
         cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4+1);
         cmd->ResolveQueryData(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4,2,
@@ -798,6 +800,91 @@ static int render_offscreen(const float *offsets,const WorldLightScene *lighting
     D3D12_RANGE all = {0, (SIZE_T)total};
     if (FAILED(readback->Map(0, &all, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Readback failed."); return 0; }
     for (unsigned y = 0; y < height; ++y) memcpy(out_pixels + (size_t)y * width, map + fp.Offset + (size_t)y * fp.Footprint.RowPitch, (size_t)width * 4);
+    D3D12_RANGE none = {0, 0};
+    readback->Unmap(0, &none);
+    return 1;
+}
+
+extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,const uint32_t *const *pixels,
+                                         unsigned count,const char *const *sources,unsigned variants,unsigned runs,
+                                         double (*pass_ms)[8],uint32_t *const *shaded,char *error,size_t error_size)
+{
+    Com<IDXGIFactory4> factory;
+    Com<ID3D12Device> device;
+    Com<ID3D12CommandQueue> queue;
+    if (!create_device(factory, device, queue, error, error_size)) return 0;
+    Com<ID3D12CommandAllocator> alloc;
+    Com<ID3D12GraphicsCommandList> cmd;
+    Com<ID3D12Fence> fence;
+    Com<ID3D12Resource> picture, source, readback, one;
+    device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(alloc.put()));
+    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.get(), nullptr, IID_PPV_ARGS(cmd.put()));
+    device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.put()));
+    texture(device.get(), W, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, picture.put());
+    UINT64 outputs = (UINT64)W * H * 4 * count * variants;
+    buffer(device.get(), D3D12_HEAP_TYPE_UPLOAD, (UINT64)W * H * 4 * count, D3D12_RESOURCE_STATE_GENERIC_READ, source.put());
+    buffer(device.get(), D3D12_HEAP_TYPE_READBACK, outputs, D3D12_RESOURCE_STATE_COPY_DEST, readback.put());
+    buffer(device.get(), D3D12_HEAP_TYPE_DEFAULT, W * H * 4, D3D12_RESOURCE_STATE_COPY_DEST, one.put());
+    if (!alloc || !cmd || !fence || !picture || !source || !readback || !one) { say(error, error_size, "Could not create resources."); return 0; }
+    uint8_t *map = nullptr;
+    if (FAILED(source->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Upload map failed."); return 0; }
+    for (unsigned s = 0; s < count; ++s) memcpy(map + (size_t)s * W * H * 4, pixels[s], W * H * 4);
+    source->Unmap(0, nullptr);
+    std::unique_ptr<WorldLightScene> copy(new WorldLightScene());
+    std::vector<std::unique_ptr<GpuTransport>> transports;
+    for (unsigned v = 0; v < variants; ++v) {
+        transports.emplace_back(new GpuTransport());
+        GpuTransport &g = *transports.back();
+        g.force_pass_profile = true;
+        g.quiet_passes = true;
+        if (sources && sources[v]) g.source = sources[v];
+        if (!g.init(device.get(), queue.get()) || !g.pass_queries) { say(error, error_size, "GPU transport variant failed to build."); return 0; }
+    }
+    for (unsigned i = 0; i < count * variants; ++i) for (int n = 0; n < 8; ++n) pass_ms[i][n] = 0;
+    UINT64 value = 0;
+    uint32_t revision = 1;
+    bool copied = false;
+    LARGE_INTEGER rate, began, now;
+    QueryPerformanceFrequency(&rate);
+    QueryPerformanceCounter(&began);
+    // Two seconds of continuous work hold the GPU at its working clock; then
+    // scenes and variants interleave (in alternating order) to share drift.
+    for (unsigned run = 0; run <= runs;) {
+        QueryPerformanceCounter(&now);
+        bool warm = (now.QuadPart - began.QuadPart) < rate.QuadPart * 2;
+        for (unsigned s = 0; s < count; ++s) for (unsigned j = 0; j < variants; ++j) {
+            unsigned v = (run + s) & 1 ? variants - 1 - j : j;
+            GpuTransport &g = *transports[v];
+            *copy = *scenes[s];
+            copy->revision = ++revision;   /* force the light field to be rebuilt */
+            alloc->Reset(); cmd->Reset(alloc.get(), nullptr);
+            if (copied) { auto b = barrier(one.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST); cmd->ResourceBarrier(1, &b); }
+            cmd->CopyBufferRegion(one.get(), 0, source.get(), (UINT64)s * W * H * 4, W * H * 4);
+            { auto b = barrier(one.get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE); cmd->ResourceBarrier(1, &b); }
+            copied = true;
+            for (int n = 0; n < 8; ++n) { g.pass_sum[n] = 0; g.pass_n[n] = 0; }
+            if (!g.record(cmd.get(), 0, 1, *copy, one.get(), picture.get())) { say(error, error_size, "Lighting dispatch failed."); return 0; }
+            if (!warm && run == runs) {
+                auto r = barrier(g.result.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                cmd->ResourceBarrier(1, &r);
+                cmd->CopyBufferRegion(readback.get(), (UINT64)(v * count + s) * W * H * 4, g.result.get(), 0, W * H * 4);
+                r = barrier(g.result.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                cmd->ResourceBarrier(1, &r);
+            }
+            cmd->Close();
+            ID3D12CommandList *lists[] = {cmd.get()};
+            queue->ExecuteCommandLists(1, lists);
+            queue->Signal(fence.get(), ++value);
+            while (fence->GetCompletedValue() < value) YieldProcessor();
+            g.pass_read(0);
+            if (!warm && run >= 1)
+                for (int n = 0; n < 8; ++n)
+                    pass_ms[v * count + s][n] += g.pass_n[n] ? g.pass_sum[n] / g.pass_n[n] / runs : 0;
+        }
+        if (!warm) ++run;
+    }
+    if (FAILED(readback->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Readback failed."); return 0; }
+    for (unsigned i = 0; i < count * variants; ++i) if (shaded && shaded[i]) memcpy(shaded[i], map + (size_t)i * W * H * 4, W * H * 4);
     D3D12_RANGE none = {0, 0};
     readback->Unmap(0, &none);
     return 1;

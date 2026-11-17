@@ -529,17 +529,32 @@ static int parse_sprites(const uint8_t *buffer, Sprite *list)
 
 #include "world_scene_materials.h"
 
-static uint32_t drawing_material;
+/* The texel whose material sprite_block stores. Looked up only when the
+   texel actually owns a pixel: nearer sprites already cover many of them. */
+static struct { int wanted, x, y, flip_x, flip_y; unsigned code, bank, pen; } drawing;
+static inline uint32_t drawing_material(void)
+{
+    return drawing.wanted ? material_surface(drawing.code, drawing.bank, drawing.pen, drawing.x, drawing.y,
+                                             drawing.flip_x, drawing.flip_y) : 0;
+}
 static inline void sprite_block(int px, int py, uint16_t value)
 {
     int k = g.k;
     if (px <= -k || py <= -k || px >= g.ow || py >= g.oh) return;
     int x0 = px < 0 ? 0 : px, x1 = px + k > g.ow ? g.ow : px + k;
     int y0 = py < 0 ? 0 : py, y1 = py + k > g.oh ? g.oh : py + k;
+    int store = g.fx->materials || g.fx->contact_shade, looked_up = 0;
+    uint32_t material = 0;
     for (int y = y0; y < y1; ++y) {
         uint16_t *row = sprite_px + (size_t)y * g.ow;
         for (int x = x0; x < x1; ++x)
-            if (row[x] == NONE) { row[x] = value; if((g.fx->materials || g.fx->contact_shade)) sprite_material[(size_t)y*g.ow+x]=drawing_material; }      /* the first sprite owns the pixel */
+            if (row[x] == NONE) {                     /* the first sprite owns the pixel */
+                row[x] = value;
+                if (store) {
+                    if (!looked_up) { material = drawing_material(); looked_up = 1; }
+                    sprite_material[(size_t)y*g.ow+x] = material;
+                }
+            }
     }
 }
 
@@ -677,8 +692,10 @@ static void draw_sprites(double alpha)
                     int wrap = s->left + shown * 16 >= 497 ? 512 : 0;
                     int sx = s->left + shown * 16 + col - wrap;
                     int px = left + (shown * 16 + col - wrap) * k, py = top + row * k;
-                    drawing_material = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive
-                        ? material_surface(code,bank,pen,flip_x?15-col:col,local&15,flip_x,flip_y) : 0;
+                    drawing.wanted = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive;
+                    drawing.code = code; drawing.bank = bank; drawing.pen = pen;
+                    drawing.x = flip_x ? 15-col : col; drawing.y = local&15;
+                    drawing.flip_x = flip_x; drawing.flip_y = flip_y;
                     sprite_block(px, py, index | flags | (hud ? 0x4000 : 0));
                     /* Fire, flashes and tracer light their surroundings. */
                     if (may_glow && blast && sx >= 0 && sx < W && screen_y >= 0 && screen_y < H) {
@@ -2052,6 +2069,17 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         title_fx.contact_shade = 0;
         fx = &title_fx;
         break;
+    }
+    /* Story, ending and other non-gameplay screens without a sea surface are
+       authored artwork and captions, often over sky. Underwater depth grading
+       would darken the sky and dim the caption text. 0C04 and 0C3E hold the
+       last gameplay picture, so they keep its grade. */
+    unsigned master = cur.scene_id & 65535;
+    if (master != 0xb2e && master != 0xc04 && master != 0xc3e && cur.waterline < 0 && fx != &title_fx) {
+        title_fx = *fx;
+        title_fx.depth = title_fx.ocean_depth = title_fx.water_volume = 0;
+        title_fx.haze = title_fx.rays = title_fx.sunshadow = title_fx.contact_shade = 0;
+        fx = &title_fx;
     }
     if (!ready) prepare();
     if(gpu_light){

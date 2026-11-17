@@ -7,6 +7,9 @@ RWStructuredBuffer<float4> bounceField : register(u1);
 RWByteAddressBuffer result : register(u2);
 ByteAddressBuffer effects : register(t2);
 RWByteAddressBuffer history : register(u3);
+// Per native pixel: 4-bit point-light visibility codes for the first 32 lights
+// of its bin, written by directPass and reused by the rim light (0 = not traced).
+RWByteAddressBuffer visCache : register(u5);
 static const int2 size=int2(160,120);
 uint indexOf(int2 p){ return p.y*160+p.x; }
 bool inside(int2 p){return all(p>=0)&&all(p<size);}
@@ -77,24 +80,27 @@ int pointBlockerRow(float2 receiver,float2 emitter){
     }
     return -1;
 }
-float pointVisibility(float2 receiver,float2 emitter,bool bow){
+// Codes 1..5: visible quarters 0..4. Codes 6..10: faint sky-fill blocked quarters 0..4.
+float decodeVisibility(uint code){
+    return code<=5?(code-1)*.25:1-.16*((code-6)*.25);
+}
+uint pointVisibilityCode(float2 receiver,float2 emitter,bool bow){
     int row=pointBlockerRow(receiver,emitter),wl=asint(scene.Load(8));
     if(wl<=0 || min(receiver.y,emitter.y)>=wl || row>=wl){
-        if(!bow || abs(receiver.x-emitter.x)<12)return row<0?1:0;
+        if(!bow || abs(receiver.x-emitter.x)<12)return row<0?5:1;
         // The bow lens is vertical in side view. Fixed taps keep tiny nearby
         // silhouette details from switching the entire distant beam on/off.
         float2 rim=float2(0,3.0);
         int top=pointBlockerRow(receiver,emitter-rim);
         int bottom=pointBlockerRow(receiver,emitter+rim);
-        return .25*(top<0)+.50*(row<0)+.25*(bottom<0);
+        return 1+uint(top<0)+2*uint(row<0)+uint(bottom<0);
     }
     // Sky fill keeps local-light shadows from airborne blockers very faint.
     // Sample a small area of the source for a stable feathered boundary.
     float2 delta=emitter-receiver;
     float2 wing=float2(-delta.y,delta.x)*min(.10,3.5/max(length(delta),1.));
     int a=pointBlockerRow(receiver,emitter-wing),b=pointBlockerRow(receiver,emitter+wing);
-    float blocked=.50*(row>=0)+.25*(a>=0 && a<wl)+.25*(b>=0 && b<wl);
-    return 1-.16*blocked;
+    return 6+2*uint(row>=0)+uint(a>=0 && a<wl)+uint(b>=0 && b<wl);
 }
 float cone(float facing,float2 toLight,uint emitter){
     if(facing>2){
@@ -174,10 +180,12 @@ void directPass(uint3 id:SV_DispatchThreadID){
     if((terrainFlags(pixel)&16) && caster(pixel)!=2)sun=1;
     float3 energy=0;
     uint bin=(q.y/16)*10+q.x/16;
+    uint ordinal=0;uint4 cache=0;
     [loop]for(uint w=0;w<(scene.Load(0)+31)/32;++w){
         uint bits=scene.Load(81300+20*bin+4*w);
         [loop]while(bits){
             uint i=w*32+firstbitlow(bits);bits&=bits-1;
+            uint slot=ordinal++;
             float4 e=asfloat(scene.Load4(16+32*i));
             bool headlamp=abs(e.w)==1;
             if(!headlamp && !(flags&(1|4|16)))continue;
@@ -187,8 +195,18 @@ void directPass(uint3 id:SV_DispatchThreadID){
             float2 dir=delta/max(.001,d);
             float fall=cone(e.w,dir,i)*pow(saturate(1-d/e.z),2)/(1+d*d*(headlamp?1.73/(e.z*e.z):.0032));
             float3 emission=asfloat(scene.Load3(32+32*i));
-            if(fall*max(emission.r,max(emission.g,emission.b))<.0025)continue;
-            float vis=pointVisibility(origin,2*e.xy,headlamp);
+            bool lit=fall*max(emission.r,max(emission.g,emission.b))>=.0025;
+            // Rim light needs dimmer lights too, but only on silhouettes.
+            bool rim=(flags&16384) && slot<32 && fall>=.002 && pointCaster(pixel)!=0;
+            if(!lit && !rim)continue;
+            uint code=pointVisibilityCode(origin,2*e.xy,headlamp);
+            if(slot<32){
+                uint shift=4*(slot&7);
+                if(slot<8)cache.x|=code<<shift;else if(slot<16)cache.y|=code<<shift;
+                else if(slot<24)cache.z|=code<<shift;else cache.w|=code<<shift;
+            }
+            if(!lit)continue;
+            float vis=decodeVisibility(code);
             float response=1;
             if(flags&1048576){
                 uint m=scene.Load(121740+4*(pixel.y*320+pixel.x));
@@ -205,6 +223,7 @@ void directPass(uint3 id:SV_DispatchThreadID){
         }
     }
     float4 light=float4(energy,sky?sun:0);
+    visCache.Store4(16*(pixel.y*320+pixel.x),cache);
     directField[19200+pixel.y*320+pixel.x]=light;
     if(!any(pixel&1))directField[indexOf(q)]=light;
 }
@@ -378,10 +397,15 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
     }
     uint2 tile=uint2(p)/16;
     uint bin=tile.y*10+tile.x;
+    // The same bin walk as directPass, so slots match its visibility cache.
+    int2 receiver=pixel/k;
+    uint4 cached=visCache.Load4(16*(receiver.y*320+receiver.x));
+    uint ordinal=0;
     [loop] for(uint w=0;w<(scene.Load(0)+31)/32;++w){
         uint bits=scene.Load(81300+20*bin+4*w);
         [loop] while(bits){
             uint i=w*32+firstbitlow(bits);bits&=bits-1;
+            uint slot=ordinal++;
             float4 e=asfloat(scene.Load4(16+32*i));
             float2 delta=e.xy-p;float d2=dot(delta,delta);
             if(d2>=e.z*e.z)continue;
@@ -390,7 +414,13 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
             if(strength<.002)continue;
             float wet=saturate((max(p.y,e.y)-surface)/max(.01,abs(delta.y)));
             float3 colour=asfloat(scene.Load3(32+32*i));
-            incident+=colour*transmission(wet*d)*strength*pointVisibility(float2(pixel/k)+.5,2*e.xy,abs(e.w)==1)*2.8;
+            uint code=0;
+            if(slot<32){
+                uint word=slot<8?cached.x:slot<16?cached.y:slot<24?cached.z:cached.w;
+                code=(word>>(4*(slot&7)))&15;
+            }
+            if(!code)code=pointVisibilityCode(float2(receiver)+.5,2*e.xy,abs(e.w)==1);
+            incident+=colour*transmission(wet*d)*strength*decodeVisibility(code)*2.8;
         }
     }
     return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));

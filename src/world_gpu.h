@@ -56,6 +56,14 @@ int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refres
 int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
                                unsigned scale,char *error,size_t size);
 int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,char *error,size_t size);
+/* Developer benchmark: on one device, rebuild and shade each captured k=1
+   scene `runs` times with each shader variant (NULL source = built-in),
+   interleaved after a warm-up. pass_ms and shaded are indexed
+   [variant * count + scene]; pass order is sun, direct, indirect, resolve,
+   upload, volume, shade, copy. Shaded pictures keep their plane tags. */
+int world_gpu_light_benchmark(const WorldLightScene *const *scenes,const uint32_t *const *pixels,
+                              unsigned count,const char *const *sources,unsigned variants,unsigned runs,
+                              double (*pass_ms)[8],uint32_t *const *shaded,char *error,size_t size);
 int world_gpu_render_offscreen(const uint32_t *frame, const char *preset, int scaling,
                                unsigned width, unsigned height, uint32_t *out,
                                char *error, size_t error_size);
