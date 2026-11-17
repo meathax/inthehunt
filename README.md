@@ -1,17 +1,16 @@
 # In the Hunt
 
-**0.9.14 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.15 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
 [Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
 
-## New in 0.9.14
+## New in 0.9.15
 
-- **Smoother fullscreen:** EXACT pacing now checks that variable refresh is really active. On a fixed-refresh display it switches to vsync pacing (notice: *NO VRR: VSYNC PACING*) instead of showing torn, unevenly held frames.
-- **Ambient side borders** cost far less at 4K.
+- Menu text now fits: the Sound tab's effects row is renamed **Sound Effects** and clears its volume bar, and long help lines are shorter.
 
-0.9.13 added caustics, effect strength sliders, brightness, ambient borders and auto quality.
+0.9.14 added smoother fullscreen pacing (vsync when variable refresh is not active) and cheaper ambient side borders at 4K.
 
 ## Lighting and sound
 
