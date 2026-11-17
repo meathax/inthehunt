@@ -1,18 +1,18 @@
 # In the Hunt
 
-**0.9.12 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+**0.9.13 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
 
 [Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
 
 ![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
 
-## New in 0.9.12
+## New in 0.9.13
 
-- After a pause in the game window (dragging the window, waking from sleep), play now resumes at normal speed instead of rushing through the missed time. Sound no longer lags behind the picture afterwards.
-- Keys released while Alt is held no longer stay pressed.
-- Fixed rare crashes when the ROM setup screen is minimised or the game window fails to resize.
-
-0.9.11 added import support for LZMA-compressed ROM ZIPs.
+- **Caustics:** rippling sunlight on the sunlit seabed and rock.
+- **Strength sliders** for light shafts, caustics, sun shadows, point lights, depth and rim lighting (**Options → Enhance**).
+- **Brightness**, **ambient side borders** and **auto quality** (eases High lighting if the GPU falls behind) under **Options → Video**.
+- Story, ranking and name-entry screens keep their arcade colours.
+- About 20% less GPU lighting work and up to 1 ms less CPU time per frame at High, with the same picture.
 
 ## Lighting and sound
 
@@ -36,7 +36,7 @@ The lighting passes measured **0.73 ms** at 3× resolution with 128 emitters on 
 
 Select the merged archive, any complete non-merged set, or a split clone with its parent (`inthunt.zip` or `inthunt.7z`) in the same folder. World, US (`inthuntu`), Japan (`kaiteids`), and Korea (`inthuntk`) all run the World edition. The importer identifies chips by content, so older MAME filenames and nested folders work.
 
-No Python or compiler needed. The built-in importer uses Windows PowerShell and `tar.exe`; CRT presets need Direct3D 12. After import, the original archive can be moved or removed.
+No Python or compiler needed. The built-in importer uses Windows PowerShell and `tar.exe`. After import, the original archive can be moved or removed.
 
 ## Controls
 
@@ -50,7 +50,7 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 ## Graphics and frame pacing
 
-Open **Options → Enhance** to choose a preset or toggle any effect. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
+Open **Options → Enhance** to choose a preset, toggle any effect or set its strength. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
 Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
@@ -76,7 +76,7 @@ Build-WorldNative -Root (Get-Location).Path
 
 The executable is written to `.local/native/InTheHunt.exe`. Open the executable to select and import your ROM archive.
 
-For optional CRT presets, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. The published Windows ZIP includes these runtimes. Generate the shader data with Python 3 from the pinned libretro checkout:
+For optional CRT presets, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. The published Windows ZIP omits them; the game runs without them. Generate the shader data with Python 3 from the pinned libretro checkout:
 
 ```powershell
 python -I tools/make_shaders.py --slang C:/path/to/slang-shaders
