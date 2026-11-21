@@ -21,6 +21,7 @@ __pycache__/
 *.log
 /build/
 /tools/*
+!/tools/test_surface_enemy_dispatch.c
 /.codex-attachments/
 
 /docs/

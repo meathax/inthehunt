@@ -627,7 +627,7 @@ static void fire_cruiser_weapon(uint8_t *ram, const uint8_t *rom, uint16_t actor
     world_queue_sound(ram, vertical ? 0x7c : 0x71);
 }
 
-static void queue_surface_enemy(uint8_t *ram, const uint8_t *rom, uint16_t actor)
+static uint16_t queue_surface_enemy(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     write_word(ram, actor + 0x2a, read_word(ram, actor + 0x4c));
     queue_sprite(ram, rom, actor, 1);
@@ -636,7 +636,8 @@ static void queue_surface_enemy(uint8_t *ram, const uint8_t *rom, uint16_t actor
     write_word(ram, actor + 0x48, index);
     index += read_word(ram, actor + 0x4a);
     write_word(ram, actor + 0x2a, read_word(rom + 0xb0000, 0x2790 + index));
-    queue_sprite(ram, rom, actor, 0);
+    if (queue_sprite(ram, rom, actor, 0)) return 2 * (ram[actor + 0x2d] & 0x3f);
+    return read_word(ram, actor + 0x2a);
 }
 
 /* 6C78 is used both on initial destruction and on the rising mine's timer. */
@@ -665,19 +666,32 @@ static void register_surface_enemy(uint8_t *ram, uint16_t actor)
 uint16_t world_surface_contact(uint8_t *, const uint8_t *, uint16_t);
 void world_award_score(uint8_t *, const uint8_t *, uint16_t, uint16_t);
 
+/* B000:2ED1 credits the owner byte addressed by the caller's BX. */
+static void surface_enemy_die(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t bx)
+{
+    ram[actor + 0x0b] = ram[(uint16_t)(bx + 0x0b)];
+    world_award_score(ram, rom, actor, bx);
+    unsigned mask = 1u << (ram[actor + 0x1e] & 15);
+    write_word(ram, 0xc4, read_word(ram, 0xc4) & ~mask);
+    write_word(ram, actor, 0x2eee);
+}
+
+/* D2B7 and D371 leave BX at the hit shot or the last slot scanned, including a
+   zero slot. An empty list preserves the incoming BX. */
+static uint16_t projectile_contact_bx(const uint8_t *ram, uint16_t list, uint16_t hit, uint16_t bx)
+{
+    unsigned end = read_word(ram, list);
+    if (hit) return hit;
+    return end ? read_word(ram, list + 4 + ((end - 1) & 0xfffe)) : bx;
+}
+
 static void surface_enemy_hit(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     ram[actor + 0x0d] = 0;
     uint16_t hit = world_surface_contact(ram, rom, actor);
     /* D371 loads SI with the shape; 6237 on the death path reloads it. */
     if (read_word(ram, actor + 0x26)) leave_si(read_word(ram, actor + 0x3c));
-    if (!read_word(ram, actor + 0x26)) {
-        ram[actor + 0x0b] = ram[hit + 0x0b];
-        world_award_score(ram, rom, actor, hit);
-        unsigned mask = 1u << (ram[actor + 0x1e] & 15);
-        write_word(ram, 0xc4, read_word(ram, 0xc4) & ~mask);
-        write_word(ram, actor, 0x2eee);
-    }
+    if (!read_word(ram, actor + 0x26)) surface_enemy_die(ram, rom, actor, hit);
 }
 
 static void begin_linear_script(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t offset)
@@ -3721,9 +3735,9 @@ static void surface_enemy_pose(uint8_t *ram, const uint8_t *bank, uint16_t actor
     write_word(ram, actor + 0x60, (index + 2) * 2);
 }
 
-static void surface_enemy_fire(uint8_t *ram, uint16_t actor)
+static uint16_t surface_enemy_fire(uint8_t *ram, uint16_t actor, uint16_t bx)
 {
-    if (read_word(ram, actor + 0x24) >= 0x170 || decrement(ram, actor + 0x50)) return;
+    if (read_word(ram, actor + 0x24) >= 0x170 || decrement(ram, actor + 0x50)) return bx;
     int mine = ram[actor + 0x0e] == 14;
     uint16_t interval = read_word(ram, actor + 0x52);
     if (!mine) {
@@ -3731,10 +3745,12 @@ static void surface_enemy_fire(uint8_t *ram, uint16_t actor)
         else write_word(ram, actor + 0x58, read_word(ram, actor + 0x5a));
     }
     write_word(ram, actor + 0x50, interval);
+    uint16_t cursor = read_word(ram, 0x8b00);
     uint16_t child = effect_slot(ram, actor, mine ? 0x30c6 : 0x2f81);
     if (child != 0x8480) write_word(ram, child + 2, 0xb000);
     if (mine) {
         write_word(ram, child + 0x58, read_word(ram, actor + 0x58));
+        return child == 0x8480 ? bx : cursor;  /* 1769 leaves the free-ring index in BX. */
     } else {
         write_word(ram, child + 0x21, read_word(ram, actor + 0x21));
         write_word(ram, child + 0x24, read_word(ram, actor + 0x24) - 8);
@@ -3742,14 +3758,16 @@ static void surface_enemy_fire(uint8_t *ram, uint16_t actor)
         write_word(ram, child + 0x38, (int16_t)read_word(ram, actor + 0x38) >> 1);
         write_word(ram, child + 0x3a, read_word(ram, actor + 0x5c));
         write_word(ram, child + 0x5e, read_word(ram, actor + 0x5e));
+        bx = (read_word(ram, 0xa6d4) + 2) & 14;
         world_queue_sound(ram, 0x7d);
+        return bx;  /* 364B leaves the next sound-ring index even when full. */
     }
 }
 
 static int surface_enemy_swim(uint8_t *ram, const uint8_t *rom, const uint8_t *tiles,
                               uint16_t actor, uint16_t handler)
 {
-    if (!tiles || !read_word(ram, actor + 0x26)) return 0;
+    if (!tiles) return 0;
     unsigned players = read_word(ram, 0x264) & 3;
     if ((handler == 0x2ca0 || handler == 0x2d80) && players == 3 &&
         !world_enemy_target_mode_supported(ram[actor + 0x0c])) return 0;
@@ -3763,8 +3781,6 @@ static int surface_enemy_swim(uint8_t *ram, const uint8_t *rom, const uint8_t *t
     uint16_t x = read_word(ram, actor + 0x21) + read_word(ram, 0xb71a);
     if (handler != 0x2d80) {
         x += (int8_t)(speed >> 8) + (fraction >> 8);
-        /* At exact clip edges the original score path consumes scratch BX. */
-        if (x == 0xffc0 || x == 0x240) return 0;
     }
     if (handler == 0x2c46) {
         write_word(ram, actor + 0x46, accel);
@@ -3783,15 +3799,19 @@ static int surface_enemy_swim(uint8_t *ram, const uint8_t *rom, const uint8_t *t
                 if ((int16_t)x <= 0x88) ram[actor + 0x29] = 0;
                 write_word(ram, actor, 0x2c46);
             }
-            surface_enemy_fire(ram, actor);
+            surface_enemy_fire(ram, actor, 0);
             if (!decrement(ram, actor + 0x4e)) {
                 write_word(ram, actor + 0x42, 16);
                 write_word(ram, actor, 0x2e4a);
             }
         }
         queue_surface_enemy(ram, rom, actor);
+        uint16_t bx = read_word(ram, 0xb6ea);  /* B900 loads BX from the register list cursor. */
         register_surface_enemy(ram, actor);
-        surface_enemy_hit(ram, rom, actor);
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_surface_contact(ram, rom, actor);
+        if (read_word(ram, actor + 0x26)) leave_si(read_word(ram, actor + 0x3c));
+        else surface_enemy_die(ram, rom, actor, projectile_contact_bx(ram, 0xaee6, hit, bx));
         return 1;
     }
     int magnitude = (speed & 0x8000) ? (uint16_t)-speed : speed;
@@ -3830,10 +3850,24 @@ static int surface_enemy_swim(uint8_t *ram, const uint8_t *rom, const uint8_t *t
         (world_terrain_mask(ram, tiles + 0x4000, x + read_word(bank, 0x28de + 2 * facing),
                             read_word(ram, actor + 0x24)) & 0xff02))) write_word(ram, actor, 0x2cd3);
     if (!decrement(ram, actor + 0x4e)) write_word(ram, actor, 0x2e05);
-    queue_surface_enemy(ram, rom, actor);
-    surface_enemy_fire(ram, actor);
-    if ((int16_t)x > -64 && (int16_t)x < 576) surface_enemy_hit(ram, rom, actor);
-    if (read_word(ram, actor + 0x26)) register_surface_enemy(ram, actor);
+    uint16_t bx = queue_surface_enemy(ram, rom, actor);
+    bx = surface_enemy_fire(ram, actor, bx);
+    int16_t position = (int16_t)x;
+    /* At B2D75 the clipping comparison supplies ZF if D371 was skipped. */
+    if (position == -64 || position == 576) {
+        surface_enemy_die(ram, rom, actor, bx);
+        return 1;
+    }
+    if (position > -64 && position < 576) {
+        ram[actor + 0x0d] = 0;
+        uint16_t hit = world_surface_contact(ram, rom, actor);
+        if (!read_word(ram, actor + 0x26)) {
+            surface_enemy_die(ram, rom, actor, projectile_contact_bx(ram, 0xaee6, hit, bx));
+            return 1;
+        }
+        leave_si(read_word(ram, actor + 0x3c));
+    }
+    register_surface_enemy(ram, actor);
     return 1;
 }
 
@@ -22634,7 +22668,6 @@ stage2_jumper_terrain:
     }
     case 0x7e48a: {
         const uint8_t *bank = main_rom + 0x70000;
-        if (!read_word(ram, actor + 0x26)) return 0;
         write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
         write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
@@ -22668,8 +22701,9 @@ stage2_jumper_terrain:
                 leave_si(read_word(ram, actor + 0x3c));   /* D2B7 at 7E50D */
                 break;
             }
+            hit = projectile_contact_bx(ram, 0xa6e2, hit, read_word(ram, 0x92));
         }
-        ram[actor + 0xb] = ram[hit + 0xb];
+        ram[actor + 0xb] = ram[(uint16_t)(hit + 0xb)];
         world_award_score(ram, main_rom, actor, hit);
         uint16_t y = read_word(ram, actor + 0x24) + 0x70;
         if (ram[actor + 0x1e] & 1) {
@@ -22753,7 +22787,7 @@ stage2_jumper_terrain:
             }
         }
         ram[actor + 0x29] = speed >> 15;
-        queue_surface_enemy(ram, main_rom, actor);
+        uint16_t bx = queue_surface_enemy(ram, main_rom, actor);
         ram[actor + 0x0d] = 0;
         uint16_t hit = world_surface_contact(ram, main_rom, actor);
         int16_t at = (int16_t)read_word(ram, actor + 0x21);
@@ -22762,21 +22796,7 @@ stage2_jumper_terrain:
             register_surface_enemy(ram, actor);                          /* 0:B900 */
             break;
         }
-        /* 2ED1 scores through BX as D371 leaves it: the hit shot, or on a
-           miss the last entry of the AEE6 list it scanned (D377 loads every
-           entry, zero ones included). */
-        if (!hit) {
-            unsigned end = read_word(ram, 0xaee6);
-            if (end)
-                hit = read_word(ram, (uint16_t)(0xaeea + ((end - 1) & 0xfffe)));
-            else    /* an empty list leaves BX from the last 0DA4: (2D & 3Fh) * 2
-                       when the sprite was queued, else the sprite id 2A */
-                hit = queued_sprite_entry ? (uint16_t)(2 * (ram[actor + 0x2d] & 0x3f)) : read_word(ram, actor + 0x2a);
-        }
-        ram[actor + 0x0b] = ram[(uint16_t)(hit + 0x0b)];
-        world_award_score(ram, main_rom, actor, hit);
-        write_word(ram, 0xc4, read_word(ram, 0xc4) & ~(1u << (ram[actor + 0x1e] & 15)));
-        write_word(ram, actor, 0x2eee);
+        surface_enemy_die(ram, main_rom, actor, projectile_contact_bx(ram, 0xaee6, hit, bx));
         break;
     }
     case 0x7e5d8: {
