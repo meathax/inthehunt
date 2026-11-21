@@ -108,7 +108,7 @@ static void apply_view(void)
         fprintf(stderr, "CRT view unavailable: %s\n", error);
         if (preset[0]) show_notice("CRT SHADER UNAVAILABLE");
         settings.crt_shader = 0;
-                world_window_set_crt("", 0, 1, NULL, 0);
+        world_window_set_crt("", 0, 1, NULL, 0);
     }
 }
 
@@ -291,7 +291,8 @@ static void present_game(const uint32_t *source)
         settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
         settings.fx_headlights || settings.fx_rim || settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
-        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid || settings.fx_ocean_depth)
+        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid ||
+        settings.fx_ocean_depth || settings.fx_caustics)
         && world_gpu_transport_available();
     float offsets[4]={0};
     int pixel_camera=!title && !settings.crt_shader && world_gpu_visible();
@@ -1635,7 +1636,6 @@ static int run_game(int argc, char **argv)
         }
         timing_override = 1;
     }
-    if (!headless) settings.crt_shader = 0;
     const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
     if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) {
         desktop_fullscreen = settings.fullscreen;

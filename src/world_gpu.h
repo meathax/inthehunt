@@ -9,8 +9,12 @@ extern "C" {
 
 /* The Direct3D 12 flip-model swap chain presents to the game window. */
 
-enum { WORLD_GPU_PRESETS = 12 };
-/* Menu name and path inside the shader folder (tools/make_shaders.py). */
+enum { WORLD_GPU_PRESETS = 0
+#define WORLD_CRT_PRESET(name, path) + 1
+#include "world_crt_presets.inc"
+#undef WORLD_CRT_PRESET
+};
+/* Menu name and path inside the shader folder. */
 extern const char *const world_gpu_preset_name[WORLD_GPU_PRESETS];
 extern const char *const world_gpu_preset_path[WORLD_GPU_PRESETS];
 

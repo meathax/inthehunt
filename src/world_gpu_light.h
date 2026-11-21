@@ -3,6 +3,11 @@
 #include <stdint.h>
 /* Native arcade coordinates, two source pixels per transport cell. */
 enum { WORLD_PROBES=160*120, WORLD_EMITTERS=140 };
+enum {
+    WORLD_LIGHT_CAUSTICS = 1u << 22,
+    WORLD_LIGHT_SUN_MASK = 2 | 16 | 16384 | WORLD_LIGHT_CAUSTICS,
+    WORLD_LIGHT_FIELD_MASK = WORLD_LIGHT_SUN_MASK | 1 | 4 | 32768
+};
 /* Ordered effects binned into 8x8 native-pixel tiles. Index zero ends a list.
    Nodes use native coordinates except additive subpixel blocks (kind 3). */
 enum { WORLD_EFFECT_TILES=40*30, WORLD_EFFECT_NODES=65536 };

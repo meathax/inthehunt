@@ -55,5 +55,8 @@ function Build-WorldNative {
         $from = Join-Path $Root "third_party/librashader/$dll"
         if (Test-Path -LiteralPath $from) { Copy-Item -Force -LiteralPath $from -Destination (Join-Path $dest $dll) }
     }
+    $shaderDest = Join-Path $dest 'shaders'
+    New-Item -Force -ItemType Directory $shaderDest | Out-Null
+    Copy-Item -Force -Recurse (Join-Path $Root 'third_party/slang-shaders/*') $shaderDest
     Write-Host "Built $target"
 }

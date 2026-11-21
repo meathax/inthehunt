@@ -166,7 +166,7 @@ struct GpuTransport {
     // Medium, or High with automatic quality, lightens the lighting while
     // measured GPU time stays over budget. Early and frame recording agree.
     static bool adaptive(const WorldLightScene &data){
-        return (data.flags&(1024|2097152))!=0 && (data.flags&(23|32768|16384))!=0;
+        return (data.flags&(1024|2097152))!=0 && (data.flags&WORLD_LIGHT_FIELD_MASK)!=0;
     }
     uint32_t dispatch_flags(const WorldLightScene &data) const {
         return data.flags | (adaptive(data) && budget_mode ? 2048u : 0u);
@@ -207,7 +207,7 @@ struct GpuTransport {
             transition(scene.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             scale=k;
         }
-        if (changed && (data.flags&(23|32768|16384))) {
+        if (changed && (data.flags&WORLD_LIGHT_FIELD_MASK)) {
             pass_mark(cmd,frame,"begin-light");
             cmd->SetComputeRootSignature(root.get());
             cmd->SetComputeRootShaderResourceView(0,scene->GetGPUVirtualAddress());
@@ -216,7 +216,7 @@ struct GpuTransport {
             cmd->SetComputeRootUnorderedAccessView(8,vis_cache->GetGPUVirtualAddress());
             D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
             cmd->ResourceBarrier(1,&sync);
-            if(!(data.flags&524288) && (data.flags&(2|16|16384))){
+            if(!(data.flags&524288) && (data.flags&WORLD_LIGHT_SUN_MASK)){
                 cmd->SetPipelineState(sun.get());
                 cmd->Dispatch(373,1,1); // 320 columns plus the 53-pixel slant at row 239
                 cmd->ResourceBarrier(1,&sync);
@@ -246,7 +246,7 @@ struct GpuTransport {
         bool medium=adaptive(data);
         uint32_t dispatch=dispatch_flags(data);
         bool changed=!have_field || revision!=data.revision || flags!=dispatch;
-        bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&(23|32768|16384))) && (++sample_counter%16==0));
+        bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&WORLD_LIGHT_FIELD_MASK)) && (++sample_counter%16==0));
         if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2);
         pass_read(frame);
         if(!prepare(cmd,scene_upload[frame].get(),k,data,dispatch,frame))return false;

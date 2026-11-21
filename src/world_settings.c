@@ -10,6 +10,7 @@
 #include <string.h>
 #include <wchar.h>
 #include "world_settings.h"
+#include "world_gpu.h"
 
 typedef struct {
     const char *key;
@@ -24,6 +25,7 @@ static const NumberSetting numbers[] = {
     {"window_scale", offsetof(WorldSettings, window_scale), 1, 12, 0},
     {"achievement_popups", offsetof(WorldSettings, achievement_popups), 0, 1, 0},
     {"scaling", offsetof(WorldSettings, scaling), 0, 2, 0},
+    {"crt_shader", offsetof(WorldSettings, crt_shader), 0, WORLD_GPU_PRESETS, 0},
     {"show_fps", offsetof(WorldSettings, show_fps), 0, 1, 0},
     {"pause_unfocused", offsetof(WorldSettings, pause_unfocused), 0, 1, 0},
     {"ambience_volume", offsetof(WorldSettings, ambience_volume), 0, 100, 0},

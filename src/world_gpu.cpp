@@ -18,13 +18,15 @@ using gdl::post::PostChain;
 using gdl::post::PreparedPreset;
 
 const char *const world_gpu_preset_name[WORLD_GPU_PRESETS] = {
-    "CRT-ROYALE", "ROYALE PVM", "GUEST ADVANCED", "GUEST NTSC", "CRT-GEOM", "CRT-LOTTES",
-    "CRT-HYLLIAN", "EASYMODE", "APERTURE", "CONSUMER TV", "CALIGARI", "ZFAST"};
+#define WORLD_CRT_PRESET(name, path) name,
+#include "world_crt_presets.inc"
+#undef WORLD_CRT_PRESET
+};
 const char *const world_gpu_preset_path[WORLD_GPU_PRESETS] = {
-    "crt/crt-royale.slangp", "presets/crt-royale-kurozumi.slangp", "crt/crt-guest-advanced.slangp",
-    "crt/crt-guest-advanced-ntsc.slangp", "crt/crt-geom.slangp", "crt/crt-lottes.slangp",
-    "crt/crt-hyllian.slangp", "crt/crt-easymode.slangp", "crt/crt-aperture.slangp",
-    "crt/crt-consumer.slangp", "crt/crt-caligari.slangp", "crt/zfast-crt.slangp"};
+#define WORLD_CRT_PRESET(name, path) path,
+#include "world_crt_presets.inc"
+#undef WORLD_CRT_PRESET
+};
 
 static_assert(offsetof(WorldLightScene,stage_light)==121692);
 static_assert(offsetof(WorldLightScene,surface)==121740);
@@ -463,7 +465,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
 {
     Presenter *p=gpu;
     if(!p || !data || !p->transport.ready || p->early_light_failed ||
-       !(data->flags&(23|16384|32768)) || !p->transport.needs_light(*data))return;
+       !(data->flags&WORLD_LIGHT_FIELD_MASK) || !p->transport.needs_light(*data))return;
     UINT f=p->frame_index;
     if(p->fence->GetCompletedValue()<std::max(p->light_fence[f],p->frame_fence[f]))return;
     if(!p->light_alloc[f] &&

@@ -27,7 +27,8 @@ enum {
     ITEM_FX_HEADLIGHTS, ITEM_HEADLIGHT_LEVEL, ITEM_FX_RIM, ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
     ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
-    ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC
+    ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
+    ITEM_CRT
 };
 enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -262,6 +263,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
             ADD(ITEM_PACING, "FRAME PACING", "DISPLAY LOCK OR EXACT ARCADE VRR");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
+            ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION PRESET");
             ADD(ITEM_BRIGHTNESS, "BRIGHTNESS", "LIFTS OR DEEPENS DARK TONES");
             ADD(ITEM_BORDERS, "SIDE BORDERS", "GLOW OR BLACK BESIDE THE PICTURE");
             ADD(ITEM_AUTO_QUALITY, "AUTO QUALITY", "EASES LIGHTING IF THE GPU LAGS");
@@ -287,7 +289,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_FX, "ENHANCEMENTS", "TOGGLES YOUR SAVED EFFECTS");
             ADD(ITEM_FX_RAYS, "LIGHT SHAFTS", "SUNBEAMS SHINE THROUGH WATER");
             ADD(ITEM_STR_SHAFT, "  SHAFT STRENGTH", "BRIGHTNESS OF SUNBEAMS IN WATER");
-            ADD(ITEM_FX_CAUSTICS, "CAUSTICS", "RIPPLING SUNLIGHT ON THE SEABED");
+            ADD(ITEM_FX_CAUSTICS, "WATER CAUSTICS", "RIPPLING SUNLIGHT ON THE SEABED");
             ADD(ITEM_STR_CAUSTIC, "  CAUSTIC STRENGTH", "BRIGHTNESS OF THE RIPPLING LIGHT");
             ADD(ITEM_FX_SUNSHADOW, "SUN SHADOWS", "ROCK AND ICE BLOCK SUNLIGHT");
             ADD(ITEM_STR_SHADOW, "  SHADOW STRENGTH", "HOW DARK SUN SHADOWS FALL");
@@ -378,6 +380,9 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     case ITEM_PACING: strcpy(out, s->pacing ? "EXACT" : "SMOOTH"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
     case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
+    case ITEM_CRT:
+        strcpy(out, s->crt_shader ? world_gpu_preset_name[s->crt_shader - 1] : "OFF");
+        break;
     case ITEM_LIVES: snprintf(out, 32, "%u", s->dip_lives + 2); break;
     case ITEM_SLOWDOWN: strcpy(out, s->timing_mode == WORLD_TIMING_ARCADE ? "ARCADE" : "REMOVED"); break;
     case ITEM_DIFFICULTY: {
@@ -480,6 +485,9 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VOLUME;
     }
     case ITEM_SCALING: s->scaling = (s->scaling + 3 + (d > 0 ? 1 : -1)) % 3; return WORLD_MENU_VIEW;
+    case ITEM_CRT:
+        s->crt_shader = (s->crt_shader + (d > 0 ? 1 : WORLD_GPU_PRESETS)) % (WORLD_GPU_PRESETS + 1);
+        return WORLD_MENU_VIEW;
     case ITEM_LIVES: s->dip_lives = (s->dip_lives + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
     case ITEM_DIFFICULTY: s->dip_difficulty = (s->dip_difficulty + 4 + (d > 0 ? 1 : -1)) % 4; return WORLD_MENU_VIEW;
     case ITEM_SLOWDOWN:

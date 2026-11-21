@@ -50,6 +50,8 @@ No Python or compiler needed. The built-in importer uses Windows PowerShell and 
 
 Open **Options → Enhance** to choose a preset, toggle any effect or set its strength. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
 
+Choose **Options → Video → CRT Shader** for CRT-Royale, Guest Advanced, Guest HD, GDV Mini, Geom Deluxe and other original Libretro presets. Use **Options → Enhance → Water Caustics** to toggle sunlight patterns on submerged terrain and **Caustic Strength** to adjust their intensity. Medium and High enable caustics by default.
+
 Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver; without active VRR the game uses vsync pacing. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
 
 ## Updates & beta status
@@ -74,13 +76,15 @@ Build-WorldNative -Root (Get-Location).Path
 
 The executable is written to `.local/native/InTheHunt.exe`. Open the executable to select and import your ROM archive.
 
-For optional CRT presets, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. The published Windows ZIP omits them; the game runs without them. Generate the shader data with Python 3 from the pinned libretro checkout:
+The game copies the included Libretro presets from `third_party/slang-shaders/` at build time. To enable CRT shaders in a source build, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. `tools/package_native.py` includes the presets, notices and both verified DLLs in the portable ZIP.
+
+To regenerate the included shader data, run this from a checkout of Libretro slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`:
 
 ```powershell
 python -I tools/make_shaders.py --slang C:/path/to/slang-shaders
 ```
 
-Use slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`. The script copies preset dependencies and their licence notices to `.local/shaders`. The release uses unmodified librashader revision `87e8a97b50516d997defeaa168173dcd185d4022`, built with the Direct3D 12 runtime and static C runtime. Runtime SHA-256 values:
+The script copies preset dependencies and their licence notices to an empty `.local/shaders` directory by default. The package uses unmodified [librashader revision `87e8a97b50516d997defeaa168173dcd185d4022`](https://github.com/SnowflakePowered/librashader/tree/87e8a97b50516d997defeaa168173dcd185d4022), built from `librashader-capi` with the `optimized` profile, `--no-default-features --features runtime-d3d12` and `RUSTFLAGS="-C target-feature=+crt-static"`. Runtime SHA-256 values:
 
 | Runtime | SHA-256 |
 |---|---|

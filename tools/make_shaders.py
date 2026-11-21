@@ -22,22 +22,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# (menu name, preset inside slang-shaders). The order is the menu order; the
-# game's own list is in src/world_gpu.cpp and must match.
-PRESETS = [
-    ("CRT-ROYALE", "crt/crt-royale.slangp"),
-    ("ROYALE PVM", "presets/crt-royale-kurozumi.slangp"),
-    ("GUEST ADVANCED", "crt/crt-guest-advanced.slangp"),
-    ("GUEST NTSC", "crt/crt-guest-advanced-ntsc.slangp"),
-    ("CRT-GEOM", "crt/crt-geom.slangp"),
-    ("CRT-LOTTES", "crt/crt-lottes.slangp"),
-    ("CRT-HYLLIAN", "crt/crt-hyllian.slangp"),
-    ("EASYMODE", "crt/crt-easymode.slangp"),
-    ("APERTURE", "crt/crt-aperture.slangp"),
-    ("CONSUMER TV", "crt/crt-consumer.slangp"),
-    ("CALIGARI", "crt/crt-caligari.slangp"),
-    ("ZFAST", "crt/zfast-crt.slangp"),
-]
+CATALOG = ROOT / "src" / "world_crt_presets.inc"
+PRESETS = re.findall(r'^WORLD_CRT_PRESET\("([^"]+)", "([^"]+)"\)$',
+                     CATALOG.read_text(encoding="utf-8"), re.M)
+REVISION = "2345ee91602a7404d3a1a6a5df6108d7305fdad4"
 REFUSED = re.compile(r"megatron", re.I)   # no licence statement upstream
 SOURCE_EXT = {".slang", ".inc", ".h", ".glsl"}
 PRESET_EXT = {".slangp", ".params"}
@@ -96,13 +84,19 @@ def notice(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--slang", required=True, help="libretro slang-shaders checkout")
+    ap.add_argument("--slang", required=True, help="pinned libretro checkout or extracted GitHub source archive")
     ap.add_argument("--out", default=str(ROOT / ".local" / "shaders"))
     args = ap.parse_args()
     slang = pathlib.Path(args.slang).resolve()
     out = pathlib.Path(args.out).resolve()
-    if out.exists():
-        shutil.rmtree(out)
+    if (slang / ".git").exists():
+        revision = subprocess.check_output(["git", "-C", str(slang), "rev-parse", "HEAD"], text=True).strip()
+    else:
+        revision = slang.name.removeprefix("slang-shaders-")
+    if revision != REVISION:
+        sys.exit(f"expected libretro slang-shaders revision {REVISION}, got {revision}")
+    if out.exists() and any(out.iterdir()):
+        sys.exit(f"output directory must be empty: {out}")
     seen = set()
     for _, rel in PRESETS:
         if not (slang / rel).is_file():
@@ -127,9 +121,8 @@ def main():
         dst = out / f.relative_to(slang)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, dst)
-    commit = subprocess.run(["git", "-C", str(slang), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() or "unknown"
     lines = ["# CRT shader data", "",
-             f"Copied unmodified from https://github.com/libretro/slang-shaders at commit `{commit}`",
+             f"Copied unmodified from https://github.com/libretro/slang-shaders at commit `{revision}`",
              "by `tools/make_shaders.py`. They are data files loaded at run time by librashader.",
              "Most are GPL-licensed; each file keeps its own notice, and the licence files found",
              "beside them are included.", "", "## Presets", "", "| Menu | Preset |", "|---|---|"]

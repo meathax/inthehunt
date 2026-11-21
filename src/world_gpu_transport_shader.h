@@ -120,6 +120,9 @@ uint terrainFlags(int2 p){
     uint bits=scene.Load(82916+(i&~3u))>>(8*(i&3));
     return bits>>((p.y&1)*2+(p.x&1));
 }
+static const uint LightCaustics=1u<<22;
+static const uint SunMask=2|16|16384|LightCaustics;
+static const uint LightFieldMask=SunMask|1|4|32768;
 int sunOffset(int row){return (11*row+25)/50;}
 bool skyReaches(int2 p){
     uint column=p.x+sunOffset(p.y);
@@ -163,9 +166,9 @@ void directPass(uint3 id:SV_DispatchThreadID){
     float2 origin=pixel+.5,p=origin*.5;
     uint flags=scene.Load(4);
     bool sky=!(flags&524288) && skyReaches(pixel);
-    float sun=sky && (flags&(2|16|16384))?directField[19200+pixel.y*320+pixel.x].a:1;
+    float sun=sky && (flags&SunMask)?directField[19200+pixel.y*320+pixel.x].a:1;
     int wl=asint(scene.Load(8));
-    if(sky && (flags&(2|16|16384)) && wl>0){
+    if(sky && (flags&SunMask) && wl>0){
         int column=pixel.x+sunOffset(pixel.y);
         float shade=0;
         // Normalized triangular filter across seventeen adjacent sun rays.
@@ -491,7 +494,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     }
     int2 native=id.xy/k;
     float4 l=float4(0,0,0,1);
-    if(flags&(23|32768|16384))l=directField[19200+native.y*320+native.x];
+    if(flags&LightFieldMask)l=directField[19200+native.y*320+native.x];
     int wl=asint(scene.Load(8));
     float wet=wl<0?1:saturate((float(native.y)-wl)/8);
     float depth=wet*saturate((native.y-(wl==-1?0:wl))/195.);
@@ -542,7 +545,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     // Caustics land on sunlit rock, seabed and structures below the surface:
     // the two world layers (planes 250..252). Sprites include on-screen
     // lettering such as the CONTINUE count, so they never receive them.
-    if((flags&4194304) && !(flags&524288) && wl>=0 && wet>0 && l.a>0 &&
+    if((flags&LightCaustics) && !(flags&524288) && wl>=0 && wet>0 && l.a>0 &&
        plane>=250 && plane<=252 && skyReaches(native)){
         float fade=exp2(-max(0.,float(native.y)-wl)*.009);
         float3 sun=(flags&131072)?stageLight(0).rgb*stageLight(0).w:float3(1,1,1);
