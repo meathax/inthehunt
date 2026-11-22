@@ -10,7 +10,16 @@
 
 /* Canvas width in game pixels: 320 in the arcade session, 428 in widescreen.
  * world_menu_render/world_menu_gpu_title set it from the caller's frame. */
-static int W = 320;
+enum { MENU_WIDTH = 320 };
+static int W = MENU_WIDTH;
+static int stride = MENU_WIDTH;
+
+/* Draw the arcade layout in the middle of the physical framebuffer. */
+static uint32_t *centered_panel_canvas(uint32_t *pixels)
+{
+    W = MENU_WIDTH;
+    return pixels + (stride - W) / 2;
+}
 enum { H = 240 };
 enum { PAGE_MAIN, PAGE_OPTIONS, PAGE_CONTROLS, PAGE_QUIT };
 enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_ENHANCE, TAB_COUNT };
@@ -126,7 +135,7 @@ static Ramp dim(void)   { return make_ramp(0xff8aa2b4, 0xff7890a4, 0xff3a4c5e, 0
 
 static void put(uint32_t *c, int x, int y, uint32_t color)
 {
-    if (x >= 0 && y >= 0 && x < W && y < H) c[y * W + x] = color;
+    if (x >= 0 && y >= 0 && x < W && y < H) c[y * stride + x] = color;
 }
 
 static void fill(uint32_t *c, int x, int y, int w, int h, uint32_t color)
@@ -147,7 +156,7 @@ static void shade(uint32_t *c, int x, int y, int w, int h, uint32_t color, unsig
 {
     for (int j = y; j < y + h; ++j)
         for (int i = x; i < x + w; ++i)
-            if (i >= 0 && j >= 0 && i < W && j < H) c[j * W + i] = mix(c[j * W + i], color, t);
+            if (i >= 0 && j >= 0 && i < W && j < H) c[j * stride + i] = mix(c[j * stride + i], color, t);
 }
 
 static unsigned tile_pen(const uint8_t *gfx1, unsigned code, unsigned x, unsigned y)
@@ -640,13 +649,13 @@ static void backdrop(uint32_t *c, uint32_t now_ms)
         if (distance < 0) distance = -distance;
         unsigned glow = distance < 24 ? (unsigned)(24 - distance) * 3 : 0;
         for (int x = 0; x < W; ++x) {
-            uint32_t p = c[y * W + x];
+            uint32_t p = c[y * stride + x];
             unsigned l = (((p >> 16) & 255) * 3 + ((p >> 8) & 255) * 5 + (p & 255) * 2) / 10;
             unsigned r = l / 7, g = l / 3 + 10 + glow / 2, b = l / 2 + 26 + glow;
             if (y & 1) { r = r * 3 / 4; g = g * 3 / 4; b = b * 3 / 4; }
             if (g > 255) g = 255;
             if (b > 255) b = 255;
-            c[y * W + x] = 0xff000000u | r << 16 | g << 8 | b;
+            c[y * stride + x] = 0xff000000u | r << 16 | g << 8 | b;
         }
     }
 }
@@ -730,10 +739,11 @@ static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, u
     Ramp normal = steel(), picked = gold();
     for (int y = 120; y < H; ++y)                       /* darken toward the bottom */
         for (int x = 0; x < W; ++x) {
-            uint32_t *pixel = c + y * W + x;
+            uint32_t *pixel = c + y * stride + x;
             if (!gpu_background || (*pixel >> 24) == 255)
                 *pixel = mix(*pixel, 0xff020a16, (unsigned)(y - 120));
         }
+    c = centered_panel_canvas(c);
     fill(c, 96, 132, W - 192, 90, 0xff040e1e);
     panel(c, 96, 132, W - 192, 90);
     Item items[MAX_ITEMS];
@@ -757,16 +767,16 @@ int world_menu_main_title(const WorldMenu *m) { return m->title && m->page == PA
 void world_menu_gpu_title(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms,
                           unsigned canvas_w)
 {
-    W = (int)canvas_w;
+    stride = W = (int)canvas_w;
     title_screen(m, c, gfx1, now_ms, 1);
-    W = 320;
+    stride = W = MENU_WIDTH;
 }
 
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
                        const uint8_t *gfx1, uint32_t now_ms, unsigned canvas_w)
 {
     if (!m->open || m->title_hidden || m->peek || !c || !gfx1) return;
-    W = (int)canvas_w;
+    stride = W = (int)canvas_w;
     if (m->selector && m->page == PAGE_MAIN) {
         Ramp brass = gold(), light = steel(), blue = sea();
         int x = W - 172;
@@ -793,6 +803,7 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
     if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms, 0); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);
+    c = centered_panel_canvas(c);
     int top = m->page == PAGE_QUIT ? 66 : 18, bottom = m->page == PAGE_QUIT ? 174 : 224;
     panel(c, 20, top, W - 40, bottom - top);
 
