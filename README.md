@@ -1,101 +1,40 @@
-# In the Hunt
+# In the Hunt for Windows
 
-**0.9.16 Beta** · An unofficial native Windows port of Irem’s 1993 submarine shooter. Play all six stages and both endings solo or in local two-player co-op.
+Irem’s 1993 submarine shooter runs natively on Windows using your own MAME ROM archive. Play all six stages and both endings solo or in local two-player co-op.
 
-[Download for Windows x64](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip) · [Release notes](https://github.com/meathax/inthehunt/releases/latest) · [Report a bug](https://github.com/meathax/inthehunt/issues)
+<p align="center"><img src="artwork/screenshots/lighting-ice.png" alt="A submarine battle beneath the ice, lit by bow lamps and explosions" width="960"></p>
 
-![Bow lamps and restrained weapon lighting beneath the ice.](artwork/screenshots/lighting-ice.png)
+| Ice Cavern | Minefield | Submarine Headlights |
+| --- | --- | --- |
+| ![Submarines dive beneath an iceberg](artwork/screenshots/ice-cavern.png) | ![A submarine approaches a field of tethered mines](artwork/screenshots/minefield.png) | ![A submarine’s bow lamp illuminates the water ahead](artwork/screenshots/side-view-lighting.png) |
 
-## New in 0.9.16
+| Title Screen | Lighting Across All Six Stages |
+| --- | --- |
+| ![In the Hunt title screen and main menu](artwork/screenshots/title.png) | ![Lighting in the ice field, harbour, waterfront, caverns, ruins and steelworks](artwork/screenshots/lighting-stages.png) |
 
-- Fixed the Stage 4 crash when a surface enemy landed exactly on a screen edge.
-- Fixed a second crash when an actor entered its update with zero health.
-- Restored selectable CRT presets and saved CRT settings. The Windows ZIP includes the presets and required runtimes.
-- Restored the **Water Caustics** toggle and fixed its rendering when enabled on its own.
+## What the PC port adds
 
-0.9.15 fixed overlapping menu text. 0.9.14 added smoother fullscreen pacing (vsync when variable refresh is not active) and cheaper ambient side borders at 4K.
-
-## Lighting and sound
-
-Each stage now has its own lighting palette, water colour, shadow balance and scattering. Caverns and enclosed ruins have deeper blacks, while sunlight, metal highlights and bow lamps retain their detail.
-
-- Rapid fire builds one sustained glow that holds between rounds and fades gently.
-- Nearby explosions share a light, with matching reflected and scattered illumination.
-- Stable bow lamps cast softer shadows. Material response gives hulls and machinery directional highlights.
-- Underwater stereo adds positional weapons, submarine motors, machinery and stage ambience. Adjust music, effects, ambience and **Reduced Bass** under **Options → Sound**.
-
-![Lighting across the ice field, harbour, waterfront, caverns, ruins and steelworks.](artwork/screenshots/lighting-stages.png)
-
-The lighting passes measured **0.73 ms** at 3× resolution with 128 emitters on an RTX 4090. This synthetic GPU measurement excludes CPU gameplay and composition. Visual checks covered three encounters in each of the six stages.
+- **Optional enhanced effects.** Pick a lighting preset or tune effects individually, including bow lamps, dynamic shadows, light shafts, particles and water caustics.
+- **Underwater stereo.** Hear positional weapons, submarine motors, machinery and stage ambience. Adjust music, effects and ambience levels or enable Reduced Bass.
+- **PC display options.** Choose exact arcade frame timing or smooth camera scrolling, and select from optional Libretro CRT presets.
+- **Local two-player play.** Share a keyboard or use gamepads to play the full arcade campaign together.
+- **Arcade slowdown.** Enable PCB-calibrated slowdown in **Options → Game**.
 
 ## Play
 
-**Requires Windows 10/11 x64 and your own In the Hunt MAME ROM archive (ZIP or 7z).**
+On Windows 10 or 11 x64, extract the [Windows release ZIP](https://github.com/meathax/inthehunt/releases/latest/download/InTheHunt-Windows-x64.zip), open `InTheHunt.exe` and select your own MAME ROM archive (ZIP or 7z). Setup imports it once and starts the game.
 
-1. Download **InTheHunt-Windows-x64.zip** and extract everything.
-2. Open **InTheHunt.exe** and select your ROM archive. The game imports it once, then starts automatically.
+Use a merged archive, a complete non-merged set, or a split clone with its parent (`inthunt.zip` or `inthunt.7z`) in the same folder. World, US (`inthuntu`), Japan (`kaiteids`) and Korea (`inthuntk`) imports all run the World edition. See the [release notes](https://github.com/meathax/inthehunt/releases/latest) or [report a bug](https://github.com/meathax/inthehunt/issues).
 
-Select the merged archive, any complete non-merged set, or a split clone with its parent (`inthunt.zip` or `inthunt.7z`) in the same folder. World, US (`inthuntu`), Japan (`kaiteids`), and Korea (`inthuntk`) all run the World edition. The importer identifies chips by content, so older MAME filenames and nested folders work.
+## Build from source
 
-No Python or compiler needed. The built-in importer uses Windows PowerShell and `tar.exe`. After import, the original archive can be moved or removed.
-
-## Controls
-
-| Action | Player 1 | Player 2 | Xbox-style pad |
-|---|---|---|---|
-| Move | Arrows | W A S D | D-pad / left stick |
-| Fire | Z / X | G / H | A / B |
-| Coin | 5 | 6 | Back |
-| Start / join | 1 | 2 | A |
-| Options | F1 / Esc | F1 / Esc | Start |
-
-## Graphics and frame pacing
-
-Open **Options → Enhance** to choose a preset, toggle any effect or set its strength. All three presets include point lights, rim lighting, sun shadows and submarine headlights. **Low** keeps the core lighting and depth grade. **Medium** adds shafts, scattering, wakes and particles. **High**, the default, enables every effect. The master switch remembers individual choices.
-
-Choose **Options → Video → CRT Shader** for CRT-Royale, Guest Advanced, Guest HD, GDV Mini, Geom Deluxe and other original Libretro presets. Use **Options → Enhance → Water Caustics** to toggle sunlight patterns on submerged terrain and **Caustic Strength** to adjust their intensity. Medium and High enable caustics by default.
-
-Choose **EXACT** for arcade frame timing. A VRR-capable monitor can follow it in focused borderless fullscreen with Adaptive-Sync enabled in the monitor and driver; without active VRR the game uses vsync pacing. Choose **SMOOTH** for fractional camera scrolling on fixed-refresh displays running near a multiple of the arcade rate.
-
-## Updates & beta status
-
-To update, back up **`.local/world`**, extract the new version into a fresh folder and copy that directory across.
-
-Choose **Options → Game → Slowdown → Arcade** for PCB-calibrated slowdown. Launcher, audio, GPU presentation and physical-controller coverage is still incomplete. RecompLauncher import and settings are supported, with catalogue listing pending. When reporting a bug, include your version, hardware, stage and enabled effects. Keep ROMs out of bug reports.
-
-## Build & credits
-
-[Dependency licences](LICENSES)
-
-<details>
-<summary>Build from source</summary>
-
-Requires Windows 10/11 x64, PowerShell 5+ and Windows `tar.exe`. The build downloads and verifies Zig 0.16.0; Visual Studio is not required.
+Open PowerShell 5 or later in the repository on Windows x64 with Windows `tar.exe` available. The build downloads and verifies Zig 0.16.0.
 
 ```powershell
 . .\tools\world_native.ps1
 Build-WorldNative -Root (Get-Location).Path
 ```
 
-The executable is written to `.local/native/InTheHunt.exe`. Open the executable to select and import your ROM archive.
+Open `.local/native/InTheHunt.exe` to import your ROM archive. For CRT shader support, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building.
 
-The game copies the included Libretro presets from `third_party/slang-shaders/` at build time. To enable CRT shaders in a source build, place `librashader.dll` v0.12.0 and `dxcompiler.dll` v1.9.2609 in `third_party/librashader/` before building. `tools/package_native.py` includes the presets, notices and both verified DLLs in the portable ZIP.
-
-To regenerate the included shader data, run this from a checkout of Libretro slang-shaders revision `2345ee91602a7404d3a1a6a5df6108d7305fdad4`:
-
-```powershell
-python -I tools/make_shaders.py --slang C:/path/to/slang-shaders
-```
-
-The script copies preset dependencies and their licence notices to an empty `.local/shaders` directory by default. The package uses unmodified [librashader revision `87e8a97b50516d997defeaa168173dcd185d4022`](https://github.com/SnowflakePowered/librashader/tree/87e8a97b50516d997defeaa168173dcd185d4022), built from `librashader-capi` with the `optimized` profile, `--no-default-features --features runtime-d3d12` and `RUSTFLAGS="-C target-feature=+crt-static"`. Runtime SHA-256 values:
-
-| Runtime | SHA-256 |
-|---|---|
-| librashader.dll | `8e5912fc7432ff39e935c61674823f37b96a824bb6c727f1319cc31fc561a74a` |
-| dxcompiler.dll | `0689e2fee0a1c9df8662a59680469f24e2a3ad7ce6bbbcc9284f7a83172bfc59` |
-
-Game and host source live in `src/`. The icon and ROM selector background are embedded build inputs. Generated files, imported ROMs and local settings are ignored. The importer scripts and ROM metadata are embedded into the executable; RecompLauncher uses its `--import-rom` command.
-
-</details>
-
-In the Hunt (c) 1993 Irem. Unofficial and unaffiliated; a top-level project licence is not yet settled. Thanks to MAME, ymfm, CPS-2 Recomp, FinalBurn Neo, the MiSTer Irem M92 project, librashader, Libretro shader authors, DirectX Shader Compiler and Blur Busters. Dependency notices remain with the source and packaged libraries.
+In the Hunt © 1993 Irem. This is an unofficial, unaffiliated port. See the [dependency licences](LICENSES).
