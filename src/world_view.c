@@ -1,15 +1,26 @@
 #include "world_view.h"
 
-static unsigned mode;
+static unsigned session_mode, mode;
 
 void world_view_set(unsigned m)
 {
-    mode = m == WORLD_VIEW_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE;
+    session_mode = mode = m == WORLD_VIEW_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE;
 }
 
 unsigned world_view_mode(void)
 {
-    return mode;
+    return session_mode;
+}
+
+/* The vertical cave and its rising boss occupy one arcade-width shaft. */
+void world_view_set_stage(unsigned stage)
+{
+    mode = stage == 4 ? WORLD_VIEW_ARCADE : session_mode;
+}
+
+unsigned world_view_canvas_width(void)
+{
+    return session_mode == WORLD_VIEW_WIDE ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH;
 }
 
 unsigned world_view_width(void)

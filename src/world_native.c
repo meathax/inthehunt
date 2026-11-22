@@ -144,7 +144,7 @@ static void scene_submit(void)
     frame.video_control = (uint16_t)word(ram + 0x8b28);
     frame.waterline = waterline_row();
     frame.scene_id = word(ram + 0x80) | word(ram + 0x84) << 16;
-    frame.width = word(ram + 0x80) == 0xb2e ? world_view_width() : WORLD_VIEW_ARCADE_WIDTH;
+    frame.width = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
     frame.left = frame.width == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
     /* The camera keeps a fraction of a pixel (byte 51h of its actor) that
        the whole-pixel scroll registers drop. The background scrolls at half
@@ -246,9 +246,10 @@ static void overlay_notices(uint32_t *frame, int k)
         apply_view();
         show_notice("CRT SHADER FAILED");
     } else if (notice_until && !strcmp(notice, "LOADING CRT SHADER")) notice_until = GetTickCount();
+    int inset = frame_w == WORLD_VIEW_WIDE_WIDTH ? (int)(frame_w - world_view_width()) / 2 : 0;
     if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
-        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, 5 * k, 5 * k, (unsigned)k, 0xff000000, notice);
-        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, 4 * k, 4 * k, (unsigned)k, 0xffff8060, notice);
+        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, (inset + 5) * k, 5 * k, (unsigned)k, 0xff000000, notice);
+        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, (inset + 4) * k, 4 * k, (unsigned)k, 0xffff8060, notice);
     } else
         notice[0] = 0;
 }
@@ -310,7 +311,8 @@ static void present_game(const uint32_t *source)
         settings.fx_ocean_depth || settings.fx_caustics)
         && world_gpu_transport_available();
     float offsets[4]={0};
-    int pixel_camera=!title && !settings.crt_shader && world_gpu_visible();
+    int pixel_camera=!title && !settings.crt_shader && world_gpu_visible() &&
+                     !(frame_w == WORLD_VIEW_WIDE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH);
     world_scene_camera_output(pixel_camera ? offsets : NULL);
     world_scene_light_ready=trace && !title && settings.gfx_quality==WORLD_GFX_HIGH ? world_gpu_prepare_lights : NULL;
     world_scene_light_target(trace ? &lights : NULL);
@@ -326,7 +328,8 @@ static void present_game(const uint32_t *source)
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
-        int x = (int)frame_w - world_menu_text_width(label, 1) - 4;
+        int inset = frame_w == WORLD_VIEW_WIDE_WIDTH ? (int)(frame_w - world_view_width()) / 2 : 0;
+        int x = (int)frame_w - inset - world_menu_text_width(label, 1) - 4;
         world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
         world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
     }
@@ -621,7 +624,7 @@ static void sound_frame_body(void)
 
 static void capture_video(void)
 {
-    frame_w = word(ram + 0x80) == 0xb2e ? world_view_width() : WORLD_VIEW_ARCADE_WIDTH;
+    frame_w = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
     shot_w = frame_w;
     WorldVideoLayer layers[3];
     for (unsigned i = 0; i < 3; ++i) {
@@ -643,12 +646,17 @@ static void capture_video(void)
 
 static void draw_captured_pixels(void)
 {
-    int left = frame_left();
+    unsigned width = frame_w < world_view_width() ? frame_w : world_view_width();
+    unsigned inset = (frame_w - width) / 2;
+    int left = width == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
     for (unsigned y = 0; y < 240; ++y) {
         uint16_t line[WORLD_VIEW_MAX_WIDTH];
         world_video_scanline(line, y, tiles, gfx1, gfx2, drawn_sprites, drawn_layers,
-                             word(ram + 0x8b28), frame_w, left);
-        for (unsigned x = 0; x < frame_w; ++x) pixels[y * frame_w + x] = drawn_colors[line[x] & 1023];
+                             word(ram + 0x8b28), width, left);
+        uint32_t *row = pixels + y * frame_w;
+        for (unsigned x = 0; x < inset; ++x)
+            row[x] = row[frame_w - 1 - x] = 0xff000000u;
+        for (unsigned x = 0; x < width; ++x) row[inset + x] = drawn_colors[line[x] & 1023];
     }
 }
 
@@ -1202,6 +1210,7 @@ static int restore_snapshot(const char *load_path)
                 ungetc(next, f);
                 failed = fread(&stage6_timing, sizeof stage6_timing, 1, f) != 1;
             }
+            world_view_set_stage(word(ram + 0x84));
             memcpy(slowdown_shadow, tiles, sizeof slowdown_shadow);
         }
         if(f)fclose(f);

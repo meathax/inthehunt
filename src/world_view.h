@@ -25,6 +25,8 @@ enum {
  * first frame initialize. Arcade is the power-on default. */
 void world_view_set(unsigned mode);
 unsigned world_view_mode(void);
+void world_view_set_stage(unsigned stage);
+unsigned world_view_canvas_width(void);
 
 /* Raster columns of the working frame: 320 or 428. */
 unsigned world_view_width(void);

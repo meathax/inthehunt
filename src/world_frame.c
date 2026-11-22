@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "world_frame_video.h"
 #include "world_stage.h"
+#include "world_view.h"
 #include "world_title.h"
 #include "world_title_master.h"
 #include <string.h>
@@ -247,6 +248,7 @@ static void start_world_stage(uint8_t *ram, uint8_t *tiles, uint8_t *palette, co
         put(ram + 0x27c, word(ram + 0x27e));
     }
     unsigned stage = word(ram + 0x84);
+    world_view_set_stage(stage);
     put(ram + 0x28e, 0);
     put(ram + 0xd2, 0);
     ram[0x262] |= 1;

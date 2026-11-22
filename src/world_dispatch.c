@@ -3155,6 +3155,29 @@ void world_draw_tile_block(uint8_t *tiles, const uint8_t *rom, uint16_t base,
     }
 }
 
+/* Stage maps start at tile column 12 in the arcade view. Fill the two
+   extra 32-pixel blocks on either side from the adjoining scenery.
+   Reflect whole tile entries so priority, palette and terrain material
+   follow the artwork. Never replace a column supplied by the map. */
+static void extend_opening_rows(uint8_t *tiles, uint16_t base, uint16_t origin,
+                                unsigned width, unsigned height, int upward)
+{
+    if (width >= 16) return; /* the complete 512-pixel ring is authored */
+    for (unsigned y = 0; y < height * 4; ++y) {
+        int dy = upward ? (int)(y % 4) - (int)(y & ~3u) : (int)y;
+        unsigned row = ((origin & 0x3f00) + dy * 256) & 0x3fff;
+        uint8_t *line = tiles + base + row;
+        int first = (origin & 255) / 4;
+        int end = first + 4 * (int)width;
+        for (int x = 4; x < 60; ++x) {
+            if (((unsigned)(x - first) & 63) < (unsigned)(end - first)) continue;
+            int src = x < first ? 2 * first - 1 - x : 2 * end - 1 - x;
+            write_word(line, x * 4, read_word(line, (src & 63) * 4));
+            write_word(line, x * 4 + 2, read_word(line, (src & 63) * 4 + 2) ^ 0x200);
+        }
+    }
+}
+
 static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
                                uint16_t actor, uint16_t base)
 {
@@ -3170,6 +3193,7 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     uint16_t size = read_word(rom, row + 6), mode = read_word(rom, row + 8) & 3;
     unsigned height = (uint8_t)((size & 255) - 1) + 1;
     unsigned width = (uint8_t)((size >> 8) - 1) + 1;
+    uint16_t first_block = origin;
     write_word(ram, 0xb89a, size);
     write_word(ram, 0xb89c, origin);
     unsigned lines = mode < 2 ? width : height;
@@ -3187,6 +3211,8 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
             write_word(ram, 0xb89c, origin);
         }
     }
+    if (base && !trigger && world_view_width() == WORLD_VIEW_WIDE_WIDTH && !read_word(ram, 0x28c))
+        extend_opening_rows(tiles, base, first_block, width, height, mode == 3);
     write_word(ram, actor + 0x40, row + 10);
     trigger = read_word(rom, row + 10);
     if (trigger == 0xffff)
