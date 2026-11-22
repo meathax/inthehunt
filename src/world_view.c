@@ -69,7 +69,7 @@ int world_view_edge_less(uint16_t x, unsigned c)
 {
     if (mode != WORLD_VIEW_WIDE) return x < c;
     return c < 0xa0 ? (int16_t)(x - 0x60) < (int)c - 0x96
-                    : x < c + WORLD_VIEW_WING;
+                    : (int16_t)x < (int)c + WORLD_VIEW_WING;
 }
 
 int world_view_edge_less_s(int16_t x, int c)
@@ -81,7 +81,7 @@ int world_view_edge_less_s(int16_t x, int c)
 int world_view_edge_greater(uint16_t x, unsigned c)
 {
     if (mode != WORLD_VIEW_WIDE) return x > c;
-    return c >= 0xa0 ? x > c + WORLD_VIEW_WING : x > c;
+    return c >= 0xa0 ? (int16_t)x > (int)c + WORLD_VIEW_WING : x > c;
 }
 
 int world_view_edge_greater_s(int16_t x, int c)

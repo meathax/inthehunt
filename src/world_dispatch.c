@@ -6221,7 +6221,7 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
         uint16_t craft = world_spawn_child(ram, actor, 0xde26);
         if (craft) {
             write_word(ram, craft + 2, 0xb000);
-            write_word(ram, craft + 0x21, 0x1b0);
+            write_word(ram, craft + 0x21, world_view_spawn_x(0x1b0));
             write_word(ram, craft + 0x24, read_word(bank, (uint16_t)(0xde1a + side)) + read_word(ram, 0xb732));
             write_word(ram, craft + 0x1e, read_word(bank, (uint16_t)(0xde1e + side)));
             write_word(ram, actor + 0x60, read_word(ram, actor + 0x60) + 1);
@@ -7425,12 +7425,12 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         part = spawn_boss_part(ram, actor, 0x29c9);
         write_word(ram, part + 0x70, read_word(ram, actor + 0x14));
         write_word(ram, part + 0x72, read_word(ram, actor + 0x16));
-        write_word(ram, part + 0x21, 0x1e0);
+        write_word(ram, part + 0x21, world_view_spawn_x(0x1e0));
         write_word(ram, part + 0x24, 0x60 + read_word(ram, 0xb732));
         part = spawn_boss_part(ram, actor, 0x29c9);
         write_word(ram, part + 0x70, read_word(ram, actor + 0x14));
         write_word(ram, part + 0x72, read_word(ram, actor + 0x16));
-        write_word(ram, part + 0x21, 0x20);
+        write_word(ram, part + 0x21, world_view_spawn_x(0x20));
         write_word(ram, part + 0x24, 0xd8 + read_word(ram, 0xb732));
         write_word(ram, part + 0x1e, 2);
         ram[part + 0x29] = 1;
@@ -7518,6 +7518,14 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         break;
     }
     case 0x12af6: {
+        /* Both entry tracks last 232 ticks. Recover the extra 54 pixels
+           over the approach and start the fight at the scripted positions. */
+        unsigned side = read_word(ram, actor + 0x1e) & 2;
+        unsigned remaining = read_word(ram, actor + 0x7c);
+        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH &&
+            read_word(ram, actor + 0x7e) == read_word(bank, 0x223c + side) + 8 &&
+            remaining <= 4 * WORLD_VIEW_WING && remaining % 4 == 0)
+            write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? 1 : -1));
         int step = step_flight_script(ram, rom, actor);
         if (!step) {
             world_dispatch_detail = "stage-two boss flight script kind";
@@ -8922,7 +8930,7 @@ static int stage_three_ship(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
         scroll_actor(ram, actor, 0xb71a);
         x = read_word(ram, actor + 0x21);
         y = read_word(ram, actor + 0x24);
-        if (x < 0x58 || x >= 0x1a8) {
+        if (world_view_edge_less(x, 0x58) || !world_view_edge_less(x, 0x1a8)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -10540,6 +10548,16 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     }
     case 0x145ba:
         scroll_actor(ram, actor, 0xb71a);
+        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH) {
+            /* The hull is centered when the camera locks. Its approach
+               runs from the 10DF spawn row to the 11BF lock (224 px).
+               Consume the extra entry distance with camera progress,
+               including holds and variable-speed scrolling. */
+            int remaining = 0x11bf - (int)read_word(ram, 0xb700);
+            if (remaining < 0) remaining = 0;
+            if (remaining > 224) remaining = 224;
+            write_word(ram, actor + 0x21, 0x100 + remaining + remaining * WORLD_VIEW_WING / 224);
+        }
         if (read_word(ram, 0xb700) >= 0x11bf) {
             for (unsigned i = 0; i < 2; ++i) {
                 child = s3b_child(ram, actor, 0x4cba);
@@ -10651,7 +10669,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             world_queue_sound(ram, 0x49);
             write_word(ram, actor, 0x4811);
         }
-        write_word(ram, actor + 0x21, world_view_spawn_x(read_word(bank, (uint16_t)(0x40f4 + 2 * (read_word(ram, actor + 0x42) & 3))))
+        write_word(ram, actor + 0x21, read_word(bank, (uint16_t)(0x40f4 + 2 * (read_word(ram, actor + 0x42) & 3)))
                                       + read_word(ram, actor + 0x31));
         s3b_shapes(ram, rom, actor, 1, 1);
         s3b_body(ram, rom, actor);
@@ -11005,7 +11023,8 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         ram[actor + 0x2d] = 0x2e;
         write_word(ram, actor + 0x2a, 0xa99a);
         write_word(ram, actor + 0x3c, 0xf7fb);
-        write_word(ram, actor + 0x21, world_view_spawn_x(read_word(bank, 0x4024 + 2 * side)));
+        write_word(ram, actor + 0x21, read_word(bank, 0x4024 + 2 * side)
+                   + (side ? -world_view_left() : world_view_left()));
         write_word(ram, actor + 0x24, 0x138);
         begin_linear_script(ram, rom, actor, read_word(bank, 0x402c + 2 * side));
         write_word(ram, actor + 0x60, read_word(ram, actor + 0x26) >> 1);
@@ -11016,6 +11035,12 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         write_word(ram, actor, 0x4d10);
         return 1;
     case 0x14d10: {
+        /* The first moving leg docks each pod at the center. Cover the
+           extra wing during that leg so it still reaches its attachment. */
+        uint16_t approach = read_word(bank, 0x402c + 2 * side) + 12;
+        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH &&
+            read_word(ram, actor + 0x7e) == approach && read_word(ram, actor + 0x7c) <= WORLD_VIEW_WING)
+            write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? -1 : 1));
         int step = step_flight_script(ram, rom, actor);
         if (!step) {
             world_dispatch_detail = "end boss pod script kind";
@@ -18458,7 +18483,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb72a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        if ((int16_t)x <= 0x50 || (int16_t)y > 0x1b8) {
+        if (world_view_edge_le_s((int16_t)x, 0x50) || (int16_t)y > 0x1b8) {
             write_word(ram, actor + 0x48, 3);
             decrement(ram, 0xb8ac);
             finish_animation(ram, actor);
@@ -21694,7 +21719,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x42, delay);
         uint16_t swimmer = effect_slot(ram, actor, 0xf52f);
         if (swimmer != 0x8480) write_word(ram, swimmer + 2, 0xa000);
-        write_word(ram, swimmer + 0x21, 0x50);
+        write_word(ram, swimmer + 0x21, world_view_spawn_x(0x50));
         write_word(ram, swimmer + 0x24, (delay & 0x1f) + read_word(main_rom + 0xa0000, 0xef6a + (delay & 0x0e)));
         ram[swimmer + 0x2c] = ram[actor + 0x2c];
         write_word(ram, swimmer + 0x1e, delay & 0x0f);
@@ -23643,7 +23668,7 @@ stage2_jumper_terrain:
                    read_word(bank, (uint16_t)(0x507c + read_word(ram, actor + 0x60))) + read_word(ram, actor + 0x40))));
         queue_sprite(ram, main_rom, actor, 0);
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x >= 0x40 && x <= 0x1c0 && !decrement(ram, actor + 0x50)) {
+        if (!world_view_edge_less(x, 0x40) && !world_view_edge_greater(x, 0x1c0) && !decrement(ram, actor + 0x50)) {
             write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
             write_word(ram, actor + 0x42, 0x20);
             uint16_t barrel = read_word(bank, 0x4fea + ((ram[actor + 0x28] & 0xf0) >> 3));
@@ -23898,7 +23923,7 @@ stage2_jumper_terrain:
         aim_warship_turret(ram, main_rom, actor, ram[actor + 0x29] & 1);
         write_word(ram, actor + 0x2a, read_word(bank, 0x4fd8 + read_word(ram, actor + 0x40)));
         queue_sprite(ram, main_rom, actor, 0);
-        if (x >= 0x40 && x <= 0x1c0 && !read_word(ram, 0x286)) {
+        if (!world_view_edge_less(x, 0x40) && !world_view_edge_greater(x, 0x1c0) && !read_word(ram, 0x286)) {
             int fire = 0;
             if (read_word(ram, actor + 0x50)) fire = !decrement(ram, actor + 0x50);
             else if (!decrement(ram, actor + 0x4c)) {
@@ -24036,7 +24061,7 @@ stage2_jumper_terrain:
             break;
         }
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x >= 0x40 && x <= 0x1c0 && !decrement(ram, actor + 0x50)) {
+        if (!world_view_edge_less(x, 0x40) && !world_view_edge_greater(x, 0x1c0) && !decrement(ram, actor + 0x50)) {
             write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
             write_word(ram, actor + 0x42, 96);
             uint16_t child = world_spawn_child(ram, actor, 0x6150);
@@ -24126,7 +24151,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x2a, read_word(bank, 0x4dc6 + barrel));
         queue_sprite(ram, main_rom, actor, 0);
         uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
-        if (x >= 0x40 && x <= 0x1c0 && !read_word(ram, parent + 0x50) && read_word(ram, parent + 0x64) == slot) {
+        if (!world_view_edge_less(x, 0x40) && !world_view_edge_greater(x, 0x1c0) && !read_word(ram, parent + 0x50) && read_word(ram, parent + 0x64) == slot) {
             uint16_t flash = world_spawn_child(ram, actor, 0xa2c0);
             if (flash) {
                 write_word(ram, flash + 0x31, read_word(ram, actor + 0x38));
@@ -24377,7 +24402,7 @@ stage2_jumper_terrain:
             ram[actor + 0xb] = ram[hit + 0xb];
             world_award_score(ram, main_rom, actor, hit);
             write_word(ram, actor, 0xfac6);
-        } else if (x < 0x28 || x > 0x1d8 || y > bottom) finish_animation(ram, actor);
+        } else if (world_view_edge_less(x, 0x28) || world_view_edge_greater(x, 0x1d8) || y > bottom) finish_animation(ram, actor);
         else {
             if (vx >= 0 && x >= 0x80) write_word(ram, actor + 0x38, 256);
             register_surface_enemy(ram, actor);
@@ -26424,7 +26449,8 @@ stage2_jumper_terrain:
     case 0xba734: {
         int step = step_flight_script(ram, main_rom, actor);
         if (!step) return 0;
-        if (step < 0 || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
+        if (step < 0 || (world_view_edge_less(read_word(ram, actor + 0x21), 0x40) &&
+            (world_view_width() == WORLD_VIEW_ARCADE_WIDTH || (int16_t)read_word(ram, actor + 0x38) <= 0))) {
             finish_animation(ram, actor);
             break;
         }
@@ -27821,7 +27847,7 @@ stage2_jumper_terrain:
             if (sub) {
                 unsigned lane = (read_word(ram, actor + 0x4a) & 1) ? 2 : 0;
                 write_word(ram, sub + 2, 0xb000);
-                write_word(ram, sub + 0x21, 0x1c0);
+                write_word(ram, sub + 0x21, world_view_spawn_x(0x1c0));
                 write_word(ram, actor + 0x4a, read_word(ram, actor + 0x4a) | (1u << lane));
                 write_word(ram, sub + 0x4a, lane);
                 write_word(ram, 0xb8b2, read_word(ram, 0xb8b2) & ~(1u << (lane + 4)));

@@ -26,6 +26,43 @@ static void put(uint8_t *p, uint16_t a, uint16_t value)
     p[(uint16_t)(a + 1)] = value >> 8;
 }
 
+static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
+                              uint16_t flags, int late)
+{
+    if (world_view_width() == WORLD_VIEW_ARCADE_WIDTH || world_anchored_kind(kind))
+        return x - late;
+    const int left = 96 - WORLD_VIEW_WING, right = left + WORLD_VIEW_WIDE_WIDTH;
+    /* Stage two's paired submarines straddle the old right boundary.
+       The first 4032 hull piece starts 24 pixels left of the pivot. */
+    if (segment == 0xb000 && kind == 0x909f && x >= 0x198 && x <= 0x1a0)
+        return right + 24 + (x - 0x198);
+    /* The eel's horizontal routes and the left-entry formation start
+       inside the arcade frame. Use the leading end of their artwork. */
+    if (segment == 0xb000 && kind == 0xd457 && (flags & 3) < 2)
+        return (flags & 1) ? left - 48 : right + 48;
+    if (segment == 0xb000 && kind == 0xa6d6 && x <= 0x60)
+        return left - 26 - (0x60 - x);
+    /* These swimmers bob vertically. Horizontal camera motion brings
+       their formation in from the right, keeping its 32-pixel spacing. */
+    if (segment == 0xa000 && kind == 0xec7e && (x == 0x80 || x == 0xa0))
+        return right + 24 + (x - 0x80);
+    /* The dock troopers wait in place for their first animation. Let the
+       approaching camera reveal them from the right. */
+    if (segment == 0xb000 && kind == 0x1c16 && (flags & 0x0e00) == 0x0600 &&
+        x >= 0x60 && x < 0x1a0)
+        return right + 16;
+    /* A delayed allocation still needs the authored run-in distance.
+       The flipped B000:571C warship extends 128 pixels past its pivot. */
+    int moved = (int16_t)world_view_spawn_x(x);
+    if (segment == 0xb000 && kind == 0x571c && (int16_t)x < 0)
+        return moved < left - 128 ? moved : left - 128;
+    if (x && (int16_t)x >= 0x1a0)
+        return moved < right + 16 ? right + 16 : moved;
+    if (x && (int16_t)x < 0x60)
+        return moved > left - 16 ? left - 16 : moved;
+    return moved - late;
+}
+
 /* 1000:5D98. Drain due twelve-byte records in ROM order. A full actor
  * pool leaves the current record pending for the next tick. */
 void world_stage_spawns(uint8_t *ram, const uint8_t *rom, uint16_t parent)
@@ -43,18 +80,8 @@ void world_stage_spawns(uint8_t *ram, const uint8_t *rom, uint16_t parent)
             if (!child) break;
             put(ram, child + 2, word(bank, row + 4));
             uint16_t authored_x = word(bank, row + 6);
-            int right_edge = 0;
-            if (!world_anchored_kind(word(bank, row + 2))) {
-                uint16_t conv = world_view_spawn_x(authored_x);
-                right_edge = conv != authored_x && (int16_t)conv >= 0x1a0 + WORLD_VIEW_WING;
-                authored_x = conv;
-            }
-            /* A row can drain after the camera already passed its trigger;
-             * never let a right-shifted entrant materialize inside the wide
-             * view — pin it just outside the right aperture instead. */
-            uint16_t fx = (uint16_t)(trigger - camera + authored_x);
-            if (right_edge && fx >= 0x2a && fx < (uint16_t)(0x1a0 + WORLD_VIEW_WING))
-                fx = 0x1a0 + WORLD_VIEW_WING;
+            uint16_t fx = stage_spawn_x(word(bank, row + 4), word(bank, row + 2),
+                                        authored_x, flags, (int16_t)(camera - trigger));
             put(ram, child + 0x21, fx);
             uint16_t y = word(bank, row + 8);
             if (!(ram[0x26e] & 2)) y += word(ram, 0xb732);
