@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "world_tile_address.h"
 #include "world_torpedo.h"
+#include "world_view.h"
 
 static uint16_t word(const uint8_t *p) { return p[0] | ((uint16_t)p[1] << 8); }
 static void put(uint8_t *p, uint16_t value) { p[0] = (uint8_t)value; p[1] = value >> 8; }
@@ -157,7 +158,7 @@ void world_sub_lives_hud(const uint8_t *rom, uint8_t *tiles, unsigned owner, uin
 {
     if (!owner) return;
     unsigned index = 2 * (owner - 1);
-    uint16_t dest = word(rom + (uint16_t)(0xc25f + index));
+    uint16_t dest = word(rom + (uint16_t)(0xc25f + index)) + world_view_hud_shift(owner);
     uint16_t attributes = word(rom + (uint16_t)(0xc263 + index));
     uint16_t left = 0x70, right = 0x71;
     for (unsigned i = 0; i < 8; i++) {
@@ -171,7 +172,7 @@ void world_sub_hud(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t su
 {
     unsigned owner = ram[sub + 0x0b] & 3;
     uint16_t index = 2 * (owner - 1);
-    uint16_t base = word(rom + (uint16_t)(0xc267 + index));
+    uint16_t base = word(rom + (uint16_t)(0xc267 + index)) + world_view_hud_shift(owner);
     uint16_t score = word(ram + (uint16_t)(0x254 + index));
     for (unsigned i = 0; i < 4; i++) {
         unsigned bcd = ram[(uint16_t)(score + 3 - i)];
@@ -247,7 +248,8 @@ void world_sub_entry_step(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         if (!((word(cfg) | word(cfg + 2)) & 0xff02)) put(a + 0x6e, 0);
     }
     int16_t ceiling = (int16_t)word(ram + 0x25c);
-    put(a + 0x21, x > 0x188 ? 0x188 : x < 0x70 ? 0x70 : x);
+    put(a + 0x21, x > world_view_player_max_x() ? world_view_player_max_x()
+                : x < world_view_player_min_x() ? world_view_player_min_x() : x);
     put(a + 0x24, y < 0xa0 ? 0xa0 : y > ceiling ? ceiling : y);
     world_stage_five_entry_ice(ram, rom, tiles, sub);
     update_water_medium(ram, rom, a, cfg[10], cfg[14] & 8 ? 3 : 0);
@@ -343,14 +345,14 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
                 x = ((uint16_t)(x + horizontal_scroll) & 0xfff8) - 1 - horizontal_scroll;
                 x_fraction = 0;
             }
-        } else if (x > 0x188) x = 0x188;
+        } else if (x > world_view_player_max_x()) x = world_view_player_max_x();
         else if (left & 0xff02) {
             if (ram[0xb8ae] & owner_bit) health = 0;
             else {
                 x = ((uint16_t)(x - 1 + horizontal_scroll) & 0xfff8) + 8 - horizontal_scroll;
                 x_fraction = 0;
             }
-        } else if (x < 0x70) x = 0x70;
+        } else if (x < world_view_player_min_x()) x = world_view_player_min_x();
     }
     uint16_t vertical[3];
     for (unsigned i = 0; i < 3; i++) {

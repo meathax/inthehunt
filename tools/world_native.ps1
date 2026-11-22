@@ -22,7 +22,7 @@ function Build-WorldNative {
         }
     }
     $names = @('native','setup','clock','cycle_costs','timing_options','settings','input','menu','scene','audio_output','ga20','audio_driver','audio_notes','boot','window','video','dispatch','title','title_master','gameover','enemy_target','stage','fire',
-        'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette')
+        'camera','torpedo','contact','terrain','death','score','candidates','player','frame','frame_video','palette','view')
     $sources = @($names | ForEach-Object { Join-Path $Root "src/world_$_.c" })
     $temp = Join-Path $dest ('build-' + [guid]::NewGuid().ToString('N') + '.exe')
     $cppSources = @('src/world_ym.cpp', 'src/third_party/ymfm/ymfm_opm.cpp', 'src/world_gpu.cpp', 'src/post/post_chain.cpp')

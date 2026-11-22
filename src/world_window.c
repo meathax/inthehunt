@@ -11,13 +11,14 @@
 #include "world_window.h"
 #include "world_gpu.h"
 
-enum { WIDTH = 320, HEIGHT = 240 };
+enum { WIDTH = 320, HEIGHT = 240, MAX_WIDTH = 428 };
 static const wchar_t window_class[] = L"InTheHuntNativeViewport";
 static HWND window;
 static BITMAPINFO bitmap;
 enum { MAX_K = 4 };
-static uint32_t frame[WIDTH * HEIGHT * MAX_K * MAX_K];   /* the picture, frame_k times 320x240 */
+static uint32_t frame[MAX_WIDTH * HEIGHT * MAX_K * MAX_K];   /* the picture, frame_k times source_w x 240 */
 static int frame_k = 1;
+static unsigned source_w = WIDTH;         /* columns of the presented raster */
 static unsigned char keys[256];
 static HMODULE controller_library;
 typedef DWORD (WINAPI *ControllerState)(DWORD, XINPUT_STATE *);
@@ -43,17 +44,20 @@ static HBITMAP back_bitmap;
 static HGDIOBJ back_previous;
 static int back_width, back_height;
 
-/* Border, then the picture: whole-number scale, largest 4:3 fit, or the
- * whole client area. */
+/* Border, then the picture: whole-number scale, largest aspect fit, or the
+ * whole client area. A widescreen source is cropped to its 16:9 aperture
+ * (2/3 of a raster column of overscan each side, rounded per k). */
 static void paint_area(HDC dc, RECT rect)
 {
-    int scale = smaller(rect.right / WIDTH, rect.bottom / HEIGHT);
+    int crop = source_w == (unsigned)MAX_WIDTH ? (2 * frame_k + 1) / 3 : 0;
+    int src_x0 = crop, src_w = (int)source_w * frame_k - 2 * crop, src_h = HEIGHT * frame_k;
+    int scale = smaller(rect.right / (src_w / frame_k), rect.bottom / HEIGHT);
     if (scale < 1) scale = 1;
-    int w = WIDTH * scale, h = HEIGHT * scale;
+    int w = src_w / frame_k * scale, h = HEIGHT * scale;
     if (view_scaling == 1) {
         h = rect.bottom;
-        w = h * 4 / 3;
-        if (w > rect.right) { w = rect.right; h = w * 3 / 4; }
+        w = h * src_w / src_h;
+        if (w > rect.right) { w = rect.right; h = w * src_h / src_w; }
     } else if (view_scaling == 2) {
         w = rect.right;
         h = rect.bottom;
@@ -63,9 +67,9 @@ static void paint_area(HDC dc, RECT rect)
     SetStretchBltMode(dc, COLORONCOLOR);
     {
         BITMAPINFO info = bitmap;
-        info.bmiHeader.biWidth = WIDTH * frame_k;
+        info.bmiHeader.biWidth = (int)source_w * frame_k;
         info.bmiHeader.biHeight = -HEIGHT * frame_k;
-        StretchDIBits(dc, x, y, w, h, 0, 0, WIDTH * frame_k, HEIGHT * frame_k, frame, &info,
+        StretchDIBits(dc, x, y, w, h, src_x0, 0, src_w, src_h, frame, &info,
                       DIB_RGB_COLORS, SRCCOPY);
     }
 }
@@ -214,13 +218,14 @@ void world_window_wait_vblank(void)
 
 /* Headless check of the window picture: the same border and centred
  * integer-scaled frame, painted into an off-screen width x height bitmap. */
-int world_window_compose_bmp(const uint32_t *pixels, int width, int height, const char *path)
+int world_window_compose_bmp(const uint32_t *pixels, unsigned src_width, int width, int height, const char *path)
 {
     if (!pixels || width < WIDTH || height < HEIGHT || width > 8192 || height > 8192) return 0;
-    memcpy(frame, pixels, sizeof(uint32_t) * WIDTH * HEIGHT);
+    source_w = src_width;
+    memcpy(frame, pixels, sizeof(uint32_t) * source_w * HEIGHT);
     frame_k = 1;
     bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bitmap.bmiHeader.biWidth = WIDTH;
+    bitmap.bmiHeader.biWidth = (int)source_w;
     bitmap.bmiHeader.biHeight = -HEIGHT;
     bitmap.bmiHeader.biPlanes = 1;
     bitmap.bmiHeader.biBitCount = 32;
@@ -496,7 +501,7 @@ int world_window_scale(void)
     if (!window) return 1;
     RECT rect;
     GetClientRect(window, &rect);
-    int scale = smaller(rect.right / WIDTH, rect.bottom / HEIGHT);
+    int scale = smaller(rect.right / (int)source_w, rect.bottom / HEIGHT);
     return scale < 1 ? 1 : scale;
 }
 
@@ -516,17 +521,18 @@ void world_window_rumble(unsigned strength, unsigned milliseconds)
     rumble_until = strength ? GetTickCount() + milliseconds : 0;
 }
 
-void world_window_present(const uint32_t *pixels, int k)
+void world_window_present(const uint32_t *pixels, int k, unsigned src_width)
 {
     if (!window || !pixels) return;
     if (k < 1 || k > MAX_K) k = 1;
+    source_w = src_width;
     if (rumble_until && (LONG)(GetTickCount() - rumble_until) >= 0) world_window_rumble(0, 0);
     if (world_gpu_visible()) {
         if (IsIconic(window)) return;
-        world_gpu_present(pixels, k, source_time);
+        world_gpu_present(pixels, k, source_time, source_w);
         return;
     }
-    memcpy(frame, pixels, sizeof(uint32_t) * WIDTH * HEIGHT * (size_t)k * (size_t)k);
+    memcpy(frame, pixels, sizeof(uint32_t) * source_w * HEIGHT * (size_t)k * (size_t)k);
     frame_k = k;
     if (!IsIconic(window)) {
         InvalidateRect(window, NULL, FALSE);
@@ -597,8 +603,9 @@ unsigned world_window_menu_buttons(unsigned *toggle, int *gamepad)
 }
 
 /* Borderless full screen on the window's monitor, or a window whose client
- * area is scale times 320x240 (clamped to the work area). */
-void world_window_set_display(int full, unsigned scale)
+ * area is scale times the content aperture (320x240 arcade, 426 2/3 x240
+ * widescreen, rounded to 1280/3 columns), clamped to the work area. */
+void world_window_set_display(int full, unsigned scale, unsigned session_width)
 {
     if (!window) return;
     if (offscreen()) {
@@ -625,10 +632,11 @@ void world_window_set_display(int full, unsigned scale)
     RECT work = info.rcWork, frame_rect = {0, 0, 0, 0};
     AdjustWindowRect(&frame_rect, WS_OVERLAPPEDWINDOW, FALSE);
     int dw = frame_rect.right - frame_rect.left, dh = frame_rect.bottom - frame_rect.top;
-    int fit = smaller((work.right - work.left - dw) / WIDTH, (work.bottom - work.top - dh) / HEIGHT);
+    int aperture_thirds = session_width == (unsigned)MAX_WIDTH ? 1280 : 3 * WIDTH;
+    int fit = smaller(3 * (work.right - work.left - dw) / aperture_thirds, (work.bottom - work.top - dh) / HEIGHT);
     if (scale < 1) scale = 1;
     if ((int)scale > fit && fit >= 1) scale = (unsigned)fit;
-    int w = WIDTH * (int)scale + dw, h = HEIGHT * (int)scale + dh;
+    int w = (aperture_thirds * (int)scale + 2) / 3 + dw, h = HEIGHT * (int)scale + dh;
     SetWindowPos(window, HWND_NOTOPMOST, (work.left + work.right - w) / 2, (work.top + work.bottom - h) / 2,
                  w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
 }

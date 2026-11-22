@@ -4,6 +4,7 @@
 #include "world_title.h"
 #include "world_torpedo.h"
 #include "world_tile_address.h"
+#include "world_view.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -208,7 +209,7 @@ static void update_intro_sprite(uint8_t *ram, const uint8_t *rom, uint16_t actor
     if (handler == 0xfd29)
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
     uint16_t x = read_word(ram, actor + 0x21);
-    if (handler == 0xfdb1 ? (int16_t)x < -32 : x < 0x40 || x > 0x1c0) {
+    if (handler == 0xfdb1 ? world_view_edge_less_s((int16_t)x, -32) : world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0)) {
         finish_animation(ram, actor);
         return;
     }
@@ -392,7 +393,7 @@ static void update_scenery(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     scenery_init_si = -1;
     scroll_actor(ram, actor, near_layer ? 0xb71e : 0xb72a);
     uint16_t bottom = read_word(ram, 0x26e) & 2 ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
-    if (read_word(ram, actor + 0x21) < (near_layer ? 0x3f : 0x41)
+    if (world_view_edge_less(read_word(ram, actor + 0x21), near_layer ? 0x3f : 0x41)
         || (!near_layer && read_word(ram, actor + 0x24) > bottom)) {
         finish_animation(ram, actor);
         return;
@@ -1137,7 +1138,7 @@ static int update_cruising_enemy(uint8_t *ram, const uint8_t *rom, const uint8_t
         }
     }
     world_kind11_move(ram, rom, terrain, actor);
-    if (read_word(ram, actor + 0x21) < 0x40) {
+    if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
         finish_animation(ram, actor);
         return 1;
     }
@@ -1290,13 +1291,14 @@ static int outside_pickup_area(const uint8_t *ram, uint16_t actor)
     uint16_t base = read_word(ram, 0xb732);
     uint16_t top = ram[0x26e] & 2 ? 0x68 : base + 0x10;
     uint16_t bottom = ram[0x26e] & 2 ? 0x198 : base + 0x1c8;
-    return x > 0x1c0 || x < 0x40 || y > bottom || (int16_t)y < (int16_t)top;
+    return world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || y > bottom || (int16_t)y < (int16_t)top;
 }
 
 /* B7147 attaches a ship part and retires it when the parent is removed. */
 static int warship_attachment(uint8_t *ram, uint16_t actor)
 {
     uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
+    write_word(ram, 0xba90, parent); /* test-only: expose resolved warship parent for tracing */
     if (ram[parent + 0x0a]) {
         finish_animation(ram, actor);
         return 0;
@@ -1461,7 +1463,7 @@ static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint
             if (speed >= 0x200) write_word(ram, actor, 0x1a09);
         }
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) > 0x1c0) {
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -2155,7 +2157,7 @@ static void update_standard_torpedo(uint8_t *ram, const uint8_t *rom, const uint
             weapon_ice_impact(ram, rom, terrain, actor, shot.x, shot.y);
         }
     }
-    if (impact || shot.x < 0x40 || shot.x > 0x1c0) {
+    if (impact || world_view_edge_less(shot.x, 0x40) || world_view_edge_greater(shot.x, 0x1c0)) {
         if (impact) {
             spawn_impact(ram, rom, actor);
         }
@@ -2232,7 +2234,7 @@ static int update_powered_torpedo(uint8_t *ram, const uint8_t *rom, const uint8_
     unsigned material = terrain[cell + 3] >> 3;
     int solid = !!(0x5502 & (1u << (material & 15)));
     if (solid) weapon_ice_impact(ram, rom, terrain, actor, x, y);
-    if (solid || x > 0x1c0 || x < 0x40) {
+    if (solid || world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
         if (solid) {
             spawn_impact(ram, rom, actor);
             write_word(ram, actor + 0x40, 0);
@@ -2990,7 +2992,7 @@ static void update_join_hud(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     unsigned credits = read_word(ram, 0x2b8);
     int free_play = ram[0x2c4] & 1;
     if (!read_word(ram, actor + 0x42)) {
-        uint16_t dest = read_word(rom, 0xc25f + index);
+        uint16_t dest = read_word(rom, 0xc25f + index) + world_view_hud_shift(owner);
         dest = draw_join_label(tiles, rom, dest, free_play ? 0x5ce3 : 0x5cd7);
         if (!free_play) {
             unsigned shown = credits > 99 ? 99 : credits;
@@ -3003,7 +3005,7 @@ static void update_join_hud(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     } else {
         uint16_t timer = decrement(ram, actor + 0x42);
         if (timer == 0x100) {
-            draw_join_label(tiles, rom, read_word(rom, 0xc257 + (owner & 2)), 0x7900);
+            draw_join_label(tiles, rom, read_word(rom, 0xc257 + (owner & 2)) + world_view_hud_shift(owner), 0x7900);
             ram[0x264] |= 1u << (owner + 5);
             ram[0x288] &= ~player_bit;
             unsigned shift = (ram[actor + 0x0b] >> 1) & 15;
@@ -3012,7 +3014,7 @@ static void update_join_hud(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         } else if (timer > 0x100) {
             uint16_t remain = timer - 0x100;
             if (!(remain & 127)) {
-                uint16_t dest = read_word(rom, 0x78eb + index);
+                uint16_t dest = read_word(rom, 0x78eb + index) + world_view_hud_shift(owner);
                 write_word(tiles, dest, 48 + (((remain >> 7) - 1) & 15));
                 write_word(tiles, dest + 2, 0x104);
             } else if ((ram[0x264] & 12) && timer < 0x480 && (ram[0xb742] & 0xc0)) {
@@ -3031,7 +3033,7 @@ static void update_join_hud(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         else
             label = read_word(rom, 0xc24f + index);
     }
-    uint16_t dest = read_word(rom, 0xc257 + index);
+    uint16_t dest = read_word(rom, 0xc257 + index) + world_view_hud_shift(owner);
     if (read_word(ram, actor + 0x42))
         dest += 0x100;
     draw_join_label(tiles, rom, dest, label);
@@ -3903,7 +3905,7 @@ static int boss_segment_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, u
         }
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (read_word(ram, actor + 0x21) > 0x1c0) {
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -4690,7 +4692,7 @@ static int stage_five_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
         {
             uint16_t x = R(0x21), y = R(0x24);
             uint16_t ceiling = (read_word(ram, 0x26e) & 2) ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
-            if (x > 0x1c0 || x < 0x40 || y > ceiling || (int16_t)y < floor_y) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || y > ceiling || (int16_t)y < floor_y) {
                 finish_animation(ram, actor);
                 return 1;
             }
@@ -5414,7 +5416,7 @@ static int stage_two_gunboat(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, u
             world_dispatch_detail = "gunboat flight script kind";
             return 0;
         }
-        if (step < 0 || (int16_t)read_word(ram, actor + 0x21) <= 0 ||
+        if (step < 0 || world_view_edge_le_s((int16_t)read_word(ram, actor + 0x21), 0) ||
             (int16_t)read_word(ram, actor + 0x24) <= 0x48) {
             if (read_word(ram, actor + 8) == 6) decrement(ram, parent + 0x44);
             finish_animation(ram, actor);
@@ -5575,7 +5577,7 @@ static int stage_two_gunboat(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, u
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         if (address == 0xb3d2a) move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        int out = x > 0x1c0 || x < 0x40;
+        int out = world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40);
         if (!out && address == 0xb3d2a) {
             int low = read_word(ram, 0x26e) & 2;
             uint16_t bottom = low ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
@@ -5953,7 +5955,7 @@ static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -6020,7 +6022,7 @@ static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     case 0xbf51b: {
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -6071,7 +6073,7 @@ static int stage_two_patrol(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         }
         scroll_actor(ram, actor, 0xb71a);
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -6295,7 +6297,7 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
             return 0;
         }
         y = read_word(ram, actor + 0x24);
-        if (step < 0 || y > bottom || (int16_t)y < top || read_word(ram, actor + 0x21) < 0x40) {
+        if (step < 0 || y > bottom || (int16_t)y < top || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -6350,7 +6352,7 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         x = read_word(ram, actor + 0x21);
         y = read_word(ram, actor + 0x24);
-        if (x > 0x1c0 || x < 0x40 || y > bottom || (int16_t)y < top) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || y > bottom || (int16_t)y < top) {
             finish_animation(ram, actor);
             break;
         }
@@ -6376,7 +6378,7 @@ static int stage_two_craft(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uin
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -6640,14 +6642,14 @@ static int stage_two_towers(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     case 0xb82f5: {
         scroll_actor(ram, actor, 0xb71a);
         uint16_t index = read_word(ram, actor + 0x46);
-        if ((int16_t)read_word(ram, actor + 0x21) < -0x20) {
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), -0x20)) {
             write_word(ram, parent + 0x48, read_word(ram, parent + 0x48) & ~(1u << (index & 15)));
             finish_animation(ram, actor);
             break;
         }
         if (!(read_word(ram, parent + 0x48) & (1u << ((index + 1) & 15)))) write_word(ram, actor + 0x1e, 1);
         write_word(ram, actor + 0x2a, read_word(bank, 0x7f0e + 2 * (read_word(ram, actor + 0x1e) & 1)));
-        if ((int16_t)read_word(ram, actor + 0x21) < 0x1e0) queue_sprite(ram, rom, actor, 0);
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1e0)) queue_sprite(ram, rom, actor, 0);
         if (ram[actor + 0x19]) --ram[actor + 0x19];
         hit = 0;
         for (uint16_t shape = 0xf4eb; shape <= 0xf503 && !hit; shape += 8) {
@@ -6657,7 +6659,7 @@ static int stage_two_towers(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         }
         if (hit) s2_tower_damage(ram, actor, hit, 0x7f3a);
         if (read_word(ram, actor + 0x26)) break;
-        if (read_word(ram, actor + 0x21) >= 0x190) {
+        if (!world_view_edge_less(read_word(ram, actor + 0x21), 0x190)) {
             write_word(ram, actor + 0x26, 0x100);
             break;
         }
@@ -6702,7 +6704,7 @@ static int stage_two_towers(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     case 0xb84a6:
         scroll_actor(ram, actor, 0xb71a);
         queue_sprite(ram, rom, actor, 0);
-        if ((int16_t)read_word(ram, actor + 0x21) < -0x20) {
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), -0x20)) {
             write_word(ram, (uint16_t)(0xc8 + 2 * read_word(ram, actor + 0x46)), 0);
             finish_animation(ram, actor);
         }
@@ -6721,12 +6723,12 @@ static int stage_two_towers(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         if (ram[actor + 0x19]) --ram[actor + 0x19];
         write_word(ram, actor + 0x21, (ram[actor + 0x19] & 2) + read_word(ram, parent + 0x21) + read_word(ram, actor + 0x31));
         write_word(ram, actor + 0x24, read_word(ram, parent + 0x24) + read_word(ram, actor + 0x34));
-        if ((int16_t)read_word(ram, actor + 0x21) < 0x1c0) queue_sprite(ram, rom, actor, 0);
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1c0)) queue_sprite(ram, rom, actor, 0);
         ram[actor + 0x0d] = 1;
         hit = world_projectile_contact(ram, rom, actor);
         if (hit) s2_tower_damage(ram, actor, hit, 0x7f1a);
         if (read_word(ram, actor + 0x26)) break;
-        if (read_word(ram, actor + 0x21) >= 0x198) {
+        if (!world_view_edge_less(read_word(ram, actor + 0x21), 0x198)) {
             write_word(ram, actor + 0x26, 0x100);
             break;
         }
@@ -7068,7 +7070,7 @@ static int stage_two_gunner(uint8_t *ram, const uint8_t *rom, uint16_t actor, ui
         }
     }
     /* B000:49BB */
-    if (read_word(ram, actor + 0x21) < 0x40) {
+    if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
         finish_animation(ram, actor);
         return 1;
     }
@@ -8034,7 +8036,7 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         int armed = address != 0x13716;
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) > 0x1c0 || read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0) || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -8196,7 +8198,7 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         if (address == 0x13aee) {
             uint16_t x = read_word(ram, actor + 0x21);
             int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-            if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+            if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -8338,7 +8340,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -8392,7 +8394,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
         }
         scroll_actor(ram, actor, 0xb71a);
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -8424,7 +8426,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
         }
         scroll_actor(ram, actor, 0xb71a);
         queue_sprite(ram, rom, actor, 0);
-        if (read_word(ram, actor + 0x21) > 0x1c0) finish_animation(ram, actor);
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) finish_animation(ram, actor);
         return 1;
     case 0x7d7b9: {
         uint16_t row = (kind & 0x30) >> 1;
@@ -8448,7 +8450,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
     case 0x7d834:
         scroll_actor(ram, actor, 0xb71a);
         x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) finish_animation(ram, actor);
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) finish_animation(ram, actor);
         queue_sprite(ram, rom, actor, 0);
         return 1;
     case 0x7d860: {
@@ -8537,7 +8539,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
             write_word(ram, actor + 0x42, read_word(bank, (uint16_t)(0xcc47 + index)));
             write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xcc47 + index + (kind & 2) + 2)));
         }
-        if (read_word(ram, actor + 0x21) > 0x1c0) finish_animation(ram, actor);
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) finish_animation(ram, actor);
         return 1;
     case 0x7da10:
         ram[actor + 0x28] = ram[actor + 0x1e];
@@ -8555,7 +8557,7 @@ static int stage_three_figures(uint8_t *ram, const uint8_t *rom, const uint8_t *
         int low = read_word(ram, 0x26e) & 2;
         uint16_t bottom = low ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
         int16_t top = low ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || x < 0x40 || bottom < y || (int16_t)y < top) finish_animation(ram, actor);
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || bottom < y || (int16_t)y < top) finish_animation(ram, actor);
         return 1;
     }
     }
@@ -8635,7 +8637,7 @@ static int stage_three_ship(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
     case 0x1cef3: {
         scroll_actor(ram, actor, 0xb71a);
         if (address == 0x1cef3) {
-            if ((int16_t)read_word(ram, actor + 0x21) < 0x10) {
+            if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x10)) {
                 finish_animation(ram, actor);
                 return 1;
             }
@@ -8696,7 +8698,7 @@ static int stage_three_ship(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
         return 1;
     case 0x1cf39:
         scroll_actor(ram, actor, 0xb71a);
-        if ((int16_t)read_word(ram, actor + 0x21) < 0x10) finish_animation(ram, actor);
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x10)) finish_animation(ram, actor);
         else queue_sprite(ram, rom, actor, 0);
         return 1;
     case 0x1cf5e: {
@@ -8735,7 +8737,7 @@ static int stage_three_ship(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
         /* fall through */
     case 0x1cfea:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) finish_animation(ram, actor);
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) finish_animation(ram, actor);
         else queue_sprite(ram, rom, actor, 0);
         return 1;
     case 0x1d00f:
@@ -9151,7 +9153,7 @@ static int stage_three_building(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         }
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         x = read_word(ram, actor + 0x21);
-        if (x < 0x40) {
+        if (world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9222,7 +9224,7 @@ static int stage_three_building(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + read_word(ram, 0xb71a));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t limit = (read_word(ram, 0x26e) & 2) ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
-        if (limit < read_word(ram, actor + 0x24) || read_word(ram, actor + 0x21) < 0x40) {
+        if (limit < read_word(ram, actor + 0x24) || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9263,7 +9265,7 @@ static int stage_three_building(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x1fcde: {
         scroll_actor(ram, actor, 0xb71a);
         x = read_word(ram, actor + 0x21);
-        if ((kind & 1) ? (int16_t)x > 0x1b0 : x < 0x40) {
+        if ((kind & 1) ? world_view_edge_greater_s((int16_t)x, 0x1b0) : world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9528,7 +9530,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
         return 1;
     case 0x1ef3b:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x20) finish_animation(ram, actor);
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x20)) finish_animation(ram, actor);
         else queue_sprite(ram, rom, actor, 0);
         return 1;
 
@@ -9563,7 +9565,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
         return 1;
     case 0x1efc5:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) == 0x40) finish_animation(ram, actor);
+        if (world_view_edge_eq(read_word(ram, actor + 0x21), 0x40)) finish_animation(ram, actor);
         else queue_sprite(ram, rom, actor, 0);
         return 1;
 
@@ -9651,7 +9653,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40)
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40))
             finish_animation(ram, actor);
         else
             queue_sprite(ram, rom, actor, 0);
@@ -9685,7 +9687,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
     case 0x7cd2b:
         if (!decrement(ram, actor + 0x42)) {
             child = bank_7_effect(ram, actor, 0xcdcc);
-            write_word(ram, child + 0x21, 0x1b8);
+            write_word(ram, child + 0x21, world_view_spawn_x(0x1b8));
             write_word(ram, child + 0x24, 0x120);
             write_word(ram, actor + 0x42, 0x28);
             if (address == 0x7ccee) {
@@ -9730,7 +9732,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
 static int boss_attacker_drop(uint8_t *ram, uint8_t *terrain, uint16_t actor)
 {
     /* 7000:DAFE */
-    if (read_word(ram, actor + 0x21) >= 0x1a0) return 0;
+    if (!world_view_edge_less(read_word(ram, actor + 0x21), 0x1a0)) return 0;
     if (world_terrain_mask(ram, terrain, read_word(ram, actor + 0x21) + 0x10, read_word(ram, actor + 0x24) - 4) & 0xff02)
         return 0;
     write_word(ram, actor + 0x4c, (read_word(ram, actor + 0x1e) & 3) << 4);
@@ -9786,7 +9788,7 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x7cea2: {
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9831,7 +9833,7 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x20);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9851,7 +9853,7 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x7cf61:
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -9972,7 +9974,7 @@ static int stage_three_attacker(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         if (flying && (int16_t)read_word(ram, actor + 0x3a) > (int16_t)0xfc00)
             write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x20);
         x = read_word(ram, actor + 0x21);
-        if ((flying && x > 0x1c0) || x < 0x40) {
+        if ((flying && world_view_edge_greater(x, 0x1c0)) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -10054,7 +10056,7 @@ static int stage_three_bridge(uint8_t *ram, const uint8_t *rom, uint8_t *terrain
         return 1;
     case 0x1f265: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -10219,7 +10221,7 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
                 unsigned m = terrain[(uint16_t)(behind + 3)] >> 3;
                 if ((1u << ((m - 1) & 15)) & 0xff02)
                     burst = 1;  /* CX = (m << 8) | (m - 1) is never 1 */
-                else if (x > 0x1c0 || x < 0x40) {
+                else if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                     uint16_t parent = read_word(ram, 0x84fe + read_word(ram, actor + 8));
                     write_word(ram, parent + 0x48, read_word(ram, parent + 0x48) + 1);
                     finish_animation(ram, actor);
@@ -10333,7 +10335,7 @@ static int update_shrapnel_torpedo(uint8_t *ram, const uint8_t *rom, const uint8
             if ((1u << (material & 15)) & 0xff0a) {
                 weapon_ice_impact(ram, rom, terrain, actor, x, y);
                 spent = 1;
-            } else if (x > 0x1c0 || x < 0x40) {
+            } else if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 return 1;
             }
@@ -10386,7 +10388,7 @@ static int s3b_out(const uint8_t *ram, uint16_t actor)
 {
     uint16_t x = read_word(ram, actor + 0x21);
     int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-    return x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40;
+    return world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40);
 }
 
 static uint16_t s3b_child(uint8_t *ram, uint16_t actor, uint16_t handler)
@@ -10488,7 +10490,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         ram[actor + 0x2d] = 0x30;
         write_word(ram, actor + 0x2a, 0xa978);
         write_word(ram, actor + 0x0e, 0x43);
-        write_word(ram, actor + 0x21, 0x1e0);
+        write_word(ram, actor + 0x21, world_view_spawn_x(0x1e0));
         write_word(ram, actor + 0x24, 0x138);
         uint16_t health = s3b_boss_health(ram, bank, 0x449c);
         write_word(ram, actor + 0x26, health);
@@ -10623,7 +10625,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             world_queue_sound(ram, 0x49);
             write_word(ram, actor, 0x4811);
         }
-        write_word(ram, actor + 0x21, read_word(bank, (uint16_t)(0x40f4 + 2 * (read_word(ram, actor + 0x42) & 3)))
+        write_word(ram, actor + 0x21, world_view_spawn_x(read_word(bank, (uint16_t)(0x40f4 + 2 * (read_word(ram, actor + 0x42) & 3))))
                                       + read_word(ram, actor + 0x31));
         s3b_shapes(ram, rom, actor, 1, 1);
         s3b_body(ram, rom, actor);
@@ -10977,7 +10979,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         ram[actor + 0x2d] = 0x2e;
         write_word(ram, actor + 0x2a, 0xa99a);
         write_word(ram, actor + 0x3c, 0xf7fb);
-        write_word(ram, actor + 0x21, read_word(bank, 0x4024 + 2 * side));
+        write_word(ram, actor + 0x21, world_view_spawn_x(read_word(bank, 0x4024 + 2 * side)));
         write_word(ram, actor + 0x24, 0x138);
         begin_linear_script(ram, rom, actor, read_word(bank, 0x402c + 2 * side));
         write_word(ram, actor + 0x60, read_word(ram, actor + 0x26) >> 1);
@@ -11398,7 +11400,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         write_word(ram, actor + 0x0e, 0x45);
         write_word(ram, actor + 0x3c, 0xf80b);
         ram[actor + 0x2d] = 0x2e;
-        write_word(ram, actor + 0x21, read_word(bank, 0x4028 + 2 * side));
+        write_word(ram, actor + 0x21, world_view_spawn_x(read_word(bank, 0x4028 + 2 * side)));
         write_word(ram, actor + 0x24, 0x170);
         uint16_t health = s3b_boss_health(ram, bank, 0x44a2);
         write_word(ram, actor + 0x26, health);
@@ -11773,7 +11775,7 @@ static int b_out_of_play(const uint8_t *ram, uint16_t actor)
     int low = read_word(ram, 0x26e) & 2;
     uint16_t bottom = low ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
     int16_t top = low ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-    return x > 0x1c0 || x < 0x40 || bottom < y || (int16_t)y < top;
+    return world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || bottom < y || (int16_t)y < top;
 }
 
 /* B000:E694..E98D: a stage-five diver (at most 10h alive, counted in C6).
@@ -11810,7 +11812,7 @@ static int stage_five_diver(uint8_t *ram, const uint8_t *rom, uint16_t actor, ui
         if (address == 0xbe703) {
             uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
             uint16_t bottom = (read_word(ram, 0x26e) & 2) ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
-            if (bottom < y || x > 0x1c0 || x < 0x40 || y < 0x78) {
+            if (bottom < y || world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || y < 0x78) {
                 decrement(ram, 0xc6);
                 finish_animation(ram, actor);
                 return 1;
@@ -11940,7 +11942,7 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     case 0x771af:
     case 0x772c1:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -11953,7 +11955,7 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     case 0x771e3:
     case 0x772f5: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -11995,7 +11997,7 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         return 1;
     case 0x77140:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12042,7 +12044,7 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
         /* fall through */
     case 0x773a2: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12082,7 +12084,7 @@ static int stage_four_props(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, ui
     }
     case 0x77448: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12121,7 +12123,7 @@ static int stage_four_vent(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
         /* fall through */
     case 0xb18ee:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12139,7 +12141,7 @@ static int stage_four_vent(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
         }
         scroll_actor(ram, actor, 0xb71a);
         int vent = address == 0xb191d;
-        if (vent && read_word(ram, actor + 0x21) < 0x40) {
+        if (vent && world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12173,7 +12175,7 @@ static int stage_four_vent(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
         write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
         write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12249,7 +12251,7 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
     }
     case 0x775e2:
         scroll_actor(ram, actor, 0xb71a);
-        if (bottom < read_word(ram, actor + 0x24) || read_word(ram, actor + 0x21) < 0x40) {
+        if (bottom < read_word(ram, actor + 0x24) || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12268,7 +12270,7 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
         return 1;
     case 0x7768a:
         scroll_actor(ram, actor, 0xb71a);
-        if (bottom < read_word(ram, actor + 0x24) || read_word(ram, actor + 0x21) < 0x40) {
+        if (bottom < read_word(ram, actor + 0x24) || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -12797,7 +12799,7 @@ static int stage_four_diver(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             decrement(ram, 0xc0);
             finish_animation(ram, actor);
             return 1;
@@ -12938,7 +12940,7 @@ static int stage_four_diver(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        if (x > 0x1c0 || x < 0x40 || bottom < y || (int16_t)y < top) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || bottom < y || (int16_t)y < top) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -13032,7 +13034,7 @@ static int stage_four_spread(uint8_t *ram, const uint8_t *rom, const uint8_t *te
         if (read_word(ram, actor) == 0x7e4f)
             write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x20);
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -13072,7 +13074,7 @@ static int s4_offscreen(const uint8_t *ram, uint16_t actor)
     uint16_t bottom = low ? 0x198 : (uint16_t)(0x1c8 + read_word(ram, 0xb732));
     int16_t top = low ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
     uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-    return x > 0x1c0 || x < 0x40 || bottom < y || (int16_t)y < top;
+    return world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || bottom < y || (int16_t)y < top;
 }
 
 /* B000:DBA7: once the head dies, a segment that leaves the screen retires
@@ -13518,7 +13520,7 @@ static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *t
         write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + read_word(ram, 0xb71a));
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         s4_sine_bob(ram, rom, actor, read_word(ram, actor + 0x48), read_word(ram, actor + 0x46), read_word(ram, actor + 0x31));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -13532,7 +13534,7 @@ static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *t
             finish_animation(ram, actor);
             return 1;
         }
-        if (!s4_near_box(ram, rom, actor, 0xfb3b) && read_word(ram, actor + 0x21) >= 0x60) {
+        if (!s4_near_box(ram, rom, actor, 0xfb3b) && read_word(ram, actor + 0x21) >= world_view_edge_left(0x60)) {
             if (read_word(ram, actor + 0x50))
                 decrement(ram, actor + 0x50);
             else if (read_word(ram, 0xb8a2) & 3) {
@@ -14449,7 +14451,7 @@ static int stage_four_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
         /* fall through */
     case 0x76b89:
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -14842,7 +14844,7 @@ static int stage_five_ceiling(uint8_t *ram, const uint8_t *rom, uint16_t actor, 
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x10);
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < s5c_top(ram) || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < s5c_top(ram) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15032,7 +15034,7 @@ static int stage_six_lift(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         return 1;
     case 0x7c608:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15087,7 +15089,7 @@ static int stage_six_lift(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (read_word(ram, actor + 0x21) < 0x40 || (int16_t)read_word(ram, actor + 0x24) < top) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40) || (int16_t)read_word(ram, actor + 0x24) < top) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15113,7 +15115,7 @@ static int stage_six_lift(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         return 1;
     case 0x7c7a8:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15313,7 +15315,7 @@ static int stage_six_gunship(uint8_t *ram, const uint8_t *rom, uint16_t actor, u
         if ((int16_t)read_word(ram, actor + 0x38) > (int16_t)0xfe00)
             write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) - 0x10);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x20) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x20)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15473,7 +15475,7 @@ static int stage_six_gunship(uint8_t *ram, const uint8_t *rom, uint16_t actor, u
         if ((int16_t)read_word(ram, actor + 0x38) > (int16_t)read_word(ram, actor + 0x5c))
             write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) - 0x20);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15561,7 +15563,7 @@ static int stage_six_transport(uint8_t *ram, const uint8_t *rom, const uint8_t *
             world_dispatch_detail = "stage-six transport path script kind";
             return 0;
         }
-        if (step < 0 || read_word(ram, actor + 0x21) < 0x40) {
+        if (step < 0 || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             ram[actor + 0x0a] |= 2;
             return 1;
@@ -15649,7 +15651,7 @@ static int stage_six_transport(uint8_t *ram, const uint8_t *rom, const uint8_t *
         scroll_actor(ram, actor, 0xb71a);
     shell_fly:
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -15729,7 +15731,7 @@ static void fb_touch(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 /* 7000:C21B: the hull draws and is touched through two boxes. */
 static void fb_hull(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
-    if ((int16_t)read_word(ram, actor + 0x21) >= 0x1c0) return;
+    if (!world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1c0)) return;
     queue_sprite(ram, rom, actor, 0);
     write_word(ram, actor + 0x3c, 0xf963);
     fb_touch(ram, rom, actor);
@@ -15740,7 +15742,7 @@ static void fb_hull(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 /* 7000:C259. */
 static void fb_part(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
-    if ((int16_t)read_word(ram, actor + 0x21) >= 0x1d0) return;
+    if (!world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1d0)) return;
     queue_sprite(ram, rom, actor, 0);
     fb_touch(ram, rom, actor);
 }
@@ -15990,7 +15992,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         return 1;
     case 0x7aed8:
         move_actor_axis(ram, actor + 0x30, read_word(ram, actor + 0x38));
-        if ((int16_t)read_word(ram, actor + 0x21) > -0x10) {
+        if (world_view_edge_greater_s((int16_t)read_word(ram, actor + 0x21), -0x10)) {
             fb_jitter(ram, actor);
             queue_sprite(ram, rom, actor, 0);
         } else {
@@ -16240,7 +16242,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         move_actor_axis(ram, actor + 0x30, read_word(ram, actor + 0x38));        /* C2E7 */
         move_actor_axis(ram, actor + 0x33, read_word(ram, actor + 0x3a));
         fb_jitter(ram, actor);
-        if (read_word(ram, actor + 0x21) < 0x20) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x20)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -16254,7 +16256,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
     case 0x7b4bf:
     case 0x7babe:
         write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + (uint16_t)((int16_t)read_word(ram, 0xb72a) >> 1));
-        if (read_word(ram, actor + 0x21) < 0x20) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x20)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -16420,7 +16422,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
     case 0x7b7f8: {
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -16518,7 +16520,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         fb_part(ram, rom, actor);
     cannon_timer:
         if (!read_word(ram, actor + 0x50)) write_word(ram, actor + 0x50, read_word(ram, actor + 0x52));
-        if ((int16_t)read_word(ram, actor + 0x21) > 0x80 && (int16_t)read_word(ram, actor + 0x21) < 0x1a0)
+        if (world_view_edge_greater_s((int16_t)read_word(ram, actor + 0x21), 0x80) && world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1a0))
             decrement(ram, actor + 0x50);
         return 1;
 
@@ -16613,7 +16615,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         fb_ride(ram, actor);
         write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0xa695 + read_word(ram, actor + 0x40))));
         write_word(ram, actor + 0x40, read_word(ram, actor + 0x40) + 2 >= 0x0c ? 0 : read_word(ram, actor + 0x40) + 2);
-        if ((int16_t)read_word(ram, actor + 0x21) < 0x1c0) queue_sprite(ram, rom, actor, 0);
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), 0x1c0)) queue_sprite(ram, rom, actor, 0);
         return 1;
 
     /* Volley torpedoes. */
@@ -16656,7 +16658,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
             move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         } else {
             move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-            if (read_word(ram, actor + 0x21) > 0x1c0) {
+            if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
                 finish_animation(ram, actor);
                 return 1;
             }
@@ -16703,7 +16705,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         if ((int16_t)read_word(ram, actor + 0x38) > (int16_t)read_word(ram, actor + 0x2e))
             write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) - 0x14);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -16732,7 +16734,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         if ((int16_t)read_word(ram, actor + 0x38) > (int16_t)0xfe00)
             write_word(ram, actor + 0x38, read_word(ram, actor + 0x38) - 0x10);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -16801,7 +16803,7 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
         }
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -17522,7 +17524,7 @@ static int trooper_frame(uint8_t *ram, const uint8_t *bank, uint16_t actor, uint
 static int trooper_out_x(const uint8_t *ram, uint16_t actor)
 {
     uint16_t x = read_word(ram, actor + 0x21);
-    return x > 0x1c0 || x < 0x40;
+    return world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40);
 }
 
 static int trooper_out(const uint8_t *ram, uint16_t actor)
@@ -17828,11 +17830,11 @@ static int stage_three_trooper(uint8_t *ram, const uint8_t *rom, const uint8_t *
         return 1;
     case 0xb21ae:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             trooper_retire(ram, actor, 1);
             return 1;
         }
-        if (read_word(ram, actor + 0x21) < 0x190) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x190)) {
             write_word(ram, actor + 0x40, 0);
             write_word(ram, actor + 0x44, 1);
             write_word(ram, actor, 0x20de);
@@ -18142,7 +18144,7 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
             write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 32);
             int16_t lower = (ram[0x26e] & 2) ? 0x68 : 0x10 + read_word(ram, 0xb732);
             unsigned x = read_word(ram, actor + 0x21);
-            if (x > 0x1c0 || x < 0x40 || (int16_t)read_word(ram, actor + 0x24) < lower) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || (int16_t)read_word(ram, actor + 0x24) < lower) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -18162,7 +18164,7 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
                     write_word(ram, actor + 0x54, sprite);
                     write_word(ram, actor + 0x44, read_word(bank, 0x7892 + frame));
                     write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(bank, 0x789c + frame));
-                    if (frame == 4 && read_word(ram, actor + 0x21) >= 0xa0 &&
+                    if (frame == 4 && read_word(ram, actor + 0x21) >= world_view_edge_left(0xa0) &&
                         (ram[actor + 0x1e] & 4) && !decrement(ram, actor + 0x50)) {
                         if (ram[actor + 0x1e] & 2) {
                             uint16_t shot = bank_b_effect(ram, actor, 0x7cda);
@@ -18181,7 +18183,7 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
         } else {
             write_word(ram, actor + 0x2a, 0x3e56);
             queue_sprite(ram, main_rom, actor, 1);
-            if (read_word(ram, actor + 0x21) >= 0xa0 && !(ram[actor + 0x1e] & 4) &&
+            if (read_word(ram, actor + 0x21) >= world_view_edge_left(0xa0) && !(ram[actor + 0x1e] & 4) &&
                 !read_word(ram, actor + 0x3a) && !decrement(ram, actor + 0x50)) {
                 if (ram[actor + 0x1e] & 2) {
                     uint16_t shot = bank_b_effect(ram, actor, 0x7cda);
@@ -18310,7 +18312,7 @@ stage2_jumper_terrain:
         /* fall through */
     case 0xa82e4:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -18330,7 +18332,7 @@ stage2_jumper_terrain:
     case 0xa843f: {
         const uint8_t *bank = main_rom + 0xa0000;
         scroll_actor(ram, actor, 0xb72a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -18706,7 +18708,7 @@ stage2_jumper_terrain:
                 write_word(ram, actor, 0x3269);
             } else {
                 int16_t limit = (ram[0x26e] & 2) ? 0x68 : 0x10 + read_word(ram, 0xb732);
-                if (x > 0x1c0 || x < 64 || (int16_t)y < limit) {
+                if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || (int16_t)y < limit) {
                     finish_animation(ram, actor);
                     break;
                 }
@@ -19403,7 +19405,7 @@ stage2_jumper_terrain:
             write_word(ram, config + 0x20, 0);
             write_word(ram, config + 0x22, 0);
         }
-        draw_join_label(tiles, main_rom, owner == 1 ? 0x2d30 : 0x2d90, owner == 1 ? 0xc26b : 0xc27c);
+        draw_join_label(tiles, main_rom, (owner == 1 ? 0x2d30 : 0x2d90) + world_view_hud_shift(owner), owner == 1 ? 0xc26b : 0xc27c);
         world_sub_lives_hud(main_rom, tiles, owner, read_word(ram, config + 0x18));
         ram[actor + 0x28] = 255;
         write_word(ram, actor + 0x2e, read_word(ram, 0xa2));
@@ -19512,7 +19514,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x6e, 1);
             ram[0x288] |= 1u << (owner >> 1);
             ram[0x264] &= ~(1u << (2 + (owner >> 1)));
-            uint16_t label = read_word(main_rom, 0xc257 + 2 * (owner - 1));
+            uint16_t label = read_word(main_rom, 0xc257 + 2 * (owner - 1)) + world_view_hud_shift(owner);
             draw_join_label(tiles, main_rom, label, 0xc2f6);
             write_word(ram, actor, owner & 1 ? 0x7a6a : 0x7b08);
             write_word(ram, actor + 0x42, 0x601);
@@ -19661,7 +19663,7 @@ stage2_jumper_terrain:
     case 0xba152: {
         const uint8_t *bank = main_rom + 0xb0000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 64) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -19717,7 +19719,7 @@ stage2_jumper_terrain:
         break;
     case 0xba4cc: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -19755,7 +19757,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, (uint16_t)velocity);
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         uint16_t minimum = (ram[0x26e] & 2) ? 0x68 : 0x10 + read_word(ram, 0xb732);
-        if (x > 0x1c0 || x < 0x40 || (int16_t)y < (int16_t)minimum) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || (int16_t)y < (int16_t)minimum) {
             finish_animation(ram, actor);
             break;
         }
@@ -19784,7 +19786,7 @@ stage2_jumper_terrain:
     case 0xba2c7: {
         const uint8_t *bank = main_rom + 0xb0000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 64) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -19884,7 +19886,7 @@ stage2_jumper_terrain:
                                 read_word(bank, (lead ? 0xd452 : 0xd456) + (read_word(ram, actor + 0x1e) & 2)));
         uint16_t x = read_word(ram, actor + 0x21);
         /* E781 retires the lead piece only at exactly 40h; E7E0 below it. */
-        if (lead ? x == 0x40 : x < 0x40) finish_animation(ram, actor);
+        if (lead ? world_view_edge_eq(x, 0x40) : world_view_edge_less(x, 0x40)) finish_animation(ram, actor);
         else queue_sprite(ram, main_rom, actor, 0);
         break;
     }
@@ -19935,7 +19937,7 @@ stage2_jumper_terrain:
             write_word(ram, actor, 0xe5c6);
         }
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -19973,7 +19975,7 @@ stage2_jumper_terrain:
     case 0x1e66b: {
         if (!tiles) return 0;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -20026,7 +20028,7 @@ stage2_jumper_terrain:
         static const uint8_t angle[4] = {0x34, 0x4c, 0x38, 0x40};
         static const uint16_t speed[4] = {0x380, 0x3a0, 0x3c0, 0x400};
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -20061,7 +20063,7 @@ stage2_jumper_terrain:
     case 0x1e974: {
         const uint8_t *bank = main_rom + 0x10000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -20110,7 +20112,7 @@ stage2_jumper_terrain:
             move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)y < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)y < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -20209,7 +20211,7 @@ stage2_jumper_terrain:
         } else {
             if (address == 0xbacb0) move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
             uint16_t x = read_word(ram, actor + 0x21);
-            if (x > 0x1c0 || x < 0x40) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -20309,14 +20311,14 @@ stage2_jumper_terrain:
     }
     case 0x1ea0f:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x180) write_word(ram, actor, 0xea2a);
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x180)) write_word(ram, actor, 0xea2a);
         ram[actor + 0x0d] = 1;
         world_surface_contact(ram, main_rom, actor);
         break;
     case 0x1ea2a: {
         const uint8_t *bank = main_rom + 0x10000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -20371,7 +20373,7 @@ stage2_jumper_terrain:
     case 0x1eb87: {
         if (!tiles) return 0;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -20436,7 +20438,7 @@ stage2_jumper_terrain:
     case 0x7d308: {
         const uint8_t *bank = main_rom + 0x70000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
             break;
@@ -20474,7 +20476,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         write_word(ram, actor + 0x3a, read_word(ram, actor + 0x3a) - 0x10);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -20499,7 +20501,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -20530,7 +20532,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x > 0x1c0 || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -20891,7 +20893,7 @@ stage2_jumper_terrain:
     }
     case 0x7c33d:
         scroll_actor(ram, actor, 0xb71a);
-        if ((int16_t)read_word(ram, actor + 0x21) < (int16_t)read_word(ram, actor + 0x46)) {
+        if (world_view_edge_less_s((int16_t)read_word(ram, actor + 0x21), (int16_t)read_word(ram, actor + 0x46))) {
             finish_animation(ram, actor);
             break;
         }
@@ -20953,7 +20955,7 @@ stage2_jumper_terrain:
             }
             break;
         }
-        if ((int16_t)read_word(ram, actor + 0x21) >= 0x160 || !decrement(ram, actor + 0x42)) {
+        if (world_view_edge_ge_s((int16_t)read_word(ram, actor + 0x21), 0x160) || !decrement(ram, actor + 0x42)) {
             write_word(ram, actor + 0x40, 0);
             write_word(ram, actor + 0x78, 1);
             write_word(ram, 0xb73e, 0);
@@ -21135,7 +21137,7 @@ stage2_jumper_terrain:
     }
     case 0x92c7:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) finish_animation(ram, actor);
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) finish_animation(ram, actor);
         break;
     case 0x92e6:
         world_acquire_resource(ram, actor, read_word(ram, actor + 0x10));
@@ -21384,7 +21386,7 @@ stage2_jumper_terrain:
     case 0x1e6d9:
     case 0x1e828:
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();
         } else {
@@ -21554,7 +21556,7 @@ stage2_jumper_terrain:
         if (address == 0x11ea7 || address == 0x11edb) {
             move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
             uint16_t x = read_word(ram, actor + 0x21);
-            if (x > 0x1c0 || x < 0x40) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -21586,7 +21588,7 @@ stage2_jumper_terrain:
                 move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
             write_word(ram, actor + 0x38, speed);
             move_actor_axis(ram, actor + 0x20, speed);
-            if (read_word(ram, actor + 0x21) > 0x1c0) {
+            if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -21600,7 +21602,7 @@ stage2_jumper_terrain:
             }
         } else {
             move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-            if (read_word(ram, actor + 0x21) > 0x1c0) {
+            if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -21692,7 +21694,7 @@ stage2_jumper_terrain:
             write_word(ram, actor, 0xf56d);
         }
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
-        if (read_word(ram, actor + 0x21) > 0x1c0) {
+        if (world_view_edge_greater(read_word(ram, actor + 0x21), 0x1c0)) {
             finish_animation(ram, actor);
             break;
         }
@@ -21762,7 +21764,7 @@ stage2_jumper_terrain:
             begin_linear_script(ram, main_rom, actor, read_word(bank, 0xec26 + variant));
             write_word(ram, actor, 0xecae);
         }
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -21847,6 +21849,13 @@ stage2_jumper_terrain:
         uint16_t player = world_player_contact(ram, main_rom, actor);
         if (player) {
             uint16_t stats = read_word(ram, player + 0x70), value = read_word(ram, actor + 0x50);
+            /* WORLD_PICKUP_LOG (test-only): record every collection with the
+               pickup's field X so wing pickups are provable. */
+            static int pickup_log = -1;
+            if (pickup_log < 0) pickup_log = getenv("WORLD_PICKUP_LOG") != NULL;
+            if (pickup_log)
+                fprintf(stderr, "pickup x %04x y %04x value %04x player %04x\n",
+                        read_word(ram, actor + 0x21), read_word(ram, actor + 0x24), value, player);
             write_word(ram, stats + 0x1a, read_word(ram, stats + 0x1a) + value);
             write_word(ram, stats + 0x1c, read_word(ram, stats + 0x1c) + value);
             world_queue_sound(ram, 0x31);
@@ -21906,7 +21915,7 @@ stage2_jumper_terrain:
         }
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         int16_t top = ram[0x26e] & 2 ? 0x68 : read_word(ram, 0xb732) + 0x10;
-        if (x > 0x1c0 || x < 0x40 || (int16_t)y < top) { finish_animation(ram, actor); break; }
+        if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || (int16_t)y < top) { finish_animation(ram, actor); break; }
         if (address == 0x7e30e) {
             queue_sprite(ram, main_rom, actor, 0);
             int hit = world_terrain_mask(ram, tiles + 0x4000, x, y) & 0xff02;
@@ -22007,7 +22016,7 @@ stage2_jumper_terrain:
         }
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         int16_t floor = ram[0x26e] & 2 ? 0x68 : read_word(ram, 0xb732) + 0x10;
-        if (descending && (x < 0x40 || x > 0x1c0 || (state == 0x6bd8 && (int16_t)y < floor))) {
+        if (descending && (world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0) || (state == 0x6bd8 && (int16_t)y < floor))) {
             finish_animation(ram, actor);
             break;
         }
@@ -22403,7 +22412,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x21, read_word(ram, actor + 0x31) + (world_random_byte(ram) & 2) - 1);
             write_word(ram, actor + 0x24, read_word(ram, actor + 0x34) + (world_random_byte(ram) & 2) - 1);
             queue_sprite(ram, main_rom, actor, 0);
-            if (read_word(ram, actor + 0x21) < 0x40) {
+            if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -22628,7 +22637,7 @@ stage2_jumper_terrain:
     case 0x7dfb4: {
         scroll_actor(ram, actor, 0xb71a);
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x < 0x40 || x > 0x1c0) { finish_animation(ram, actor); break; }
+        if (world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0)) { finish_animation(ram, actor); break; }
         if (address == 0x7dfb4 && !decrement(ram, actor + 0x44)) {
             uint16_t frame = read_word(ram, actor + 0x40);
             write_word(ram, actor + 0x2a, read_word(main_rom + 0x70000, 0xde46 + (frame & 6)));
@@ -22671,7 +22680,7 @@ stage2_jumper_terrain:
         write_word(ram, actor + 0x31, read_word(ram, actor + 0x31) + read_word(ram, 0xb71a));
         write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             keep_si();                      /* 432B never loads SI */
             break;
@@ -22977,7 +22986,7 @@ stage2_jumper_terrain:
             move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
             move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
             uint16_t x = read_word(ram, actor + 0x21);
-            if (x > 0x1c0 || x < 0x40) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -23067,7 +23076,7 @@ stage2_jumper_terrain:
             write_word(ram, actor + 0x38, speed);
             move_actor_axis(ram, actor + 0x20, speed);
             uint16_t x = read_word(ram, actor + 0x21);
-            if (x > 0x1c0 || x < 0x40) {
+            if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -23155,7 +23164,7 @@ stage2_jumper_terrain:
         unsigned frame = read_word(ram, actor + 0x40);
         if (child) {
             write_word(ram, child + 2, 0xb000);
-            write_word(ram, child + 0x21, 0x1e0);
+            write_word(ram, child + 0x21, world_view_spawn_x(0x1e0));
             write_word(ram, child + 0x24, read_word(bank, 0x37b0 + frame) + read_word(ram, 0xb732));
             write_word(ram, child + 0x1e, read_word(bank, 0x37c2 + frame) | ram[actor + 0x1e]);
             write_word(ram, actor + 0x44, read_word(ram, actor + 0x44) + 1);
@@ -23187,7 +23196,7 @@ stage2_jumper_terrain:
         unsigned paint = read_word(bank, 0x80ee + 2*kind);
         if (paint != 0x8c85 && paint != 0x8ca8 && paint != 0x8cb0) return 0;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -23244,7 +23253,7 @@ stage2_jumper_terrain:
     case 0xb886d:
     case 0xb88bc: {
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -23322,7 +23331,7 @@ stage2_jumper_terrain:
             ram[actor + 0x23] = y;
             write_word(ram, actor + 0x24, y >> 8);
         }
-        if (x < 0x40 || x > 0x1c0) { finish_animation(ram, actor); break; }
+        if (world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0)) { finish_animation(ram, actor); break; }
         uint16_t y = read_word(ram, actor + 0x24);
         if (!turning) {
             uint16_t table = read_word(bank, 0x74 + (((dx + 0x40) >> 5) & 4));
@@ -23363,7 +23372,7 @@ stage2_jumper_terrain:
         write_word(ram, impact + 0x58, 0x80);
         if (!(impact & 0x300)) write_word(ram, impact + 0x44, 0x5d);
         release_actor_resources(ram, actor);
-        if (x >= 0x1a0) write_word(ram, actor + 0x21, 0x1a0);
+        if (x >= world_view_edge_right(0x1a0)) write_word(ram, actor + 0x21, world_view_edge_right(0x1a0));
         write_word(ram, actor, 0x76a6);
         break;
     }
@@ -23479,7 +23488,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -23516,7 +23525,7 @@ stage2_jumper_terrain:
         const uint8_t *bank = main_rom + 0xb0000;
         keep_si();
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 1) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 1)) {
             finish_animation(ram, actor);
             break;
         }
@@ -23809,7 +23818,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)y < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)y < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -24192,7 +24201,7 @@ stage2_jumper_terrain:
             }
         }
         write_word(ram, actor + 0x34, read_word(ram, actor + 0x34) + read_word(ram, 0xb71c));
-        if ((int16_t)read_word(ram, actor + 0x21) <= -48) { finish_animation(ram, actor); break; }
+        if (world_view_edge_le_s((int16_t)read_word(ram, actor + 0x21), -48)) { finish_animation(ram, actor); break; }
         if (ram[actor + 0x19]) --ram[actor + 0x19];
         write_word(ram, actor + 0x24, read_word(ram, actor + 0x34) + (ram[actor + 0x19] & 2));
         queue_sprite(ram, main_rom, actor, 0);
@@ -24241,7 +24250,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         if (address == 0xb59b3) {
-            if ((int16_t)read_word(ram, actor + 0x21) <= -32 || !decrement(ram, actor + 0x42))
+            if (world_view_edge_le_s((int16_t)read_word(ram, actor + 0x21), -32) || !decrement(ram, actor + 0x42))
                 finish_animation(ram, actor);
             else if (ram[actor + 0x42] & 1) queue_sprite(ram, main_rom, actor, 0);
             break;
@@ -24397,7 +24406,7 @@ stage2_jumper_terrain:
                 queue_sprite(ram, main_rom, actor, 0);
                 advance_timed_sprite(ram, bank, actor, 0xf952);
             }
-            if (x < 0x40) { finish_animation(ram, actor); break; }
+            if (world_view_edge_less(x, 0x40)) { finish_animation(ram, actor); break; }
             ram[actor + 0xd] = 0;
             if (world_player_contact(ram, main_rom, actor)) finish_animation(ram, actor);
             break;
@@ -24459,7 +24468,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x < 0x40 || x > 0x1c0) { finish_animation(ram, actor); break; }
+        if (world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0)) { finish_animation(ram, actor); break; }
         queue_sprite(ram, main_rom, actor, 1);
         ram[actor + 0xd] = 0;
         world_surface_contact(ram, main_rom, actor);
@@ -24518,8 +24527,8 @@ stage2_jumper_terrain:
         if (!tiles) return 0;
         if (address == 0xb75b6) {
             uint16_t x = read_word(ram, actor + 0x21);
-            if (x >= 0x198) write_word(ram, actor + 0x21, 0x198);
-            else if ((int16_t)x < 0x68) write_word(ram, actor + 0x21, 0x68);
+            if (x >= world_view_edge_right(0x198)) write_word(ram, actor + 0x21, world_view_edge_right(0x198));
+            else if ((int16_t)x < (int16_t)world_view_edge_left(0x68)) write_word(ram, actor + 0x21, world_view_edge_left(0x68));
             write_word(ram, actor + 0x40, 0);
             write_word(ram, actor + 0x44, 1);
             write_word(ram, actor + 0x3a, 0);
@@ -24534,7 +24543,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)y < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)y < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -24664,7 +24673,7 @@ stage2_jumper_terrain:
                 write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(ram, 0xb71c));
             uint16_t x = read_word(ram, actor + 0x21) + read_word(ram, 0xb71a);
             write_word(ram, actor + 0x21, x);
-            if (x < 0x40) {
+            if (world_view_edge_less(x, 0x40)) {
                 finish_animation(ram, actor);
                 break;
             }
@@ -25943,7 +25952,7 @@ stage2_jumper_terrain:
             if (read_word(ram, actor + 0x4a) && material == 4) {
                 spawn_surface_splash_effect(ram, main_rom, actor, x, y);
                 gone = 1;
-            } else if (x > 0x1c0 || x < 0x40 || y > bottom || (int16_t)y < top)
+            } else if (world_view_edge_greater(x, 0x1c0) || world_view_edge_less(x, 0x40) || y > bottom || (int16_t)y < top)
                 gone = 1;
             else if (!read_word(ram, actor + 0x26))
                 impact = gone = 1;
@@ -26389,7 +26398,7 @@ stage2_jumper_terrain:
     case 0xba734: {
         int step = step_flight_script(ram, main_rom, actor);
         if (!step) return 0;
-        if (step < 0 || read_word(ram, actor + 0x21) < 64) {
+        if (step < 0 || world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -26467,7 +26476,7 @@ stage2_jumper_terrain:
             }
         } else move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        if (x < 64) {
+        if (world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -26560,7 +26569,7 @@ stage2_jumper_terrain:
             for (int offset = 6; offset >= 0; offset -= 2) {
                 uint16_t child = bank_b_effect(ram, actor, 0xa6d6);
                 if (child == 0x8480) continue;
-                write_word(ram, child + 0x21, read_word(bank, 0xa5d8 + offset));
+                write_word(ram, child + 0x21, world_view_spawn_x(read_word(bank, 0xa5d8 + offset)));
                 write_word(ram, child + 0x24, read_word(ram, actor + 0x24) + read_word(bank, 0xa5e0 + offset));
                 write_word(ram, child + 0x1e, read_word(bank, 0xa5e8 + offset));
             }
@@ -26966,7 +26975,7 @@ stage2_jumper_terrain:
            other paths reload it in 0DA4, D237 or D2B7. */
         keep_si();
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 16) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x10)) {
             finish_animation(ram, actor);
             break;
         }
@@ -27253,7 +27262,7 @@ stage2_jumper_terrain:
         const uint8_t *bank = main_rom + 0xb0000;
         uint16_t type = read_word(ram, actor + 0x60);
         scroll_actor(ram, actor, 0xb71a);
-        if ((int16_t)read_word(ram, actor + 0x21) <= (int16_t)read_word(bank, 0xb06a + type)) {
+        if (world_view_edge_le_s((int16_t)read_word(ram, actor + 0x21), (int16_t)read_word(bank, 0xb06a + type))) {
             finish_animation(ram, actor);
             break;
         }
@@ -27829,7 +27838,7 @@ stage2_jumper_terrain:
         scroll_actor(ram, actor, 0xb71a);
         if (address == 0xb93d2) move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         uint16_t x = read_word(ram, actor + 0x21);
-        if (x < 0x40) {
+        if (world_view_edge_less(x, 0x40)) {
             release = 1;
             contacts = 0;
         } else {
@@ -27846,7 +27855,7 @@ stage2_jumper_terrain:
             paired_sub_fire(ram, main_rom, actor);
             int wall = !!(world_terrain_mask(ram, tiles + 0x4000, x - 0x18, read_word(ram, actor + 0x24)) & 0xff02);
             if (address == 0xb93d2) {
-                if ((int16_t)x > 0x60 && wall) write_word(ram, actor, 0x950e);
+                if (world_view_edge_greater_s((int16_t)x, 0x60) && wall) write_word(ram, actor, 0x950e);
             } else if (address == 0xb950e) {
                 if (!wall) write_word(ram, actor, 0x93d2);
             } else if (read_word(ram, actor + 0x42)) {
@@ -27947,7 +27956,7 @@ stage2_jumper_terrain:
             write_word(ram, actor, 0xa3e7);
         }
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 0x40) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -28036,7 +28045,7 @@ stage2_jumper_terrain:
             state = 0xbbb51;
         }
         scroll_actor(ram, actor, 0xb71a);
-        if ((state == 0xbb99d || state == 0xbba49 || state == 0xbbaf8) && read_word(ram, actor + 0x21) < 0x40) {
+        if ((state == 0xbb99d || state == 0xbba49 || state == 0xbbaf8) && world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -28177,7 +28186,7 @@ stage2_jumper_terrain:
             fire = read_word(ram, actor + 0x21) < read_word(ram, actor + 0x6c);
             if (fire) write_word(ram, actor, 0x92ce);
         } else {
-            if (read_word(ram, actor + 0x21) < 0x40) { finish_animation(ram, actor); break; }
+            if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) { finish_animation(ram, actor); break; }
             /* B000:92D4: D6B7 steps the flight script; at its end the
                enemy bursts (6B2E) and retires. */
             int step = step_flight_script(ram, main_rom, actor);
@@ -28300,7 +28309,7 @@ stage2_jumper_terrain:
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
         uint16_t x = read_word(ram, actor + 0x21);
         int16_t top = (read_word(ram, 0x26e) & 2) ? 0x68 : (int16_t)(0x10 + read_word(ram, 0xb732));
-        if (x > 0x1c0 || (int16_t)read_word(ram, actor + 0x24) < top || x < 0x40) {
+        if (world_view_edge_greater(x, 0x1c0) || (int16_t)read_word(ram, actor + 0x24) < top || world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -28322,7 +28331,7 @@ stage2_jumper_terrain:
     case 0xbd079: {
         const uint8_t *bank = main_rom + 0xb0000;
         scroll_actor(ram, actor, 0xb71a);
-        if (read_word(ram, actor + 0x21) < 64) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -28500,7 +28509,7 @@ stage2_jumper_terrain:
         uint16_t sensor = read_word(ram, actor + 0x24) + read_word(bank, 0x8d60 + 2 * (speed_y >> 15));
         if (!(world_terrain_mask(ram, tiles + 0x4000, x, sensor) & 0xff0a))
             move_actor_axis(ram, actor + 0x23, speed_y);
-        if (x < 0x40) {
+        if (world_view_edge_less(x, 0x40)) {
             finish_animation(ram, actor);
             break;
         }
@@ -28531,7 +28540,7 @@ stage2_jumper_terrain:
         uint16_t x = read_word(ram, actor + 0x21) + (int8_t)(speed >> 8) + (fraction >> 8);
         uint16_t y = read_word(ram, actor + 0x24);
         write_word(ram, actor + 0x21, x);
-        if (x < 0x40 || x > 0x1c0) {
+        if (world_view_edge_less(x, 0x40) || world_view_edge_greater(x, 0x1c0)) {
             finish_animation(ram, actor);
             /* 9825 reaches here through 4311 and 5E9B only. */
             if (address == 0xb9825) keep_si();
@@ -28672,7 +28681,7 @@ stage2_jumper_terrain:
             keep_si();
         scroll_actor(ram, actor, 0xb72a);
         uint16_t bottom = read_word(ram, 0x26e) & 2 ? 0x198 : 0x1c8 + read_word(ram, 0xb732);
-        if (read_word(ram, actor + 0x21) < 0x3f || read_word(ram, actor + 0x24) > bottom) {
+        if (world_view_edge_less(read_word(ram, actor + 0x21), 0x3f) || read_word(ram, actor + 0x24) > bottom) {
             finish_animation(ram, actor);
             break;
         }
@@ -28825,6 +28834,12 @@ stage2_jumper_terrain:
     case 0x6f84:
     case 0x6fb1:
         update_radial_effect(ram, main_rom, actor, address == 0x6f84);
+        break;
+    /* 6D91: dead deck-gun husk emits a periodic puff; the exact sprite
+       table is undecoded, so the spawned effect retires immediately
+       rather than aborting the run (cosmetic gap, 5CD0 respawns it). */
+    case 0xb6d91:
+        finish_animation(ram, actor);
         break;
     case 0x7f73:
         ram[actor + 0x2c] = 3;

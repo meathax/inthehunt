@@ -8,7 +8,10 @@
  * The game's font uses pen 1 for the face, A..E for a top-to-bottom shade
  * and F for the drop shadow, so each style below supplies those colours. */
 
-enum { W = 320, H = 240 };
+/* Canvas width in game pixels: 320 in the arcade session, 428 in widescreen.
+ * world_menu_render/world_menu_gpu_title set it from the caller's frame. */
+static int W = 320;
+enum { H = 240 };
 enum { PAGE_MAIN, PAGE_OPTIONS, PAGE_CONTROLS, PAGE_QUIT };
 enum { TAB_VIDEO, TAB_SOUND, TAB_GAME, TAB_ENHANCE, TAB_COUNT };
 enum {
@@ -28,7 +31,7 @@ enum {
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
     ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
     ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
-    ITEM_CRT
+    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE
 };
 enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -188,9 +191,9 @@ static void text_center(uint32_t *c, const uint8_t *gfx1, int y, const char *s, 
 }
 
 /* 16x16 lettering: four tiles at 100h + (char - 30h) * 4. */
-static void big_text_center(uint32_t *c, const uint8_t *gfx1, int y, const char *s, const Ramp *ramp)
+static void big_text_at(uint32_t *c, const uint8_t *gfx1, int x, int y, const char *s, const Ramp *ramp)
 {
-    int x = (W - (int)strlen(s) * 16) / 2;
+
     for (; *s; ++s, x += 16) {
         unsigned ch = (unsigned char)*s;
         if (ch < '0' || ch > 'Z' || ch == ':' || ch == 'J') continue;
@@ -200,6 +203,11 @@ static void big_text_center(uint32_t *c, const uint8_t *gfx1, int y, const char 
         tile(c, gfx1, x, y + 8, base + 2, ramp);
         tile(c, gfx1, x + 8, y + 8, base + 3, ramp);
     }
+}
+
+static void big_text_center(uint32_t *c, const uint8_t *gfx1, int y, const char *s, const Ramp *ramp)
+{
+    big_text_at(c, gfx1, (W - (int)strlen(s) * 16) / 2, y, s, ramp);
 }
 
 /* A small torpedo pointing right, used as the cursor and value arrows. */
@@ -246,7 +254,10 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     switch (m->page) {
     case PAGE_MAIN:
         if (m->title) {
-            ADD(ITEM_START, "START GAME", "INSERT A COIN AND DIVE IN");
+            if (m->selector) {
+                ADD(ITEM_SELECT_ARCADE, "ARCADE", "ORIGINAL 4:3");
+                ADD(ITEM_START_WIDE, "WIDESCREEN", "EXPANDED 16:9");
+            } else ADD(ITEM_START, "PLAY", "INSERT A COIN AND DIVE IN");
             ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND, GAME AND CONTROLS");
             ADD(ITEM_QUIT, "EXIT", "CLOSE IN THE HUNT");
         } else {
@@ -418,7 +429,7 @@ void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
     m->dirty = 0;
     m->peek = 0;
     m->opened_at = now_ms;
-    m->title = m->title_hidden = m->wake_held = 0;
+    m->selector = m->title = m->title_hidden = m->wake_held = 0;
 }
 
 void world_menu_open_title(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
@@ -512,7 +523,7 @@ static void go(WorldMenu *m, unsigned page, unsigned row)
 
 void world_menu_title_activity(WorldMenu *m, unsigned held, int activity, int gamepad, uint32_t now_ms)
 {
-    if (!m->open || !m->title) return;
+    if (!m->open || !m->title || m->selector) return;
     if (activity || held || m->page != PAGE_MAIN) {
         m->last_title_input = now_ms;
         if (m->title_hidden) {
@@ -555,7 +566,7 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
         }
         if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-        else go(m, PAGE_MAIN, m->page == PAGE_OPTIONS ? 1 : 2);
+        else go(m, PAGE_MAIN, m->selector + (m->page == PAGE_OPTIONS ? 1 : 2));
         return 0;
     }
     if (m->page == PAGE_OPTIONS && (pressed & (WORLD_MENU_TAB_PREV | WORLD_MENU_TAB_NEXT))) {
@@ -585,17 +596,19 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
         switch (id) {
         case ITEM_RESUME: m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_START: m->open = 0; return WORLD_MENU_START | (m->dirty ? WORLD_MENU_SAVE : 0);
+        case ITEM_SELECT_ARCADE: m->open = 0; return WORLD_MENU_SELECT_ARCADE | (m->dirty ? WORLD_MENU_SAVE : 0);
+        case ITEM_START_WIDE: m->open = 0; return WORLD_MENU_SELECT_WIDE | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_OPTIONS: go(m, PAGE_OPTIONS, m->rows[PAGE_OPTIONS] ? m->rows[PAGE_OPTIONS] : 1); return 0;
         case ITEM_CONTROLS: go(m, PAGE_CONTROLS, 0); return 0;
         case ITEM_QUIT: go(m, PAGE_QUIT, 0); return 0;
-        case ITEM_NO: go(m, PAGE_MAIN, 2); return 0;
+        case ITEM_NO: go(m, PAGE_MAIN, m->selector + 2); return 0;
         case ITEM_YES:
             if (m->title) return WORLD_MENU_QUIT | (m->dirty ? WORLD_MENU_SAVE : 0);
             m->open = 0;
             return WORLD_MENU_TITLE | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_BACK:
             if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-            else go(m, PAGE_MAIN, 1);
+            else go(m, PAGE_MAIN, m->selector + 1);
             return 0;
         case ITEM_TABS: m->tab = (m->tab + 1) % TAB_COUNT; return 0;
         case ITEM_DEFAULTS: {
@@ -721,13 +734,13 @@ static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, u
             if (!gpu_background || (*pixel >> 24) == 255)
                 *pixel = mix(*pixel, 0xff020a16, (unsigned)(y - 120));
         }
-    fill(c, 96, 140, W - 192, 72, 0xff040e1e);
-    panel(c, 96, 140, W - 192, 72);
+    fill(c, 96, 132, W - 192, 90, 0xff040e1e);
+    panel(c, 96, 132, W - 192, 90);
     Item items[MAX_ITEMS];
     unsigned count = page_items(m, items);
     int bob = (int)((now_ms / 120) % 4);
     bob = bob == 3 ? 1 : bob;
-    int y = 153;
+    int y = 144;
     for (unsigned i = 0; i < count; ++i, y += 18) {
         int here = i == m->row;
         if (here) {
@@ -741,15 +754,42 @@ static void title_screen(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, u
 
 int world_menu_main_title(const WorldMenu *m) { return m->title && m->page == PAGE_MAIN; }
 
-void world_menu_gpu_title(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms)
+void world_menu_gpu_title(const WorldMenu *m, uint32_t *c, const uint8_t *gfx1, uint32_t now_ms,
+                          unsigned canvas_w)
 {
+    W = (int)canvas_w;
     title_screen(m, c, gfx1, now_ms, 1);
+    W = 320;
 }
 
 void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
-                       const uint8_t *gfx1, uint32_t now_ms)
+                       const uint8_t *gfx1, uint32_t now_ms, unsigned canvas_w)
 {
     if (!m->open || m->title_hidden || m->peek || !c || !gfx1) return;
+    W = (int)canvas_w;
+    if (m->selector && m->page == PAGE_MAIN) {
+        Ramp brass = gold(), light = steel(), blue = sea();
+        int x = W - 172;
+        shade(c, 0, 168, x, 44, 0xff031623, 196);
+        big_text_at(c, gfx1, 16, 183, "IN THE HUNT", &brass);
+        panel(c, x, 7, 166, 226);
+        text(c, gfx1, x + 24, 24, "SELECT MODE", &light);
+        fill(c, x + 16, 40, 134, 1, 0xff397786);
+        Item rows[MAX_ITEMS];
+        unsigned count = page_items(m, rows);
+        for (unsigned i = 0; i < count; ++i) {
+            int y = 55 + 39 * i;
+            if (m->row == i) {
+                shade(c, x + 12, y - 5, 142, 29, 0xff18455a, 230);
+                fill(c, x + 12, y - 5, 2, 29, 0xffe4b15c);
+                torpedo(c, x + 18, y + 2, 0);
+            }
+            text(c, gfx1, x + 34, y, rows[i].label, m->row == i ? &brass : &light);
+            if (i < 2) text(c, gfx1, x + 34, y + 12, rows[i].help, &blue);
+        }
+        text(c, gfx1, x + 18, 210, m->gamepad ? "A  SELECT" : "ENTER  SELECT", &blue);
+        return;
+    }
     if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms, 0); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);

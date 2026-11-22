@@ -1,7 +1,19 @@
 #include "world_stage.h"
+#include "world_view.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 uint16_t world_spawn_child(uint8_t *, uint16_t, uint16_t);
+
+/* Map-anchored kinds: their authored X is a world coordinate (or unused),
+ * never a screen-edge entrance, so widescreen must not shift it.
+ * 0000:da13/db86 write tilemap structures (update_scenery); a000:8309 is a
+ * scroll-locked decoration. See docs/widescreen-geometry.md. */
+static int world_anchored_kind(uint16_t kind)
+{
+    return kind == 0xda13 || kind == 0xdb86 || kind == 0x8309;
+}
 
 static uint16_t word(const uint8_t *p, uint16_t a)
 {
@@ -30,11 +42,30 @@ void world_stage_spawns(uint8_t *ram, const uint8_t *rom, uint16_t parent)
             uint16_t child = world_spawn_child(ram, parent, word(bank, row + 2));
             if (!child) break;
             put(ram, child + 2, word(bank, row + 4));
-            put(ram, child + 0x21, trigger - camera + word(bank, row + 6));
+            uint16_t authored_x = word(bank, row + 6);
+            int right_edge = 0;
+            if (!world_anchored_kind(word(bank, row + 2))) {
+                uint16_t conv = world_view_spawn_x(authored_x);
+                right_edge = conv != authored_x && (int16_t)conv >= 0x1a0 + WORLD_VIEW_WING;
+                authored_x = conv;
+            }
+            /* A row can drain after the camera already passed its trigger;
+             * never let a right-shifted entrant materialize inside the wide
+             * view — pin it just outside the right aperture instead. */
+            uint16_t fx = (uint16_t)(trigger - camera + authored_x);
+            if (right_edge && fx >= 0x2a && fx < (uint16_t)(0x1a0 + WORLD_VIEW_WING))
+                fx = 0x1a0 + WORLD_VIEW_WING;
+            put(ram, child + 0x21, fx);
             uint16_t y = word(bank, row + 8);
             if (!(ram[0x26e] & 2)) y += word(ram, 0xb732);
             put(ram, child + 0x24, y);
             put(ram, child + 0x1e, flags);
+            static int spawn_trace = -1;
+            if (spawn_trace < 0) spawn_trace = !!getenv("WORLD_SPAWN_TRACE");
+            if (spawn_trace)
+                fprintf(stderr, "spawn trg=%04x cam=%04x kind=%04x:%04x ax=%04x fx=%04x y=%04x fl=%04x\n",
+                        trigger, camera, word(bank, row + 4), word(bank, row + 2),
+                        word(bank, row + 6), fx, y, flags);
         }
         put(ram, parent + 0x40, word(ram, parent + 0x40) + 12);
     }

@@ -28,11 +28,20 @@
 #include "world_file.h"
 #include "world_setup.h"
 #include "world_menu.h"
+#include "world_view.h"
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
 static uint8_t oam[2048], palette[2048];
 extern double world_scene_stage_ms[6];
-static uint32_t pixels[320*240];
+static uint32_t pixels[WORLD_VIEW_MAX_WIDTH * WORLD_VIEW_HEIGHT];
+/* Columns in the last drawn frame: 320 outside a widescreen gameplay
+   session (the attract stays 4:3), 428 while 0:B2E runs under Widescreen. */
+static unsigned frame_w = 320;
+static unsigned shot_w = 320;          /* unscaled width of the last captured frame */
+static int frame_left(void)
+{
+    return frame_w == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
+}
 /* Title entry at 0:1D52 programs all three playfield controls. */
 static const uint16_t title_master_controls[3] = {0, 0x41, 2};
 static uint16_t layer_master[3] = {0, 0x41, 2};
@@ -51,8 +60,8 @@ static unsigned elapsed_board_frames = 1;
 static char settings_path[4096];
 static WorldMenu menu;
 
-/* The frame as presented: enhancements and overlays, shown_k times 320x240. */
-static uint32_t shown[320 * 240 * WORLD_SCENE_MAX_K * WORLD_SCENE_MAX_K];
+/* The frame as presented: enhancements and overlays, shown_k times frame_w x 240. */
+static uint32_t shown[WORLD_VIEW_MAX_WIDTH * 240 * WORLD_SCENE_MAX_K * WORLD_SCENE_MAX_K];
 static int shown_k = 1;
 static double scene_alpha = 1.0;       /* current pose plus fractional camera advance */
 /* What draw() last drew, for the scene renderer. */
@@ -121,7 +130,7 @@ static void scene_submit(void)
         unsigned actor=word(ram+0x90+2*player);
         if (actor<0x400 || actor>0xff00) continue;
         int x=(int16_t)word(ram+actor+0x21)-96, y=375-(int16_t)word(ram+actor+0x24);
-        if (x<0 || x>=320 || y<0 || y>=240) continue;
+        if (x<frame_left() || x>=frame_left()+(int)frame_w || y<0 || y>=240) continue;
         int facing=(ram[actor+0x29]&1)?-1:1;
         frame.lamp[player][0]=x+17*facing;
         frame.lamp[player][1]=y;
@@ -135,6 +144,8 @@ static void scene_submit(void)
     frame.video_control = (uint16_t)word(ram + 0x8b28);
     frame.waterline = waterline_row();
     frame.scene_id = word(ram + 0x80) | word(ram + 0x84) << 16;
+    frame.width = word(ram + 0x80) == 0xb2e ? world_view_width() : WORLD_VIEW_ARCADE_WIDTH;
+    frame.left = frame.width == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
     /* The camera keeps a fraction of a pixel (byte 51h of its actor) that
        the whole-pixel scroll registers drop. The background scrolls at half
        the playfield's rate, so its fraction follows from the same value. */
@@ -209,12 +220,14 @@ static int enhance(const uint32_t *source, uint32_t *target, uint32_t time, int 
     WorldSceneFx fx = settings.fx_enable ? scene_effects() : (WorldSceneFx){0};
     fx.smooth = 1;
     fx.interp = 0;
-    if (world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
+    /* The scene renderer only knows the legacy raster until widescreen scene
+       work lands; outside it the plain picture is the correct output. */
+    if (frame_w == WORLD_VIEW_ARCADE_WIDTH && world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
         unsigned strength = world_scene_take_rumble();
         if (strength && settings.fx_shake) world_window_rumble(strength, 160);
         return k;
     }
-    memcpy(target, source, sizeof(uint32_t) * 320 * 240);
+    memcpy(target, source, sizeof(uint32_t) * frame_w * 240);
     return 1;
 }
 
@@ -234,8 +247,8 @@ static void overlay_notices(uint32_t *frame, int k)
         show_notice("CRT SHADER FAILED");
     } else if (notice_until && !strcmp(notice, "LOADING CRT SHADER")) notice_until = GetTickCount();
     if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
-        world_menu_draw_text(frame, 320u * k, 240u * k, 5 * k, 5 * k, (unsigned)k, 0xff000000, notice);
-        world_menu_draw_text(frame, 320u * k, 240u * k, 4 * k, 4 * k, (unsigned)k, 0xffff8060, notice);
+        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, 5 * k, 5 * k, (unsigned)k, 0xff000000, notice);
+        world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, 4 * k, 4 * k, (unsigned)k, 0xffff8060, notice);
     } else
         notice[0] = 0;
 }
@@ -287,7 +300,9 @@ static void present_game(const uint32_t *source)
     /* The title menu sits over the running attract sequence, at 1x. */
     int title = menu.open && menu.title && !menu.title_hidden && !menu.peek;
     static WorldLightScene lights;
-    int trace=(!title || world_menu_main_title(&menu)) && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow ||
+    /* GPU light transport is sized for the legacy 320-wide frame; a
+       widescreen frame runs the plain path until the field grows too. */
+    int trace=frame_w == WORLD_VIEW_ARCADE_WIDTH && (!title || world_menu_main_title(&menu)) && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow ||
         settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
         settings.fx_headlights || settings.fx_rim || settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
         settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
@@ -301,24 +316,24 @@ static void present_game(const uint32_t *source)
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
     world_scene_light_ready=NULL;
-    apply_brightness(shown, (size_t)320 * 240 * k * k);
+    apply_brightness(shown, (size_t)frame_w * 240 * k * k);
     if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (title && trace && lights.scale == k) {
         lights.flags |= 256u;
-        world_menu_gpu_title(&menu, shown, gfx1, GetTickCount());
-    } else if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount());
+        world_menu_gpu_title(&menu, shown, gfx1, GetTickCount(), frame_w);
+    } else if (title) world_menu_render(&menu, &settings, shown, gfx1, GetTickCount(), frame_w);
     overlay_notices(shown, k);
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
-        int x = 320 - world_menu_text_width(label, 1) - 4;
-        world_menu_draw_text(shown, 320u * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
-        world_menu_draw_text(shown, 320u * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
+        int x = (int)frame_w - world_menu_text_width(label, 1) - 4;
+        world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
+        world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
     }
     world_gpu_light_frame(trace && lights.scale==k ? &lights : NULL);
     memcpy(displayed_camera_offsets,offsets,sizeof offsets);
     world_gpu_camera_offsets(pixel_camera ? offsets : NULL);
-    world_window_present(shown, k);
+    world_window_present(shown, k, frame_w);
     world_gpu_camera_offsets(NULL);
     world_scene_camera_output(NULL);
     world_gpu_light_frame(NULL);
@@ -343,7 +358,8 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         result = world_menu_update(&menu, &settings, held, gamepad, GetTickCount());
     if (result & WORLD_MENU_DISPLAY) {
         launch_fullscreen_override = 0; /* An explicit player choice supersedes launch mode. */
-        world_window_set_display(settings.fullscreen, settings.window_scale);
+        world_window_set_display(settings.fullscreen, settings.window_scale,
+                                 menu.selector ? WORLD_VIEW_WIDE_WIDTH : world_view_width());
         world_gpu_retry_vrr();          /* a new display mode may support VRR */
     }
     if (result & WORLD_MENU_VIEW) {
@@ -360,10 +376,10 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         present_game(paused);
     } else if (menu.open) {
         memcpy(pixels, paused, sizeof pixels);
-        world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount());
+        world_menu_render(&menu, &settings, pixels, gfx1, GetTickCount(), frame_w);
         overlay_notices(pixels, 1);
         beam_step();
-        world_window_present(pixels, 1);
+        world_window_present(pixels, 1, frame_w);
     }
     return result;
 }
@@ -412,8 +428,12 @@ static void locate_sounds(unsigned actor,unsigned tail)
     SoundOrigin origin={0};
     if(word(ram+0x80)==0xb2e){
         int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
-        if(x>=-48 && x<368 && y>=-48 && y<288){
-            origin.pan=fmaxf(-.72f,fminf(.72f,(x-159.5f)*(.72f/160)));
+        /* Listener window: the aperture plus 48 px of margin each side;
+           pan normalizes to the aperture half-width, clamped at output. */
+        int lo=frame_left()-48, hi=frame_left()+(int)frame_w+48;
+        float half=frame_w==WORLD_VIEW_WIDE_WIDTH?640.f/3.f:160.f;
+        if(x>=lo && x<hi && y>=-48 && y<288){
+            origin.pan=fmaxf(-.72f,fminf(.72f,(x-159.5f)*(.72f/half)));
             int wl=waterline_row();
             origin.submerged=wl==-1?.82f:fmaxf(0,fminf(1,(y-wl+4)/32.f));
         }
@@ -502,7 +522,7 @@ static void sound_frame_body(void)
         int present=immersion.active && actor>=0x400 && actor<=0xff00;
         int x=present?(int16_t)word(ram+actor+0x21)-96:0;
         int y=present?375-(int16_t)word(ram+actor+0x24):0;
-        present=present && x>=0 && x<320 && y>=0 && y<240;
+        present=present && x>=frame_left() && x<frame_left()+(int)frame_w && y>=0 && y<240;
         imm_player(p,present,x,y,waterline_row());
     }
     imm_frame();
@@ -601,6 +621,8 @@ static void sound_frame_body(void)
 
 static void capture_video(void)
 {
+    frame_w = word(ram + 0x80) == 0xb2e ? world_view_width() : WORLD_VIEW_ARCADE_WIDTH;
+    shot_w = frame_w;
     WorldVideoLayer layers[3];
     for (unsigned i = 0; i < 3; ++i) {
         unsigned pos = 0xb706 + 4*i;
@@ -621,10 +643,12 @@ static void capture_video(void)
 
 static void draw_captured_pixels(void)
 {
+    int left = frame_left();
     for (unsigned y = 0; y < 240; ++y) {
-        uint16_t line[320];
-        world_video_scanline(line, y, tiles, gfx1, gfx2, drawn_sprites, drawn_layers, word(ram + 0x8b28));
-        for (unsigned x = 0; x < 320; ++x) pixels[y*320+x] = drawn_colors[line[x] & 1023];
+        uint16_t line[WORLD_VIEW_MAX_WIDTH];
+        world_video_scanline(line, y, tiles, gfx1, gfx2, drawn_sprites, drawn_layers,
+                             word(ram + 0x8b28), frame_w, left);
+        for (unsigned x = 0; x < frame_w; ++x) pixels[y * frame_w + x] = drawn_colors[line[x] & 1023];
     }
 }
 
@@ -784,7 +808,7 @@ static void observe_weapon(unsigned entry,unsigned actor,int old_x,int old_y)
     flight[actor].kind=moving;flight[actor].expected=next;flight[actor].pass=weapon_pass;
     WeaponEmission kind=pulse?pulse:moving;
     int x=(int16_t)word(ram+actor+0x21)-96,y=375-(int16_t)word(ram+actor+0x24);
-    if(x<0 || x>=320 || y<0 || y>=240)return;
+    if(x<frame_left() || x>=frame_left()+(int)frame_w || y<0 || y>=240)return;
     int vx=(int16_t)word(ram+actor+0x38),vy=-(int16_t)word(ram+actor+0x3a);
     int moved_x=weapon_position(actor+0x20)-old_x;
     int moved_y=old_y-weapon_position(actor+0x23);
@@ -831,8 +855,8 @@ static int tick(uint16_t pads, uint16_t system)
             /* These consecutive cases in final_boss cover one torpedo
              * from launch through its turn. Count the ones on screen. */
             if (addr >= 0x7be50 && addr <= 0x7bfd2) {
-                unsigned x = word(ram + pass.actor + 0x21), y = word(ram + pass.actor + 0x24);
-                if (x >= 96 && x < 416 && y >= 136 && y <= 375) ++volley;
+                int x = (int)word(ram + pass.actor + 0x21), y = word(ram + pass.actor + 0x24);
+                if (x >= 96 + frame_left() && x < 96 + frame_left() + (int)frame_w && y >= 136 && y <= 375) ++volley;
             }
             if (addr == 0x7c018 || addr == 0x7c05b || addr == 0x7c0c2) ++muzzle_bombs;
             ++slowdown_actors;
@@ -970,7 +994,7 @@ static void record_stop(const char *dir)
    "FRAME end" stops the run. "shot" saves that frame as a BMP in the data
    directory, as does the last frame of the run. */
 static const uint32_t *shot_source = pixels;
-static int shot_k = 1;                 /* shot_source is shot_k times 320x240 */
+static int shot_k = 1;                 /* shot_source is shot_k times shot_w x 240 */
 
 static void headless_shot(const char *dir, const char *name)
 {
@@ -985,10 +1009,10 @@ static void headless_shot(const char *dir, const char *name)
     memset(&info, 0, sizeof info);
     file.bfType = 0x4d42;
     file.bfOffBits = sizeof file + sizeof info;
-    size_t shot_bytes = sizeof pixels * (size_t)shot_k * (size_t)shot_k;
+    size_t shot_bytes = (size_t)shot_w * 240 * sizeof(uint32_t) * (size_t)shot_k * (size_t)shot_k;
     file.bfSize = (DWORD)(file.bfOffBits + shot_bytes);
     info.biSize = sizeof info;
-    info.biWidth = 320 * shot_k;
+    info.biWidth = (LONG)(shot_w * shot_k);
     info.biHeight = -240 * shot_k;
     info.biPlanes = 1;
     info.biBitCount = 32;
@@ -1004,10 +1028,37 @@ static void headless_shot(const char *dir, const char *name)
    to the surface and alternates both fire buttons; otherwise `fallback`. */
 static unsigned headless_boss_state; /* diagnostic witness, never game state */
 
-static unsigned headless_autopilot(unsigned fallback)
+static unsigned headless_autopilot(unsigned fallback, unsigned *edges)
 {
     static const unsigned boss_states[] = {0x45ba, 0x4614, 0x4640, 0x465a, 0x46a5, 0x46e4, 0x47cb,
                                            0x4811, 0x4837, 0x48a4, 0x49ab, 0x49ce, 0x4c19};
+    /* Outside the 0xb2e gameplay master emit single-frame coin and start
+       edges so scripted runs survive continue, game over and title on their
+       own. nonplay resets the same tick the scene returns to gameplay, so a
+       start edge can never land on a 0xb2e frame and latch a pause. */
+    static unsigned nonplay;
+    /* WORLD_AUTOPILOT_P2=1 (test-only): drive a player-two-only session â€”
+       start edge 0x02 and sub tracking via ram[0x92] instead of 0x90. */
+    static int p2_only = -1;
+    if (p2_only < 0) p2_only = getenv("WORLD_AUTOPILOT_P2") ? 1 : 0;
+    /* Truly dead sub states (blast + respawn wait) still need edges for the
+       continue prompt; 7C3B is a live entry hold that wants movement. */
+    unsigned p1 = word(ram + 0x90);
+    unsigned p1_state = p1 ? word(ram + p1) : 0;
+    int parked = p1_state == 0x7eb1 || p1_state == 0x7ee5;
+    if (word(ram + 0x80) != 0xb2e || (ram[0x28c] & 1) || parked) {
+        ++nonplay;
+        /* Coin chutes debounce over vblanks: service (system bit 4) needs
+           two consecutive held samples ((0x2bb&15)==3), chutes the 0101
+           pattern â€” single-frame edges can never produce either, so hold
+           service for two ticks, then issue a start edge. */
+        unsigned m = nonplay % 120;
+        *edges = (m == 60 || m == 61) ? 0x10 : m == 90 ? (p2_only ? 0x02 : 0x01) : 0;
+        return m == 96 ? 0x40 : 0;   /* pad fire edge: 0x2218 briefing needs
+                                        B742&0xF0, not a system bit */
+    }
+    nonplay = 0;
+    *edges = 0;
     unsigned boss = 0, actor = 0x400;
     for (unsigned steps = 0; steps < 512 && actor; ++steps) {
         if (word(ram + actor + 2) == 0x1000) {
@@ -1020,10 +1071,79 @@ static unsigned headless_autopilot(unsigned fallback)
         actor = next;
     }
     headless_boss_state = boss ? word(ram + boss) : 0;
-    unsigned sub = word(ram + 0x90);
+    unsigned sub = word(ram + (p2_only ? 0x92 : 0x90));
     unsigned phase = (unsigned)(ticks % 12);
     unsigned fire = phase < 4 ? 0x40 : (phase >= 6 && phase < 10) ? 0x80 : 0;
     if (!boss) {
+        /* Test-only: steer toward live pickup actors (7000:EA17 init and its
+           7EA62/7EB1C update states) so empirical collection events get
+           captured; keeps firing while chasing. */
+        unsigned pickup = 0;
+        actor = 0x400;
+        for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+            unsigned state = word(ram + actor);
+            if (state == 0xea17 || state == 0xea62 || state == 0xeb1c) pickup = actor;
+            unsigned next = word(ram + actor + 4);
+            if (next == actor || next == 0x400) break;
+            actor = next;
+        }
+        if (pickup) {
+            int px = (int16_t)(word(ram + pickup + 0x21) - word(ram + sub + 0x21));
+            int py = (int16_t)(word(ram + pickup + 0x24) - word(ram + sub + 0x24));
+            unsigned held = fire;
+            if (px > 6) held |= 0x01;
+            else if (px < -6) held |= 0x02;
+            if (py > 6) held |= 0x08;
+            else if (py < -6) held |= 0x04;
+            return held;
+        }
+        /* WORLD_AUTOPILOT_DODGE=1 (test-only): evade any actor with a nonzero
+           +0x0d contact flag inside a danger box around the sub â€” covers both
+           enemy projectiles and collision damage without classifying types. */
+        static int dodge = -1;
+        if (dodge < 0) dodge = getenv("WORLD_AUTOPILOT_DODGE") ? 1 : 0;
+        if (dodge) {
+            int ex = 0, ey = 0, threats = 0;
+            actor = 0x400;
+            for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+                if (actor != sub && actor != word(ram + 0x92) && ram[actor + 0x0d]) {
+                    int dx = (int16_t)(word(ram + actor + 0x21) - word(ram + sub + 0x21));
+                    int dy = (int16_t)(word(ram + actor + 0x24) - word(ram + sub + 0x24));
+                    if (dx > -0x30 && dx < 0x30 && dy > -0x30 && dy < 0x30) { ex += dx; ey += dy; ++threats; }
+                }
+                unsigned next = word(ram + actor + 4);
+                if (next == actor || next == 0x400) break;
+                actor = next;
+            }
+            if (threats) {
+                unsigned held = fire;
+                if (ex > 2) held |= 0x02;       /* threats right: move left */
+                else if (ex < -2) held |= 0x01;
+                else held |= 0x01;
+                if (ey > 2) held |= 0x04;
+                else if (ey < -2) held |= 0x08;
+                return held;
+            }
+        }
+        /* Test-only: when the stage-one boss's B5C73 kill-gate parts are up,
+           park so the up-missile spawn (sub_x+8 facing left) lands on the
+           part's line and hold the 0x40 weapon group. */
+        unsigned gate = 0;
+        actor = 0x400;
+        for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+            if (word(ram + actor + 2) == 0xb000 && word(ram + actor) == 0x5c73) gate = actor;
+            unsigned next = word(ram + actor + 4);
+            if (next == actor || next == 0x400) break;
+            actor = next;
+        }
+        if (gate) {
+            int aim = (int)word(ram + gate + 0x21) - 8 - (int)word(ram + sub + 0x21);
+            unsigned held = 0x40;
+            if (aim > 6) held |= 0x01;
+            else if (aim < -6) held |= 0x02;
+            else held |= 0x02;                  /* hold facing-left spawn line */
+            return held;
+        }
         /* Stage four's rising camera (0:3E29) moves only while a player is
            below its word 4C: steer there, mid-screen. */
         unsigned camera = 0;
@@ -1034,7 +1154,11 @@ static unsigned headless_autopilot(unsigned fallback)
             if (next == actor || next == 0x400) break;
             actor = next;
         }
-        if (!camera) return fallback;
+        /* Unguided play (stage intros, camera-locked arenas): hold right so
+           the sub clears entry gates that park a drifting sub against solid
+           terrain, keep firing into the scroll path, and weave vertically so
+           arena fights don't eat every hit at one depth. */
+        if (!camera) return fallback | 0x01 | fire | ((ticks / 70) & 1 ? 0x04 : 0x08);
         /* In the descent, sweep across the screen so an ice ceiling over
            one column cannot hold the sub below word 4C forever. */
         int column = word(ram + camera) == 0x3e6c ? 0x90 + 0x40 * (int)((ticks / 600) % 5) : 0x100;
@@ -1086,7 +1210,8 @@ static int restore_snapshot(const char *load_path)
 
 static void headless_run(const char *dir, const char *script_path, int timing_override)
 {
-    FILE *script = world_fopen(script_path, "r");
+    /* Binary mode keeps ftell/fseek byte-exact on any line ending. */
+    FILE *script = world_fopen(script_path, "rb");
     if (!script) {
         snprintf(failure, sizeof failure, "Cannot open the headless input script.");
         return;
@@ -1149,7 +1274,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
         const char *menu_shot = getenv("WORLD_MENU_SHOT");
         if (menu_shot && !menu_shot_done && ticks >= strtoul(menu_shot, NULL, 10)) {
             menu_shot_done = 1;
-            static uint32_t still[320*240];
+            static uint32_t still[WORLD_VIEW_MAX_WIDTH * 240];
             memcpy(still, pixels, sizeof still);
             static const unsigned pages[][4] = {{0,0,0,0},{1,0,0,1},{1,0,1,3},{1,1,1,1},{1,2,1,1},{2,0,0,0},{3,0,0,0},
                                                 {1,0,6,0},{1,2,3,0},{1,3,1,0},{1,3,9,0},{1,0,8,0},{1,3,4,0}};
@@ -1159,7 +1284,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 menu.tab = pages[i][1];
                 menu.row = pages[i][2];
                 memcpy(pixels, still, sizeof still);
-                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i);
+                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i, frame_w);
                 char name[32];
                 snprintf(name, sizeof name, "menu%u", i);
                 headless_shot(dir, name);
@@ -1170,7 +1295,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 menu.page = title_pages[i][0];
                 menu.row = title_pages[i][1];
                 memcpy(pixels, still, sizeof still);
-                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i);
+                world_menu_render(&menu, &settings, pixels, gfx1, 1500 + 400 * i, frame_w);
                 char name[32];
                 snprintf(name, sizeof name, "title%u", i);
                 headless_shot(dir, name);
@@ -1264,7 +1389,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 if (i) snprintf(preset, sizeof preset, "%s/%s", folder, world_gpu_preset_path[i - 1]);
                 snprintf(path, sizeof path, "%s/headless-crt%02u.bmp", dir, i);
                 DWORD started = GetTickCount();
-                if (!world_gpu_render_offscreen(pixels, preset, 0, 1920, 1080, big, error, sizeof error)) {
+                if (!world_gpu_render_offscreen(pixels, frame_w, preset, 0, 1920, 1080, big, error, sizeof error)) {
                     fprintf(stderr, "CRT preset %u (%s) failed: %s\n", i, i ? world_gpu_preset_name[i - 1] : "OFF", error);
                     continue;
                 }
@@ -1294,7 +1419,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             char path[4096];
             snprintf(path, sizeof path, "%s/headless-view-fit.bmp", dir);
             world_window_set_view(1, 0);
-            int ok = world_window_compose_bmp(pixels, 1920, 1080, path);
+            int ok = world_window_compose_bmp(pixels, frame_w, 1920, 1080, path);
             world_window_set_view(0, 0);
             if (!ok) { snprintf(failure, sizeof failure, "View composition failed"); break; }
         }
@@ -1328,8 +1453,23 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             at += script_base;
         }
         if (fields != 2) break;
-        unsigned input = autopilot ? headless_autopilot(held) : held;
-        if (!tick((uint16_t)~input, (uint16_t)~buttons)) break;
+        /* WORLD_STAGE_SEED=n (test-only): pins the level counter so a fresh
+           coin+start boots straight into stage n. Evidence runs only. */
+        static int stage_seed = -2;
+        if (stage_seed == -2) {
+            const char *e = getenv("WORLD_STAGE_SEED");
+            stage_seed = e ? (int)strtol(e, NULL, 0) : -1;
+        }
+        /* The frame validator requires word 84 to stay zero through the title
+           masters, so the seed only applies along the briefing chain that
+           hands it to start_world_stage at A81. */
+        if (stage_seed >= 0 && (word(ram + 0x80) == 0x2218 || word(ram + 0x80) == 0x2282
+                              || word(ram + 0x80) == 0xa81)) {
+            ram[0x84] = (uint8_t)stage_seed; ram[0x85] = 0;
+        }
+        unsigned input = held, edges = buttons;
+        if (autopilot) input = headless_autopilot(held, &edges);
+        if (!tick((uint16_t)~input, (uint16_t)~edges)) break;
         unsigned long before = ticks;
         ticks += elapsed_board_frames;
         /* WORLD_SCROLL_LOG=path: the playfield and background scroll at every
@@ -1345,30 +1485,84 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             for (unsigned long f = before; f < ticks; ++f)
                 fprintf(scroll_log, "%lu %u %u %u %u %u\n", f, word(ram + 0xb70a), word(ram + 0xb70c),
                         word(ram + 0xb70e), word(ram + 0xb710), (unsigned)(ticks - before));
-        if (trace && before / 1000 != ticks / 1000) {
+        /* WORLD_TRACE_EVERY=n (test-only) overrides the 1000-tick trace
+           interval so transient events (deaths, pickups) are captured. */
+        static unsigned trace_every;
+        if (!trace_every) {
+            const char *e = getenv("WORLD_TRACE_EVERY");
+            trace_every = e ? (unsigned)strtoul(e, NULL, 10) : 1000;
+            if (!trace_every) trace_every = 1000;
+        }
+        if (trace && before / trace_every != ticks / trace_every) {
             unsigned sub = word(ram + 0x90);
             unsigned cfg = word(ram + sub + 0x70);
-            fprintf(trace, "%lu stage %u B700 %04x 26E %04x 264 %04x sub %04x x %04x y %04x input %02x up %04x mid %04x down %04x\n",
-                    ticks, word(ram + 0x84), word(ram + 0xb700), word(ram + 0x26e), word(ram + 0x264),
+            fprintf(trace, "%lu stage %u B700 %04x 26E %04x 264 %04x 28C %04x 2B8 %04x 2AA %04x 262 %04x 80 %04x 2C4 %04x ba80 %04x ba84 %04x 282 %04x sub %04x x %04x y %04x input %02x up %04x mid %04x down %04x b742 %04x s44 %04x s46 %04x s48 %04x\n",
+                    ticks, word(ram + 0x84), word(ram + 0xb700), word(ram + 0x26e), word(ram + 0x264), word(ram + 0x28c),
+                    word(ram + 0x2b8), word(ram + 0x2aa), word(ram + 0x262), word(ram + 0x80), word(ram + 0x2c4),
+                    word(ram + 0xba80), word(ram + 0xba84), word(ram + 0x282),
                     word(ram + sub), word(ram + sub + 0x21), word(ram + sub + 0x24), input & 0xff,
-                    word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6));
+                    word(ram + cfg + 4), word(ram + cfg + 8), word(ram + cfg + 6),
+                    word(ram + 0xb742), word(ram + sub + 0x44), word(ram + sub + 0x46), word(ram + sub + 0x48));
+            /* WORLD_ACTOR_TRACE=1 (test-only): append the actor handler list to
+               the trace so boss phase transitions (wreck/destroyed states) can
+               be located by handler-column changes between samples. */
+            static int actor_trace = -1;
+            if (actor_trace < 0) actor_trace = getenv("WORLD_ACTOR_TRACE") ? 1 : 0;
+            if (actor_trace) {
+                unsigned actor = 0x400;
+                for (unsigned steps = 0; steps < 512 && actor; ++steps) {
+                    fprintf(trace, "    %04x %04x:%04x x %04x y %04x hp %04x\n",
+                            actor, word(ram + actor + 2), word(ram + actor),
+                            word(ram + actor + 0x21), word(ram + actor + 0x24),
+                            word(ram + actor + 0x26));
+                    unsigned next = word(ram + actor + 4);
+                    if (next == actor || next == 0x400) break;
+                    actor = next;
+                }
+                for (unsigned i = 0, end = word(ram + 0xaee6); i < end && i < 64; i += 2) {
+                    unsigned p = word(ram + 0xaee6 + 4 + i);
+                    if (!p) continue;
+                    fprintf(trace, "    P%04x %04x:%04x x %04x y %04x hp %04x\n",
+                            p, word(ram + p + 2), word(ram + p),
+                            word(ram + p + 0x21), word(ram + p + 0x24),
+                            word(ram + p + 0x26));
+                }
+                {
+                    unsigned p = word(ram + 0xba90);
+                    if (p) fprintf(trace, "    W%04x %04x:%04x x %04x y %04x hp %04x f4a %04x f60 %04x f66 %04x f68 %04x\n",
+                            p, word(ram + p + 2), word(ram + p),
+                            word(ram + p + 0x21), word(ram + p + 0x24),
+                            word(ram + p + 0x26), word(ram + p + 0x4a),
+                            word(ram + p + 0x60), word(ram + p + 0x66),
+                            word(ram + p + 0x68));
+                }
+                for (unsigned i = 0; i < 16; i += 2) {
+                    unsigned p = word(ram + 0x84fe + i);
+                    if (!p) continue;
+                    fprintf(trace, "    A%02x=%04x %04x:%04x x %04x y %04x hp %04x f60 %04x f66 %04x f68 %04x\n",
+                            i, p, word(ram + p + 2), word(ram + p),
+                            word(ram + p + 0x21), word(ram + p + 0x24),
+                            word(ram + p + 0x26), word(ram + p + 0x60),
+                            word(ram + p + 0x66), word(ram + p + 0x68));
+                }
+            }
         }
         draw();
         if(getenv("WORLD_LIGHT_CAPTURE")){
             static WorldLightScene capture;
-            static uint32_t readback[320*240];
+            static uint32_t readback[WORLD_VIEW_MAX_WIDTH * 240];
             char err[256]={0};
             scene_submit();
             world_scene_light_target(&capture);
             enhance(pixels,shown,(uint32_t)(ticks*133),1,1);
             if(shot){
-                if(!world_gpu_light_offscreen(&capture,shown,readback,err,sizeof err)){
+                if(!world_gpu_light_offscreen(&capture,shown,readback,frame_w,err,sizeof err)){
                     snprintf(failure,sizeof failure,"GPU capture: %.200s",err);
                     break;
                 }
                 char name[40];
                 snprintf(name,sizeof name,"lighting-%06lu",ticks);
-                shot_source=readback;headless_shot(dir,name);shot_source=pixels;
+                shot_source=readback;shot_w=frame_w;headless_shot(dir,name);shot_source=pixels;shot_w=frame_w;
                 /* WORLD_LIGHT_DUMP=1: keep the exact GPU inputs for offline benchmarks. */
                 if(getenv("WORLD_LIGHT_DUMP")){
                     char path[4096];
@@ -1541,6 +1735,57 @@ static void sound_power_on(void)
 
 /* Exit to menu: the whole board back to power-on, with the cabinet switches
    as they are set now. */
+/* The board ranks ten 16-byte records through a rotating pointer table.
+ * Store rows in display order. The two live player slots stay board-owned. */
+enum { SCORE_BYTES = 10 * 16 };
+static unsigned char saved_scores[SCORE_BYTES];
+static wchar_t score_path[4096];
+static int scores_active;
+
+static void load_scores(void)
+{
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, data_directory, -1, score_path, 4040);
+    scores_active = n > 0;
+    if (!scores_active) return;
+    wcscat(score_path, world_view_mode() == WORLD_VIEW_WIDE ? L"/scores-wide.dat" : L"/scores-arcade.dat");
+    FILE *f = _wfopen(score_path, L"rb");
+    unsigned char rows[SCORE_BYTES];
+    if (f) {
+        int ok = fread(rows, 1, sizeof rows, f) == sizeof rows && fgetc(f) == EOF && !ferror(f);
+        fclose(f);
+        for (unsigned i = 0; ok && i < 10; ++i) {
+            unsigned stage = word(rows + 16*i + 6);
+            if ((stage & 1) || stage > 12) ok = 0;
+        }
+        if (ok) memcpy(ram + 0x180, rows, sizeof rows);
+    }
+    memcpy(saved_scores, ram + 0x180, SCORE_BYTES);
+}
+
+static void save_scores(void)
+{
+    if (!scores_active) return;
+    unsigned char rows[SCORE_BYTES];
+    for (unsigned i = 0; i < 10; ++i) {
+        unsigned slot = word(ram + 0x240 + i*2);
+        if (slot < 0x180 || slot > 0x230 || (slot & 15)) return;
+        memcpy(rows + 16*i, ram + slot, 16);
+    }
+    if (!memcmp(rows, saved_scores, sizeof rows)) return;
+    wchar_t temp[4160];
+    swprintf(temp, sizeof temp / sizeof *temp, L"%ls.%lu.tmp", score_path, GetCurrentProcessId());
+    FILE *f = _wfopen(temp, L"wb");
+    if (f) {
+        int ok = fwrite(rows, 1, sizeof rows, f) == sizeof rows;
+        if (fclose(f) == 0 && ok && MoveFileExW(temp, score_path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            memcpy(saved_scores, rows, sizeof rows);
+            return;
+        }
+        DeleteFileW(temp);
+    }
+    fprintf(stderr, "Could not save the selected mode's scores.\n");
+}
+
 static void machine_reset(void)
 {
     set_cabinet_switches();
@@ -1629,6 +1874,14 @@ static int run_game(int argc, char **argv)
             headless = argv[i] + 11;
             continue;
         }
+        if (!strncmp(argv[i], "--mode=", 7)) {
+            if (!strcmp(argv[i] + 7, "wide")) world_view_set(WORLD_VIEW_WIDE);
+            else if (strcmp(argv[i] + 7, "arcade")) {
+                fprintf(stderr, "Unknown --mode=%s. Use arcade or wide.\n", argv[i] + 7);
+                return 1;
+            }
+            continue;
+        }
         if (strncmp(argv[i], "--timing=", 9) ||
             !world_timing_mode_parse(argv[i] + 9, &settings.timing_mode)) {
             fprintf(stderr, "Unknown native option %s. Use --timing=arcade or --timing=remove-slowdown.\n", argv[i]);
@@ -1652,6 +1905,12 @@ load_game_data:
         return 1;
     }
     if (!headless) set_cabinet_switches();      /* scripted runs keep the factory setting */
+    else if (getenv("WORLD_DIP")) {             /* test-only: "lives,difficulty" headless dip override */
+        unsigned dl = 1, dd = 2;
+        sscanf(getenv("WORLD_DIP"), "%u,%u", &dl, &dd);
+        settings.dip_lives = dl & 3; settings.dip_difficulty = dd & 3;
+        set_cabinet_switches();
+    }
     if (!world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4)) {
         if (!headless) MessageBoxA(NULL, "World startup checks failed. Re-import the World ROM archive.",
                                    "In The Hunt", MB_ICONERROR);
@@ -1691,7 +1950,7 @@ load_game_data:
         world_audio_output_close();
         return 1;
     }
-    world_window_set_display(settings.fullscreen, settings.window_scale);
+    world_window_set_display(settings.fullscreen, settings.window_scale, boss_snapshot ? world_view_width() : WORLD_VIEW_WIDE_WIDTH);
     apply_view();
     timeBeginPeriod(1);                 /* Sleep(1) must mean one millisecond for even pacing */
     LARGE_INTEGER rate, now;
@@ -1700,14 +1959,17 @@ load_game_data:
     double deadline = (double)now.QuadPart;
     const double arcade_period = (double)rate.QuadPart * WORLD_CLOCK_FRAME_PIXELS / WORLD_CLOCK_PIXEL_HZ;
     uint16_t pads, system;
-    static uint32_t paused_frame[320*240];
+    static uint32_t paused_frame[WORLD_VIEW_MAX_WIDTH * 240];
     unsigned previous_toggle = 0, hold_input = 0, counted = 0, presented = 0;
     int was_focused = 0;
     LONGLONG counted_from = now.QuadPart;
     double last_tick = deadline;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     world_menu_open_title(&menu, 0, 0, GetTickCount());
-    menu.title_hidden = 1;
+    static uint32_t selector_art[WORLD_VIEW_WIDE_WIDTH * 240];
+    world_setup_menu_art(selector_art, WORLD_VIEW_WIDE_WIDTH, 240);
+    menu.selector = 1;
+    int selector_row = -1, selector_pad = -1;
     if(boss_snapshot)menu.open=0;
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
@@ -1742,6 +2004,7 @@ load_game_data:
         /* WORLD_TEST_TITLE=1: START GAME, play, EXIT TO MENU, START GAME again,
            logging the game's master state; quits when done. */
         if (getenv("WORLD_TEST_TITLE")) {
+            if (menu.selector) menu_held = WORLD_MENU_ACCEPT;
             static unsigned phase;
             static unsigned long logged = 1;
             if (ticks / 60 != logged) {
@@ -1767,9 +2030,31 @@ load_game_data:
             world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
-            if (result & WORLD_MENU_START) {
-                /* The game reads its switches at power-on: changed ones need a fresh board. */
-                if (cabinet_switches() != world_dispatch_port4) machine_reset();
+            if (result & (WORLD_MENU_SELECT_ARCADE | WORLD_MENU_SELECT_WIDE)) {
+                world_view_set(result & WORLD_MENU_SELECT_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE);
+                machine_reset();
+                load_scores();
+                if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, world_view_width());
+                world_menu_open_title(&menu, title_held, gamepad, GetTickCount());
+                QueryPerformanceCounter(&now);
+                deadline = last_tick = (double)now.QuadPart;
+            } else if (menu.selector) {
+                /* The selector root is static between navigation events. */
+                if (menu.page || selector_row != (int)menu.row || selector_pad != gamepad) {
+                    memcpy(shown, selector_art, sizeof selector_art);
+                    world_menu_render(&menu, &settings, shown, gfx1, GetTickCount(), WORLD_VIEW_WIDE_WIDTH);
+                    selector_row = menu.page ? -1 : (int)menu.row;
+                    selector_pad = gamepad;
+                }
+                world_window_present(shown, 1, WORLD_VIEW_WIDE_WIDTH);
+                world_window_wait_vblank();
+                continue;
+            } else if (result & WORLD_MENU_START) {
+                if (cabinet_switches() != world_dispatch_port4) {
+                    save_scores();
+                    machine_reset();
+                    load_scores();
+                }
                 starting = 1;
                 start_from = ticks;
                 hold_input = 1;
@@ -1778,9 +2063,13 @@ load_game_data:
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
             if (result & WORLD_MENU_TITLE) {
-                machine_reset();
+                save_scores();
+                scores_active = 0;
                 starting = 0;
                 world_menu_open_title(&menu, menu_held, gamepad, GetTickCount());
+                menu.selector = 1;
+                selector_row = -1;
+                if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, WORLD_VIEW_WIDE_WIDTH);
             }
             if (!menu.open || menu.title) {
                 hold_input = 1;
@@ -1843,7 +2132,7 @@ load_game_data:
                 if (pads != 0xffff || ((uint16_t)~system & 15) || menu_held) pads = system = 0xffff;
                 else hold_input = 0;
             }
-            if(boss_snapshot)pads=(uint16_t)~headless_autopilot(0xc1);
+            if(boss_snapshot){unsigned e;pads=(uint16_t)~headless_autopilot(0xc1,&e);}
             if (!play_tick(pads, system)) goto end_loop;
             last_tick = deadline;
             deadline += period * elapsed_board_frames;
@@ -1856,6 +2145,7 @@ load_game_data:
         if (pacing_log) QueryPerformanceCounter(&after_tick);
         if (advanced) {
             capture_video();
+            if (frame_w == WORLD_VIEW_WIDE_WIDTH) draw_captured_pixels();
             scene_submit();
         }
         /* Hold original multi-vblank slowdown frames. On extra display
@@ -1885,6 +2175,7 @@ load_game_data:
             if (world_gpu_frame_statistics(&shown_present,&shown_refresh,&made))
                 fprintf(pacing_log,"dxgi %u %u %u\n",shown_present,shown_refresh,made);
         }
+        if (word(ram + 0x80) == 0xc7f8) save_scores();
         world_audio_output_pump();
         world_window_wait_vblank();
         QueryPerformanceCounter(&now);
@@ -1897,6 +2188,7 @@ load_game_data:
         }
     }
 end_loop:
+    save_scores();
     if (pacing_log) fclose(pacing_log);
     timeEndPeriod(1);
     world_window_close();

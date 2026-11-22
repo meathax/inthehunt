@@ -143,15 +143,17 @@ UINT64 upload_size(ID3D12Device *device, ID3D12Resource *dst)
 
 static bool ambient_borders;
 
-void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h)
+void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h, unsigned source_w)
 {
+    /* The widescreen session's visible aperture is exactly 16:9. */
+    const float aspect = source_w == 428 ? 16.0f / 9.0f : 4.0f / 3.0f;
     gdl::post::Settings &s = chain.settings();
     s.source_mode = gdl::post::SourceMode::AsIs;
-    s.base_width = W;
+    s.base_width = source_w;
     s.base_height = H;
-    s.base_aspect = 4.0f / 3.0f;
+    s.base_aspect = aspect;
     s.integer_scale = scaling == 0;
-    s.display_aspect = scaling == 2 && out_h ? (float)out_w / (float)out_h : 4.0f / 3.0f;
+    s.display_aspect = scaling == 2 && out_h ? (float)out_w / (float)out_h : aspect;
     s.passthrough_filter = gdl::post::PassThroughFilter::Nearest;
     s.keep_background = true;
     s.ambient_borders = ambient_borders;
@@ -212,6 +214,7 @@ struct Presenter {
     bool busy = false;
     bool shown = true;
     int picture_k = 1;
+    unsigned picture_w = W;
     ~Presenter() { DeleteCriticalSection(&lock); }
     double refresh_hz = 0.0;
     double last_source_time = 0.0;
@@ -257,7 +260,7 @@ struct Presenter {
             height = h;
         }
         if (!buffers()) release_buffers();
-        if (chain) apply(*chain, scaling, beam, width, height);
+        if (chain) apply(*chain, scaling, beam, width, height, picture_w);
     }
 };
 
@@ -415,7 +418,7 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
     p->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(p->fence.put()));
     p->event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!p->rtv_heap || !p->cmd || !p->fence || !p->event || !p->buffers() ||
-        FAILED(texture(p->device.get(), W, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, p->picture.put()))) {
+        FAILED(texture(p->device.get(), p->picture_w, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, p->picture.put()))) {
         say(error, error_size, "Could not create the presentation resources.");
         return 0;
     }
@@ -428,7 +431,7 @@ extern "C" int world_gpu_open(void *parent_window, char *error, size_t error_siz
         say(error, error_size, e.what());
         return 0;
     }
-    apply(*p->chain, p->scaling, p->beam, p->width, p->height);
+    apply(*p->chain, p->scaling, p->beam, p->width, p->height, p->picture_w);
     if (!p->transport.init(p->device.get(),p->queue.get())) fprintf(stderr,"GPU transport unavailable; using CPU lighting.\n");
     else if(getenv("WORLD_PACING_LOG")) fprintf(stderr,"GPU path transport ready.\n");
     gpu = p.release();
@@ -565,7 +568,7 @@ extern "C" void world_gpu_set_options(int scaling, int beam, int vsync)
     gpu->scaling = scaling;
     gpu->beam = beam;
     gpu->vsync = vsync;
-    apply(*gpu->chain, scaling, beam, gpu->width, gpu->height);
+    apply(*gpu->chain, scaling, beam, gpu->width, gpu->height, gpu->picture_w);
 }
 
 
@@ -641,23 +644,26 @@ extern "C" void world_gpu_wait_frame(void)
     }
 }
 
-extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_time)
+extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_time, unsigned source_w)
 {
     Presenter *p = gpu;
     if (!p) return;
     if (k < 1) k = 1;
-    if (k != p->picture_k) {
+    if (source_w != 428) source_w = W;
+    if (k != p->picture_k || source_w != p->picture_w) {
         /* The source picture changed size: new texture and upload buffers. */
         p->wait_all();
         p->picture.reset();
         for (auto &u : p->picture_upload) u.reset();
-        if (FAILED(texture(p->device.get(), (UINT)(W * k), (UINT)(H * k), D3D12_RESOURCE_FLAG_NONE,
+        if (FAILED(texture(p->device.get(), (UINT)(source_w * k), (UINT)(H * k), D3D12_RESOURCE_FLAG_NONE,
                            D3D12_RESOURCE_STATE_COPY_DEST, p->picture.put())))
             return;
         UINT64 bytes = upload_size(p->device.get(), p->picture.get());
         for (auto &u : p->picture_upload)
             buffer(p->device.get(), D3D12_HEAP_TYPE_UPLOAD, bytes, D3D12_RESOURCE_STATE_GENERIC_READ, u.put());
         p->picture_k = k;
+        p->picture_w = source_w;
+        apply(*p->chain, p->scaling, p->beam, p->width, p->height, source_w);
     }
     if (!p->picture) return;
     {
@@ -668,7 +674,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
         LeaveCriticalSection(&p->lock);
         if (ready) {
             p->chain->install_preset(std::move(ready));
-            apply(*p->chain, p->scaling, p->beam, p->width, p->height);
+            apply(*p->chain, p->scaling, p->beam, p->width, p->height, p->picture_w);
         }
     }
     RECT rc;
@@ -702,12 +708,13 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
 
     ID3D12Resource *fresh = nullptr;
     if (frame) {
-        upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame, (UINT)(W * p->picture_k),
-               (UINT)(H * p->picture_k), !p->light_frame);
+        upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame,
+               (UINT)(p->picture_w * p->picture_k), (UINT)(H * p->picture_k), !p->light_frame);
         if(p->light_frame && p->transport.ready)
             if (!p->transport.record(cmd,f,k,*p->light_frame,p->picture_upload[f].get(),p->picture.get())) {
                 p->transport.ready=false;
-                upload(p->device.get(),cmd,p->picture_upload[f].get(),p->picture.get(),frame,W*k,H*k);
+                upload(p->device.get(),cmd,p->picture_upload[f].get(),p->picture.get(),frame,
+                       (UINT)(p->picture_w*k),(UINT)(H*k));
             }
         D3D12_RESOURCE_BARRIER t = barrier(p->picture.get(), D3D12_RESOURCE_STATE_COPY_DEST,
                                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -727,7 +734,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     timing.source_time = source_time;
     timing.span = span;
     if (fresh && !p->beam && p->chain->preset_path().empty())
-        p->chain->present_pixels(cmd,fresh,W*k,H*k,out,p->camera_offsets);
+        p->chain->present_pixels(cmd,fresh,(UINT)(p->picture_w*k),(UINT)(H*k),out,p->camera_offsets);
     else
         p->chain->frame(cmd, fresh, out, timing);
     D3D12_RESOURCE_BARRIER t = barrier(target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -760,7 +767,8 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     p->last_present = now;
 }
 
-static int render_offscreen(const float *offsets,const WorldLightScene *lighting, const uint32_t *frame, const char *preset, int scaling, unsigned width,
+static int render_offscreen(const float *offsets,const WorldLightScene *lighting, const uint32_t *frame, unsigned source_w,
+                            const char *preset, int scaling, unsigned width,
                                           unsigned height, uint32_t *out_pixels, char *error, size_t error_size)
 {
     Com<IDXGIFactory4> factory;
@@ -775,7 +783,7 @@ static int render_offscreen(const float *offsets,const WorldLightScene *lighting
     device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(alloc.put()));
     device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.get(), nullptr, IID_PPV_ARGS(cmd.put()));
     device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.put()));
-    texture(device.get(), W, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, picture.put());
+    texture(device.get(), source_w, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, picture.put());
     texture(device.get(), width, height, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_STATE_RENDER_TARGET, target.put());
     if (!alloc || !cmd || !fence || !picture || !target) { say(error, error_size, "Could not create resources."); return 0; }
     buffer(device.get(), D3D12_HEAP_TYPE_UPLOAD, upload_size(device.get(), picture.get()), D3D12_RESOURCE_STATE_GENERIC_READ, picture_upload.put());
@@ -800,9 +808,9 @@ static int render_offscreen(const float *offsets,const WorldLightScene *lighting
     }
     std::string why;
     if (preset && *preset && !chain->set_preset(preset, &why)) { say(error, error_size, why.c_str()); return 0; }
-    apply(*chain, scaling, 0, width, height);
+    apply(*chain, scaling, 0, width, height, source_w);
     chain->settings().keep_background = false;
-    upload(device.get(), cmd.get(), picture_upload.get(), picture.get(), frame, W, H);
+    upload(device.get(), cmd.get(), picture_upload.get(), picture.get(), frame, source_w, H);
     GpuTransport transport;
     if (lighting && (!transport.init(device.get()) ||
         !transport.record(cmd.get(),0,1,*lighting,picture_upload.get(),picture.get()))) {
@@ -828,7 +836,7 @@ static int render_offscreen(const float *offsets,const WorldLightScene *lighting
             alloc->Reset();
             cmd->Reset(alloc.get(), nullptr);
         }
-        if(offsets)chain->present_pixels(cmd.get(),picture.get(),W,H,out,offsets);
+        if(offsets)chain->present_pixels(cmd.get(),picture.get(),source_w,H,out,offsets);
         else chain->frame(cmd.get(),picture.get(),out);
     }
     t = barrier(target.get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -939,20 +947,20 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
     return 1;
 }
 
-extern "C" int world_gpu_render_offscreen(const uint32_t *frame,const char *preset,int scaling,
+extern "C" int world_gpu_render_offscreen(const uint32_t *frame,unsigned source_w,const char *preset,int scaling,
                                           unsigned width,unsigned height,uint32_t *out,char *error,size_t size)
 {
-    return render_offscreen(nullptr,nullptr,frame,preset,scaling,width,height,out,error,size);
+    return render_offscreen(nullptr,nullptr,frame,source_w,preset,scaling,width,height,out,error,size);
 }
 
 extern "C" int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
-                                         char *error,size_t size)
+                                         unsigned source_w,char *error,size_t size)
 {
-    return render_offscreen(nullptr,scene,pixels,"",0,W,H,out,error,size);
+    return render_offscreen(nullptr,scene,pixels,source_w,"",0,W,H,out,error,size);
 }
 
 extern "C" int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
-                                          unsigned scale,char *error,size_t size)
+                                          unsigned source_w,unsigned scale,char *error,size_t size)
 {
-    return render_offscreen(offsets,nullptr,pixels,"",0,W*scale,H*scale,out,error,size);
+    return render_offscreen(offsets,nullptr,pixels,source_w,"",0,source_w*scale,H*scale,out,error,size);
 }

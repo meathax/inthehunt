@@ -145,6 +145,18 @@ static void load_art(Setup *s)
     if(SUCCEEDED(initialized)) CoUninitialize();
 }
 
+void world_setup_menu_art(uint32_t *pixels, unsigned width, unsigned height)
+{
+    Setup s = {0};
+    load_art(&s);
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x)
+            pixels[y * width + x] = s.art ? 0xff000000u |
+                ((uint32_t *)s.art)[(y * s.art_height / height) * s.art_width + x * s.art_width / width]
+                : 0xff0b2638;
+    free(s.art);
+}
+
 static void label(HDC dc, const wchar_t *text, int x, int y, int w, int h, int size, COLORREF color, int bold)
 {
     HFONT font = CreateFontW(-size, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, 0, 0, 0,

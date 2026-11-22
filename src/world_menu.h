@@ -19,12 +19,15 @@ enum {
     WORLD_MENU_TIMING = 32,         /* timing_mode changed */
     WORLD_MENU_SAVE = 64,           /* persist settings (on close) */
     WORLD_MENU_VIEW = 128,          /* scaling, v-sync, frame rate, enhancements or cabinet switches changed */
-    WORLD_MENU_START = 256,         /* title menu: start a game */
-    WORLD_MENU_TITLE = 512          /* pause menu: end this game and return to the title menu */
+    WORLD_MENU_START = 256,         /* title menu: start the arcade game */
+    WORLD_MENU_TITLE = 512,         /* pause menu: end this game and return to the title menu */
+    WORLD_MENU_SELECT_ARCADE = 2048,
+    WORLD_MENU_SELECT_WIDE = 1024    /* title menu: start the widescreen session */
 };
 
 typedef struct {
     unsigned open, page, tab, row, rows[4];
+    unsigned selector;
     unsigned title;                 /* the title menu (start, options, exit) rather than the pause menu */
     unsigned previous, repeat_buttons, gamepad, dirty;
     unsigned peek;                  /* the menu is hidden while the preview button is held */
@@ -39,12 +42,14 @@ void world_menu_open_title(WorldMenu *menu, unsigned held, int gamepad, uint32_t
 void world_menu_title_activity(WorldMenu *menu, unsigned held, int activity, int gamepad, uint32_t now_ms);
 unsigned world_menu_update(WorldMenu *menu, WorldSettings *settings, unsigned held,
                            int gamepad, uint32_t now_ms);
-/* canvas: the 320x240 ARGB game frame, replaced by the menu over it.
+/* canvas: the ARGB game frame, canvas_w columns wide (320 arcade, 428 in a
+ * widescreen session), replaced by the menu over it.
  * gfx1 supplies the game's own 8x8 and 16x16 lettering. */
 int world_menu_main_title(const WorldMenu *menu);
-void world_menu_gpu_title(const WorldMenu *menu, uint32_t *pixels, const uint8_t *gfx1, uint32_t now_ms);
+void world_menu_gpu_title(const WorldMenu *menu, uint32_t *pixels, const uint8_t *gfx1, uint32_t now_ms,
+                          unsigned canvas_w);
 void world_menu_render(const WorldMenu *menu, const WorldSettings *settings,
-                       uint32_t *canvas, const uint8_t *gfx1, uint32_t now_ms);
+                       uint32_t *canvas, const uint8_t *gfx1, uint32_t now_ms, unsigned canvas_w);
 
 /* Small 5x7 host lettering kept for the achievement view. */
 void world_menu_draw_text(uint32_t *pixels, unsigned width, unsigned height,

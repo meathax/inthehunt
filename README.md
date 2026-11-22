@@ -12,8 +12,13 @@ Irem’s 1993 submarine shooter runs natively on Windows using your own MAME ROM
 | --- | --- |
 | ![In the Hunt title screen and main menu](artwork/screenshots/title.png) | ![Lighting in the ice field, harbour, waterfront, caverns, ruins and steelworks](artwork/screenshots/lighting-stages.png) |
 
+| Mode selection | Widescreen gameplay |
+| --- | --- |
+| ![Arcade and Widescreen selector](artwork/screenshots/mode-select.png) | ![Widescreen Ice Cavern gameplay](artwork/screenshots/widescreen-play.png) |
+
 ## What the PC port adds
 
+- **Arcade and Widescreen.** Choose the original 4:3 game or expanded 16:9 gameplay at launch. Each mode keeps its own high scores. Choose Play to start, or leave the menu idle for five seconds to watch the attract sequence.
 - **Optional enhanced effects.** Pick a lighting preset or tune effects individually, including bow lamps, dynamic shadows, light shafts, particles and water caustics.
 - **Underwater stereo.** Hear positional weapons, submarine motors, machinery and stage ambience. Adjust music, effects and ambience levels or enable Reduced Bass.
 - **PC display options.** Choose exact arcade frame timing or smooth camera scrolling, and select from optional Libretro CRT presets.

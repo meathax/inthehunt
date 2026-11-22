@@ -50,6 +50,10 @@ typedef struct {
     int frac[3];                 /* true scroll beyond the whole pixel, 1/256 px, per layer */
     int lamp[2][3]; /* native bow x, y, facing; zero facing disables */
     unsigned scene_id;           /* changes on a scene cut (no in-between frames across it) */
+    /* Session view: columns in the raster and the legacy screen X at
+     * raster column 0 (0 arcade, -54 widescreen). */
+    unsigned width;
+    int left;
 } WorldSceneFrame;
 
 #include "world_weapon_light.h"

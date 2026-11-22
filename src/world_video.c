@@ -28,7 +28,7 @@ uint8_t world_video_sprite_pen(const uint8_t *gfx2, unsigned code, unsigned x, u
 
 WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1,
                                       const WorldVideoLayer layers[3], uint16_t video_control,
-                                      unsigned x, unsigned y)
+                                      int x, unsigned y)
 {
     WorldVideoPixel pixel = { 0, 0 };
     for (int layer = 2; layer >= 0; --layer) {
@@ -41,7 +41,8 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
             scroll = word(tiles + 0xf400 + layer * 0x400 + sy * 2);
         unsigned wide = master & 4;
         unsigned columns = wide ? 128 : 64;
-        unsigned sx = x + 80 + scroll - 2 * layer + (wide ? 256 : 0);
+        /* sx stays non-negative for any supported view (x >= -54). */
+        unsigned sx = (unsigned)(x + 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
         unsigned entry = (master & 3) * 0x4000 +
                          ((sy / 8) * columns + ((sx / 8) & (columns - 1))) * 4;
         const uint8_t *tile = tiles + (entry & 0xffff);
@@ -58,28 +59,32 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
     return pixel;
 }
 
-static void sprite_row(uint16_t output[320], uint8_t priority[320], const uint8_t *gfx2,
+static void sprite_row(uint16_t *output, uint8_t *priority, const uint8_t *gfx2,
                        unsigned code, unsigned local_y, int left, int flip_x,
-                       unsigned bank, int behind)
+                       unsigned bank, int behind, int clip_left, int clip_right)
 {
     for (int col = 0; col < 16; ++col) {
         int x = left + col;
-        if (x < 0 || x >= 320 || priority[x] == 2) continue;
+        if (x < clip_left || x >= clip_right) continue;
+        unsigned slot = (unsigned)(x - clip_left);
+        if (priority[slot] == 2) continue;
         unsigned pen = world_video_sprite_pen(gfx2, code, flip_x ? 15 - col : col, local_y);
         if (!pen) continue;
-        if (!behind || !priority[x]) output[x] = (uint16_t)(bank * 16 + pen);
+        if (!behind || !priority[slot]) output[slot] = (uint16_t)(bank * 16 + pen);
         /* The first opaque sprite pixel owns this position, even behind a tile. */
-        priority[x] = 2;
+        priority[slot] = 2;
     }
 }
 
-void world_video_scanline(uint16_t output[320], unsigned y, const uint8_t *tiles,
+void world_video_scanline(uint16_t *output, unsigned y, const uint8_t *tiles,
                           const uint8_t *gfx1, const uint8_t *gfx2, const uint8_t *sprite_buffer,
-                          const WorldVideoLayer layers[3], uint16_t video_control)
+                          const WorldVideoLayer layers[3], uint16_t video_control,
+                          unsigned width, int left)
 {
-    uint8_t priority[320];
-    for (unsigned x = 0; x < 320; ++x) {
-        WorldVideoPixel pixel = world_video_playfields(tiles, gfx1, layers, video_control, x, y);
+    uint8_t priority[512];
+    int right = left + (int)width;
+    for (unsigned x = 0; x < width; ++x) {
+        WorldVideoPixel pixel = world_video_playfields(tiles, gfx1, layers, video_control, left + (int)x, y);
         output[x] = pixel.palette_index;
         priority[x] = pixel.sprite_priority;
     }
@@ -103,14 +108,14 @@ void world_video_scanline(uint16_t output[320], unsigned y, const uint8_t *tiles
         unsigned bank = (attr & (independent_priority ? 0x7f : 0xff)) |
                         ((video_control & 0x8000) ? 0x100 : 0);
         int behind = !independent_priority || !(attr & 0x80);
-        int left = (int)((word(entry + 6) - 16u) & 511) - 80;
+        int sprite_left = (int)((word(entry + 6) - 16u) & 511) - 80;
         for (unsigned i = 0; i < columns; ++i) {
             unsigned display_col = flip_x ? columns - 1 - i : i;
-            int xpos = left + (int)display_col * 16;
-            if (xpos < 320 && xpos > -16)
-                sprite_row(output, priority, gfx2, code, local_y, xpos, flip_x, bank, behind);
+            int xpos = sprite_left + (int)display_col * 16;
+            if (xpos < right && xpos > left - 16)
+                sprite_row(output, priority, gfx2, code, local_y, xpos, flip_x, bank, behind, left, right);
             if (xpos >= 497)
-                sprite_row(output, priority, gfx2, code, local_y, xpos - 512, flip_x, bank, behind);
+                sprite_row(output, priority, gfx2, code, local_y, xpos - 512, flip_x, bank, behind, left, right);
             code += 8;
         }
     }

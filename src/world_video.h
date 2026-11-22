@@ -18,16 +18,20 @@ typedef struct {
     uint8_t sprite_priority; /* nonzero if any front-half tile pen blocks low-priority sprites */
 } WorldVideoPixel;
 
-/* x and y are unflipped picture coordinates in the original 320x240 viewport.
- * Layer 0 is nearest the viewer. Pass the control words active on this line. */
+/* x and y are unflipped picture coordinates. x is signed: a widescreen view
+ * samples legacy coordinates below zero on its left wing. Layer 0 is nearest
+ * the viewer. Pass the control words active on this line. */
 WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1,
                                       const WorldVideoLayer layers[3], uint16_t video_control,
-                                      unsigned x, unsigned y);
-/* Draw one visible scanline, including the DMA-buffered 2 KiB sprite list.
- * Supply active registers/VRAM for this line so raster IRQ changes are retained. */
-void world_video_scanline(uint16_t output[320], unsigned y, const uint8_t *tiles,
+                                      int x, unsigned y);
+/* Draw one visible scanline of `width` pixels, including the DMA-buffered
+ * 2 KiB sprite list. Raster column 0 of output is legacy picture coordinate
+ * `left` (0 for the arcade viewport, -54 for widescreen). Supply active
+ * registers/VRAM for this line so raster IRQ changes are retained. */
+void world_video_scanline(uint16_t *output, unsigned y, const uint8_t *tiles,
                           const uint8_t *gfx1, const uint8_t *gfx2, const uint8_t *sprite_buffer,
-                          const WorldVideoLayer layers[3], uint16_t video_control);
+                          const WorldVideoLayer layers[3], uint16_t video_control,
+                          unsigned width, int left);
 
 /* Expand a hardware xBGR555 palette word to opaque ARGB8888. */
 uint32_t world_video_rgb(uint16_t palette_word);

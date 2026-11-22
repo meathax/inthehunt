@@ -40,10 +40,11 @@ int world_gpu_set_preset(const char *path, char *error, size_t error_size);
 int world_gpu_preset_status(char *message, size_t size);
 /* scaling: 0 integer, 1 fit 4:3, 2 stretch. */
 void world_gpu_set_options(int scaling, int beam, int vsync);
-/* One display refresh. frame is the ARGB picture, k times 320x240, when it
- * changed since the last call (else NULL). source_time counts emulated refreshes
- * (game frames plus the fraction elapsed), for the beam simulator. */
-void world_gpu_present(const uint32_t *frame, int k, double source_time);
+/* One display refresh. frame is the ARGB picture, k times source_w x 240
+ * (source_w 320 arcade, 428 widescreen), when it changed since the last call
+ * (else NULL). source_time counts emulated refreshes (game frames plus the
+ * fraction elapsed), for the beam simulator. */
+void world_gpu_present(const uint32_t *frame, int k, double source_time, unsigned source_w);
 /* Measured display refresh rate (0 until known). */
 int world_gpu_request_vrr(int enable);
 double world_gpu_refresh_hz(void);
@@ -58,14 +59,15 @@ int world_gpu_frame_statistics(unsigned *present_count, unsigned *present_refres
 /* Headless: render frame through preset (path or "") at width x height into
  * out (ARGB). Creates and releases its own device. */
 int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
-                               unsigned scale,char *error,size_t size);
+                               unsigned source_w,unsigned scale,char *error,size_t size);
 /* VRR was requested but the display kept its fixed refresh; vsync is used. */
 int world_gpu_vrr_failed(void);
 /* Probe VRR again (after a display or mode change). */
 void world_gpu_retry_vrr(void);
 /* Fill the bars beside the picture with a dim blur of its edges (else black). */
 void world_gpu_set_ambient_borders(int on);
-int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,char *error,size_t size);
+int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
+                              unsigned source_w,char *error,size_t size);
 /* Developer benchmark: on one device, rebuild and shade each captured k=1
    scene `runs` times with each shader variant (NULL source = built-in),
    interleaved after a warm-up. pass_ms and shaded are indexed
@@ -74,7 +76,7 @@ int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixel
 int world_gpu_light_benchmark(const WorldLightScene *const *scenes,const uint32_t *const *pixels,
                               unsigned count,const char *const *sources,unsigned variants,unsigned runs,
                               double (*pass_ms)[8],uint32_t *const *shaded,char *error,size_t size);
-int world_gpu_render_offscreen(const uint32_t *frame, const char *preset, int scaling,
+int world_gpu_render_offscreen(const uint32_t *frame, unsigned source_w, const char *preset, int scaling,
                                unsigned width, unsigned height, uint32_t *out,
                                char *error, size_t error_size);
 #ifdef __cplusplus
