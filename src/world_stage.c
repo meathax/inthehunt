@@ -6,15 +6,34 @@
 
 uint16_t world_spawn_child(uint8_t *, uint16_t, uint16_t);
 
-/* Map-anchored kinds: their authored X is a world coordinate (or unused),
- * never a screen-edge entrance, so widescreen must not shift it.
- * 0000:da13/db86 write tilemap structures (update_scenery); a000:8309 is a
- * scroll-locked decoration. See docs/widescreen-geometry.md. */
-static int world_anchored_kind(uint16_t kind)
+/* These stage actors paint the map or follow an authored location. Their
+ * spawn field is relative to the camera at the scheduled trigger. */
+static int world_anchored_kind(uint16_t segment, uint16_t kind)
 {
-    /* EC04 carries the bridge weak point and repaints a fixed section of
-       terrain on collapse. Its offscreen spawn is a world-space pivot. */
-    return kind == 0xda13 || kind == 0xdb86 || kind == 0x8309 || kind == 0xec04;
+    switch (((uint32_t)segment << 4) + kind) {
+    case 0x0da13: case 0x0daa9: case 0x0db86: case 0x0dbf3: /* tile animation */
+    case 0x1e800: case 0x1e84d: /* fixed scenery and surface target */
+    case 0x1e9d2: case 0x1eace: /* breakable structures and rubble */
+    case 0x1f1ba: case 0x1f66d: /* bridge sections and building windows */
+    case 0x1ec04:               /* bridge weak point */
+    case 0x7704a:               /* gate and player stop */
+    case 0x7711d: case 0x77187: /* far-layer animation and background life */
+    case 0x77239: case 0x772a0: /* near-layer blocks and egg emitter */
+    case 0x7c458:               /* lift and its four shaft shutters */
+    case 0x7a54c:               /* scroll-triggered background animation */
+    case 0x7c312:               /* stage-six scenery */
+    case 0x7df0e:               /* gun base and attached gun */
+    case 0x7e41e: case 0x7e817: /* hazards tied to a scroll-relative origin */
+    case 0xa8309:               /* scroll-locked decoration */
+    case 0xaf1d4: case 0xaf95d: /* destructible scenery */
+    case 0xb18cb:               /* bubble vent */
+    case 0xba0f4:               /* fixed salvo gun and its wreck */
+    case 0xbb92b:               /* freeze launcher and its beam */
+    case 0xbccac:               /* mounted turret */
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 static uint16_t word(const uint8_t *p, uint16_t a)
@@ -31,7 +50,7 @@ static void put(uint8_t *p, uint16_t a, uint16_t value)
 static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
                               uint16_t flags, int late)
 {
-    if (world_view_width() == WORLD_VIEW_ARCADE_WIDTH || world_anchored_kind(kind))
+    if (world_view_width() == WORLD_VIEW_ARCADE_WIDTH || world_anchored_kind(segment, kind))
         return x - late;
     const int left = 96 - WORLD_VIEW_WING, right = left + WORLD_VIEW_WIDE_WIDTH;
     /* Stage two's paired submarines straddle the old right boundary.

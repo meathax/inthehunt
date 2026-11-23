@@ -19,6 +19,21 @@ uint16_t world_spawn_child(uint8_t *ram, uint16_t parent, uint16_t kind)
     return 0x500;
 }
 
+/* Original stage routines whose actors share the map's coordinate system. */
+static int fixed_stage_object(unsigned segment, unsigned kind)
+{
+    static const unsigned fixed[] = {
+        0x0da13, 0x0daa9, 0x0db86, 0x0dbf3,
+        0x1e800, 0x1e84d, 0x1e9d2, 0x1eace, 0x1ec04, 0x1f1ba, 0x1f66d,
+        0x7704a, 0x7711d, 0x77187, 0x77239, 0x772a0, 0x7a54c, 0x7c312,
+        0x7c458, 0x7df0e, 0x7e41e, 0x7e817, 0xa8309, 0xaf1d4, 0xaf95d,
+        0xb18cb, 0xba0f4, 0xbb92b, 0xbccac,
+    };
+    for (unsigned i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i)
+        if (segment * 16 + kind == fixed[i]) return 1;
+    return 0;
+}
+
 /* Drain each actual ROM row once, including gated rows and late retries.
    Only the pool allocation is stubbed. Coordinates come from the game. */
 static unsigned sweep_rows(unsigned stage, unsigned mode)
@@ -55,8 +70,9 @@ static unsigned sweep_rows(unsigned stage, unsigned mode)
             else if (segment == 0xb000 && kind == 0x1c16 && (flags & 0x0e00) == 0x0600 &&
                      x >= 96 && x < 416)
                 assert(actual - 16 >= 470);
-            else if ((int16_t)x >= 416 && kind != 0xda13 && kind != 0xdb86 &&
-                     kind != 0x8309 && kind != 0xec04)
+            else if (fixed_stage_object(segment, kind))
+                assert((uint16_t)(trigger + late + actual) == (uint16_t)(trigger + x));
+            else if ((int16_t)x >= 416)
                 assert(actual >= 470);
         }
     }
