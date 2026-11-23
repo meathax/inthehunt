@@ -1,21 +1,15 @@
 #include <algorithm>
 #include "world_gpu_transport_shader.h"
-static_assert(offsetof(WorldLightScene,water_grade)==82900 && offsetof(WorldLightScene,ice_coverage)==82916);
-static_assert(offsetof(WorldLightScene,sky_stop)==102116);
-static_assert(offsetof(WorldLightScene,light_bins)==81300);
-static_assert(offsetof(WorldEffectBatch,mirror)==5336 && offsetof(WorldEffectBatch,ocean_rows)==43736 && offsetof(WorldEffectBatch,nodes)==43768 && sizeof(WorldEffectNode)==32);
-
-static_assert(offsetof(WorldLightScene,point_coverage)==102492);
-static_assert(offsetof(WorldLightScene,strengths)==428940 && offsetof(WorldEffectBatch,playfield_scroll)==4820);
+static_assert(sizeof(WorldEffectNode)==32);
 
 // Close single-pixel stipple holes in each material independently. Four
 // native pixels and both materials are processed together in each byte.
-static void pack_point_coverage(uint8_t *out,const uint32_t *cells){
-    for(int y=0;y<120;++y)for(int x=0;x<160;++x){
-        int i=y*160+x;
+static void pack_point_coverage(uint8_t *out,const uint32_t *cells,int cols){
+    for(int y=0;y<120;++y)for(int x=0;x<cols;++x){
+        int i=y*cols+x;
         unsigned c=cells[i]>>24;
-        unsigned l=x?cells[i-1]>>24:0,r=x<159?cells[i+1]>>24:0;
-        unsigned t=y?cells[i-160]>>24:0,b=y<119?cells[i+160]>>24:0;
+        unsigned l=x?cells[i-1]>>24:0,r=x+1<cols?cells[i+1]>>24:0;
+        unsigned t=y?cells[i-cols]>>24:0,b=y<119?cells[i+cols]>>24:0;
         unsigned left=((c&0x55)<<1)|((l&0xaa)>>1);
         unsigned right=((c&0xaa)>>1)|((r&0x55)<<1);
         unsigned up=((c&0x33)<<2)|((t&0xcc)>>2);
@@ -32,6 +26,7 @@ struct GpuTransport {
     bool ready=false, have_field=false, have_inputs=false;
     uint32_t revision=0, flags=0;
     int scale=0;
+    unsigned width=0;
 
     Com<ID3D12QueryHeap> time_queries;
     Com<ID3D12Resource> time_readback;
@@ -134,9 +129,32 @@ struct GpuTransport {
            FAILED(dev->CreateRootSignature(0,signature->GetBufferPointer(),signature->GetBufferSize(),IID_PPV_ARGS(root.put()))))return false;
         const char *names[]={"sunPass","directPass","indirectPass","shadePass","volumePass","resolvePass"};
         Com<ID3D12PipelineState> *states[]={&sun,&direct,&indirect,&shade,&volume,&resolve};
+        // Bind raw-buffer shader addresses to the native upload layout.
+        struct ShaderOffset { const char *name; size_t value; };
+#define SCENE_OFFSET(field) {"SCENE_" #field, offsetof(WorldLightScene,field)}
+#define EFFECT_OFFSET(field) {"EFFECT_" #field, offsetof(WorldEffectBatch,field)}
+        const ShaderOffset offsets[] = {
+            {"MAX_RASTER_WIDTH",WORLD_VIEW_MAX_WIDTH},
+            SCENE_OFFSET(width), SCENE_OFFSET(light_bins), SCENE_OFFSET(water_grade),
+            SCENE_OFFSET(ice_coverage), SCENE_OFFSET(sky_stop), SCENE_OFFSET(point_coverage),
+            SCENE_OFFSET(stage_light), SCENE_OFFSET(surface), SCENE_OFFSET(strengths),
+            EFFECT_OFFSET(nodes), EFFECT_OFFSET(ocean_rows), EFFECT_OFFSET(mirror),
+            EFFECT_OFFSET(ripple), EFFECT_OFFSET(reflect_rows), EFFECT_OFFSET(reflect_row),
+            EFFECT_OFFSET(volumes), EFFECT_OFFSET(playfield_scroll), EFFECT_OFFSET(volume_count),
+            EFFECT_OFFSET(volume_time), EFFECT_OFFSET(volume_scroll), EFFECT_OFFSET(history_reset),
+        };
+#undef SCENE_OFFSET
+#undef EFFECT_OFFSET
+        constexpr size_t count=sizeof offsets/sizeof *offsets;
+        char values[count][24];
+        D3D_SHADER_MACRO defines[count+1]={};
+        for(size_t i=0;i<count;++i){
+            snprintf(values[i],sizeof values[i],"%zu",offsets[i].value);
+            defines[i]={offsets[i].name,values[i]};
+        }
         for(int i=0;i<6;i++){
             Com<ID3DBlob> code;
-            if(FAILED(D3DCompile(source,strlen(source),"water transport",nullptr,nullptr,names[i],"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put()))){
+            if(FAILED(D3DCompile(source,strlen(source),"water transport",defines,nullptr,names[i],"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put()))){
                 if(errors) fprintf(stderr,"%s\n",(const char*)errors->GetBufferPointer());
                 return false;
             }
@@ -148,18 +166,20 @@ struct GpuTransport {
         for(auto &u:scene_upload)
             if(FAILED(buffer(dev,D3D12_HEAP_TYPE_UPLOAD,offsetof(WorldLightScene,effects),D3D12_RESOURCE_STATE_GENERIC_READ,u.put())))return false;
         if(FAILED(buffer(dev,D3D12_HEAP_TYPE_DEFAULT,offsetof(WorldLightScene,effects),D3D12_RESOURCE_STATE_COPY_DEST,scene.put())))return false;
+        constexpr UINT maxPitch=((WORLD_VIEW_MAX_WIDTH*4*4+255)/256)*256;
+        constexpr UINT maxFrameBytes=maxPitch*H*4;
         for(auto &u:effect_upload)
             if(FAILED(buffer(dev,D3D12_HEAP_TYPE_UPLOAD,sizeof(WorldEffectBatch),D3D12_RESOURCE_STATE_GENERIC_READ,u.put())))return false;
         if(FAILED(buffer(dev,D3D12_HEAP_TYPE_DEFAULT,sizeof(WorldEffectBatch),D3D12_RESOURCE_STATE_COPY_DEST,effect_device.put())) ||
-           FAILED(buffer(dev,D3D12_HEAP_TYPE_DEFAULT,W*H*4*4*4,D3D12_RESOURCE_STATE_COPY_DEST,input_device.put())))return false;
+           FAILED(buffer(dev,D3D12_HEAP_TYPE_DEFAULT,maxFrameBytes,D3D12_RESOURCE_STATE_COPY_DEST,input_device.put())))return false;
         auto storage=[&](Com<ID3D12Resource>& resource,UINT bytes){
             D3D12_RESOURCE_DESC d=scene->GetDesc();
             d.Width=bytes;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
             D3D12_HEAP_PROPERTIES heap={};heap.Type=D3D12_HEAP_TYPE_DEFAULT;
             return SUCCEEDED(dev->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,nullptr,IID_PPV_ARGS(resource.put())));
         };
-        ready=storage(volume_field,80*60*16) && storage(history,W*H*4*4*4) && storage(direct_field,(WORLD_PROBES+320*240+373)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,W*H*4*4*4)
-            && storage(vis_cache,W*H*16);
+        ready=storage(volume_field,WORLD_VIEW_MAX_WIDTH/4*60*16) && storage(history,maxFrameBytes) && storage(direct_field,(WORLD_PROBES+WORLD_VIEW_MAX_WIDTH*240+WORLD_SKY_COLUMNS)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,maxFrameBytes)
+            && storage(vis_cache,WORLD_VIEW_MAX_WIDTH*H*16);
         return ready;
     }
 
@@ -172,14 +192,15 @@ struct GpuTransport {
         return data.flags | (adaptive(data) && budget_mode ? 2048u : 0u);
     }
     bool needs_light(const WorldLightScene &data) const {
-        return !have_field || revision!=data.revision || flags!=dispatch_flags(data) || scale!=data.scale;
+        return !have_field || width!=data.width || revision!=data.revision || flags!=dispatch_flags(data) || scale!=data.scale;
     }
     bool prepare(ID3D12GraphicsCommandList *cmd,ID3D12Resource *upload,int k,
                  const WorldLightScene &data,uint32_t dispatch_flags,UINT frame=0){
-        bool changed=!have_field || revision!=data.revision || flags!=dispatch_flags;
+        bool changed=!have_field || width!=data.width || revision!=data.revision || flags!=dispatch_flags;
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
+        int cols=data.width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : W;
         if (changed || scale!=k) {
             void *map=nullptr;
             D3D12_RANGE empty={0,0};
@@ -187,17 +208,18 @@ struct GpuTransport {
             memcpy(map,&data,offsetof(WorldLightScene,effects));
             auto *packed=static_cast<WorldLightScene*>(map);
             packed->flags=dispatch_flags;
-            pack_point_coverage(packed->point_coverage,data.cells);
-            uint32_t bins[10*8][5]={};
+            packed->width=cols;
+            pack_point_coverage(packed->point_coverage,data.cells,cols/2);
+            uint32_t bins[((WORLD_VIEW_MAX_WIDTH+31)/32)*8][5]={};
             for(unsigned i=0;i<data.count && i<WORLD_EMITTERS;++i){
                 const float *e=data.emitters[i];
                 // radius is conservative; the shader retains the per-probe falloff test.
                 int xmin=std::max(0,(int)floorf((e[0]-e[2])/16));
-                int xmax=std::min(9,(int)floorf((e[0]+e[2])/16));
+                int xmax=std::min((cols-1)/32,(int)floorf((e[0]+e[2])/16));
                 int ymin=std::max(0,(int)floorf((e[1]-e[2])/16));
                 int ymax=std::min(7,(int)floorf((e[1]+e[2])/16));
                 for(int y=ymin;y<=ymax;++y)for(int x=xmin;x<=xmax;++x)
-                    bins[y*10+x][i/32]|=1u<<(i%32);
+                    bins[y*((cols+31)/32)+x][i/32]|=1u<<(i%32);
             }
             memcpy(packed->light_bins,bins,sizeof bins);
             upload->Unmap(0,nullptr);
@@ -218,21 +240,21 @@ struct GpuTransport {
             cmd->ResourceBarrier(1,&sync);
             if(!(data.flags&524288) && (data.flags&WORLD_LIGHT_SUN_MASK)){
                 cmd->SetPipelineState(sun.get());
-                cmd->Dispatch(373,1,1); // 320 columns plus the 53-pixel slant at row 239
+                cmd->Dispatch(cols+53,1,1); // Include the 53-pixel slant at row 239.
                 cmd->ResourceBarrier(1,&sync);
                 pass_mark(cmd,frame,"sun");
             }
-            cmd->SetPipelineState(direct.get());cmd->Dispatch(40,30,1);
+            cmd->SetPipelineState(direct.get());cmd->Dispatch((cols+7)/8,30,1);
             cmd->ResourceBarrier(1,&sync);
             pass_mark(cmd,frame,"direct");
-            cmd->SetPipelineState(indirect.get());cmd->Dispatch(20,15,1);
+            cmd->SetPipelineState(indirect.get());cmd->Dispatch((cols/2+7)/8,15,1);
             cmd->ResourceBarrier(1,&sync);
             pass_mark(cmd,frame,"indirect");
-            cmd->SetPipelineState(resolve.get());cmd->Dispatch(20,15,1);
+            cmd->SetPipelineState(resolve.get());cmd->Dispatch((cols/2+7)/8,15,1);
             cmd->ResourceBarrier(1,&sync);
             pass_mark(cmd,frame,"resolve");
         }
-        revision=data.revision;flags=dispatch_flags;have_field=true;
+        width=data.width;revision=data.revision;flags=dispatch_flags;have_field=true;
         return true;
     }
 
@@ -242,10 +264,12 @@ struct GpuTransport {
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
+        const int cols=data.width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : W;
+        const UINT pitch=(cols*k*4+255)&~255u;
         read_time(frame);
         bool medium=adaptive(data);
         uint32_t dispatch=dispatch_flags(data);
-        bool changed=!have_field || revision!=data.revision || flags!=dispatch;
+        bool changed=!have_field || width!=data.width || revision!=data.revision || flags!=dispatch;
         bool measure=early_sample[frame] || (time_readback && (medium || log_times) && (changed || !(data.flags&WORLD_LIGHT_FIELD_MASK)) && (++sample_counter%16==0));
         if(measure)cmd->EndQuery(time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,frame*4+2);
         pass_read(frame);
@@ -264,7 +288,7 @@ struct GpuTransport {
             transition(effect_device.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COPY_DEST);
         }
         have_inputs=true;
-        cmd->CopyBufferRegion(input_device.get(),0,source,0,W*H*k*k*4);
+        cmd->CopyBufferRegion(input_device.get(),0,source,0,(H*k-1)*pitch+cols*k*4);
         cmd->CopyBufferRegion(effect_device.get(),0,effect_upload[frame].get(),0,bytes);
         transition(input_device.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         transition(effect_device.get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -282,17 +306,17 @@ struct GpuTransport {
         cmd->ResourceBarrier(1,&sync);
         pass_mark(cmd,frame,"upload");
         if(data.flags&(32|512)){
-            cmd->SetPipelineState(volume.get());cmd->Dispatch(10,8,1);
+            cmd->SetPipelineState(volume.get());cmd->Dispatch((cols/4+7)/8,8,1);
             cmd->ResourceBarrier(1,&sync);
             pass_mark(cmd,frame,"volume");
         }
-        cmd->SetPipelineState(shade.get());cmd->Dispatch(W*k/8,H*k/8,1);
+        cmd->SetPipelineState(shade.get());cmd->Dispatch((cols*k+7)/8,H*k/8,1);
         cmd->ResourceBarrier(1,&sync);
         pass_mark(cmd,frame,"shade");
         transition(result.get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COPY_SOURCE);
         D3D12_TEXTURE_COPY_LOCATION src={},dst={};
         src.pResource=result.get();src.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        src.PlacedFootprint.Footprint={DXGI_FORMAT_B8G8R8A8_UNORM,UINT(W*k),UINT(H*k),1,UINT(W*k*4)};
+        src.PlacedFootprint.Footprint={DXGI_FORMAT_B8G8R8A8_UNORM,UINT(cols*k),UINT(H*k),1,pitch};
         dst.pResource=picture;dst.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         cmd->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
         transition(result.get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);

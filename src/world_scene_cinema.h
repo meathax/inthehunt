@@ -1,13 +1,14 @@
 /* Bounded presentation-only water volumes.
  * No reads/writes of gameplay actors. Native tile/sprite priorities always win. */
-enum { CINEMA_EVENTS=24, VW=W/4, VH=H/4 };
+#define VW (W/4)
+enum { CINEMA_EVENTS=24, MAX_VW=MAX_W/4, VH=H/4 };
 typedef struct {float x,y,age,life,power; int seabed; unsigned tint; float light,hold;} CinemaEvent;
 static CinemaEvent cinema_events[CINEMA_EVENTS];
-static uint32_t volume_probes[VW*VH], water_volume[N];
+static uint32_t volume_probes[MAX_VW*VH], water_volume[MAX_N];
 static unsigned cinema_emitted,cinema_samples;
 static int cinema_volume_dirty=1;
 typedef struct {float hx,hy,hz,r,g,b,energy;} MaterialLight;
-static MaterialLight material_light[N];
+static MaterialLight material_light[MAX_N];
 static void material_rows(int from,int to)
 {
     for(int y=from;y<to;++y)for(int x=0;x<W;++x){

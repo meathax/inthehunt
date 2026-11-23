@@ -10,7 +10,7 @@ static const Material materials[MAT_COUNT] = {
     {.08f,.94f,1.2f,0xb98765}, {.95f,.08f,.4f,0xb5edff}, {.035f,.98f,.5f,0xa0b4bf},
     {.045f,.96f,1.3f,0xa8b9b6}
 };
-static uint32_t sprite_material[MAXK*MAXK*N];
+static uint32_t sprite_material[MAXK*MAXK*MAX_N];
 
 static int material_kind(unsigned code, unsigned bank, unsigned pen, uint32_t c)
 {

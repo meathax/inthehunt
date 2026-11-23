@@ -10,13 +10,15 @@ RWByteAddressBuffer history : register(u3);
 // Per native pixel: 4-bit point-light visibility codes for the first 32 lights
 // of its bin, written by directPass and reused by the rim light (0 = not traced).
 RWByteAddressBuffer visCache : register(u5);
-static const int2 size=int2(160,120);
-uint indexOf(int2 p){ return p.y*160+p.x; }
+#define rasterWidth int(scene.Load(SCENE_width))
+#define size int2(rasterWidth/2,120)
+#define pitchPixels(w) (((w)+63u)&~63u)
+uint indexOf(int2 p){ return p.y*size.x+p.x; }
 bool inside(int2 p){return all(p>=0)&&all(p<size);}
 uint cell(int2 p){return scene.Load(4496+4*indexOf(p));}
 float3 rgb(uint c){return float3((c>>16)&255,(c>>8)&255,c&255)/255.;}
 float4 stageLight(uint group){
-    return (scene.Load(4)&131072)?asfloat(scene.Load4(121692+16*group)):float4(1,1,1,1);
+    return (scene.Load(4)&131072)?asfloat(scene.Load4(SCENE_stage_light+16*group)):float4(1,1,1,1);
 }
 float3 transmission(float distance){return exp2(-distance*float3(.021,.009,.004));}
 // Grid traversal visits each crossed cell, including thin silhouettes.
@@ -48,7 +50,7 @@ uint caster(int2 pixel){
 uint pointCaster(int2 p){
     if(any(p<0)||any(p>=2*size))return 0;
     uint i=indexOf(p/2);
-    uint bits=scene.Load(102492+(i&~3u))>>(8*(i&3)+2*(p.y&1)+(p.x&1));
+    uint bits=scene.Load(SCENE_point_coverage+(i&~3u))>>(8*(i&3)+2*(p.y&1)+(p.x&1));
     return (bits&16)?2:bits&1;
 }
 // Compare boundary distances by cross multiplication. A corner crossing
@@ -117,7 +119,7 @@ groupshared uint firstShadowRow,firstSolidRow,firstIceRow,firstAirRow;
 uint terrainFlags(int2 p){
     if(any(p<0)||any(p>=size*2))return false;
     uint i=indexOf(p/2);
-    uint bits=scene.Load(82916+(i&~3u))>>(8*(i&3));
+    uint bits=scene.Load(SCENE_ice_coverage+(i&~3u))>>(8*(i&3));
     return bits>>((p.y&1)*2+(p.x&1));
 }
 static const uint LightCaustics=1u<<22;
@@ -126,7 +128,7 @@ static const uint LightFieldMask=SunMask|1|4|32768;
 int sunOffset(int row){return (11*row+25)/50;}
 bool skyReaches(int2 p){
     uint column=p.x+sunOffset(p.y);
-    uint stop=(scene.Load(102116+(column&~3u))>>(8*(column&3)))&255;
+    uint stop=(scene.Load(SCENE_sky_stop+(column&~3u))>>(8*(column&3)))&255;
     return stop==0 || p.y+1<int(stop);
 }
 [numthreads(256,1,1)]
@@ -135,7 +137,7 @@ void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
     int2 p=int2(column-sunOffset(y),y);
     if(lane==0){firstShadowRow=240;firstSolidRow=240;firstIceRow=240;firstAirRow=240;}
     GroupMemoryBarrierWithGroupSync();
-    if(y>0 && y<240 && p.x>=0 && p.x<320){
+    if(y>0 && y<240 && p.x>=0 && p.x<rasterWidth){
         uint previous=caster(int2(column-sunOffset(y-1),y-1));
         bool exitEdge=previous!=0 && previous!=caster(p);
         if(exitEdge && y-1<asint(scene.Load(8)))InterlockedMin(firstAirRow,lane);
@@ -148,15 +150,15 @@ void sunPass(uint3 group:SV_GroupID,uint lane:SV_GroupIndex){
             InterlockedMin(firstIceRow,lane);
     }
     GroupMemoryBarrierWithGroupSync();
-    if(lane==0)directField[96000+column]=float4(firstAirRow,0,0,0);
-    if(y<240 && p.x>=0 && p.x<320){
+    if(lane==0)directField[(size.x*120+rasterWidth*240)+column]=float4(firstAirRow,0,0,0);
+    if(y<240 && p.x>=0 && p.x<rasterWidth){
         // Forward scatter fills long shadows. Keep the contact edge sharp,
         // and retain a visible umbra all the way to the bottom.
         float visibility=1;
         if(lane>=firstIceRow && !caster(p))visibility=.72+.13*saturate((y-int(firstIceRow))/150.);
         if(lane>=firstShadowRow)visibility=min(visibility,.64+.17*saturate((y-int(firstShadowRow))/120.));
         if(lane>=firstSolidRow)visibility=min(visibility,.18+.22*saturate((y-int(firstSolidRow))/180.));
-        directField[19200+y*320+p.x]=float4(0,0,0,visibility);
+        directField[(size.x*120)+y*rasterWidth+p.x]=float4(0,0,0,visibility);
     }
 }
 [numthreads(8,8,1)]
@@ -166,7 +168,7 @@ void directPass(uint3 id:SV_DispatchThreadID){
     float2 origin=pixel+.5,p=origin*.5;
     uint flags=scene.Load(4);
     bool sky=!(flags&524288) && skyReaches(pixel);
-    float sun=sky && (flags&SunMask)?directField[19200+pixel.y*320+pixel.x].a:1;
+    float sun=sky && (flags&SunMask)?directField[(size.x*120)+pixel.y*rasterWidth+pixel.x].a:1;
     int wl=asint(scene.Load(8));
     if(sky && (flags&SunMask) && wl>0){
         int column=pixel.x+sunOffset(pixel.y);
@@ -175,8 +177,8 @@ void directPass(uint3 id:SV_DispatchThreadID){
         // It filters airborne silhouettes only, including below the interface.
         [unroll]for(int dx=-8;dx<=8;++dx){
             int c=column+dx;
-            if(c>=0 && c<373){
-                float gap=pixel.y-directField[96000+c].x;
+            if(c>=0 && c<rasterWidth+53){
+                float gap=pixel.y-directField[(size.x*120+rasterWidth*240)+c].x;
                 if(gap>=0)shade+=(9-abs(dx))*(1-.45*saturate(gap/145.));
             }
         }
@@ -184,10 +186,10 @@ void directPass(uint3 id:SV_DispatchThreadID){
     }
     if((terrainFlags(pixel)&16) && caster(pixel)!=2)sun=1;
     float3 energy=0;
-    uint bin=(q.y/16)*10+q.x/16;
+    uint bin=(q.y/16)*((rasterWidth+31)/32)+q.x/16;
     uint ordinal=0;uint4 cache=0;
     [loop]for(uint w=0;w<(scene.Load(0)+31)/32;++w){
-        uint bits=scene.Load(81300+20*bin+4*w);
+        uint bits=scene.Load(SCENE_light_bins+20*bin+4*w);
         [loop]while(bits){
             uint i=w*32+firstbitlow(bits);bits&=bits-1;
             uint slot=ordinal++;
@@ -214,7 +216,7 @@ void directPass(uint3 id:SV_DispatchThreadID){
             float vis=decodeVisibility(code);
             float response=1;
             if(flags&1048576){
-                uint m=scene.Load(121740+4*(pixel.y*320+pixel.x));
+                uint m=scene.Load(SCENE_surface+4*(pixel.y*rasterWidth+pixel.x));
                 uint kind=m&255;
                 if(kind>0 && kind<10){
                     float2 normal=float2(int(m<<16)>>24,int(m<<8)>>24)/128.;
@@ -228,8 +230,8 @@ void directPass(uint3 id:SV_DispatchThreadID){
         }
     }
     float4 light=float4(energy,sky?sun:0);
-    visCache.Store4(16*(pixel.y*320+pixel.x),cache);
-    directField[19200+pixel.y*320+pixel.x]=light;
+    visCache.Store4(16*(pixel.y*rasterWidth+pixel.x),cache);
+    directField[(size.x*120)+pixel.y*rasterWidth+pixel.x]=light;
     if(!any(pixel&1))directField[indexOf(q)]=light;
 }
 // Deterministic stratified paths prevent independently seeded frames from shimmering.
@@ -278,15 +280,15 @@ void resolvePass(uint3 id:SV_DispatchThreadID){
 RWStructuredBuffer<float4> volumes : register(u4);
 [numthreads(8,8,1)]
 void volumePass(uint3 id:SV_DispatchThreadID){
-    if(any(id.xy>=uint2(80,60)))return;
+    if(any(id.xy>=uint2(rasterWidth/4,60)))return;
     int2 q=id.xy*4+2;
-    int wl=asint(scene.Load(8)),t=asint(effects.Load(4812)),scroll=asint(effects.Load(4808));
-    uint at=id.y*80+id.x;
+    int wl=asint(scene.Load(8)),t=asint(effects.Load(EFFECT_volume_time)),scroll=asint(effects.Load(EFFECT_volume_scroll));
+    uint at=id.y*(rasterWidth/4)+id.x;
     if(wl>=0 && q.y<wl){volumes[at]=0;return;}
     float4 l=float4(0,0,0,1);
     if(scene.Load(4)&23)l=directField[indexOf(q/2)];
     else [unroll]for(int j=1;j<=4;j++){
-        int2 p=int2(min(q.x+j*5,319),q.y-j*10);
+        int2 p=int2(min(q.x+j*5,(rasterWidth-1)),q.y-j*10);
         if(p.y>=0 && (cell(p/2)>>24))l.a*=.3;
     }
     // Wide, slow variations in downwelling light. Continuous phase avoids
@@ -300,8 +302,8 @@ void volumePass(uint3 id:SV_DispatchThreadID){
     if(flags&32)colour+=l.rgb*float3(9,10,12)*water.rgb*((flags&4)?.65:1);
     // One extinction field is shared by downwelling and local light.
     colour*=exp2(-max(0.,q.y-max(0,wl))*.0015*water.w);
-    [loop]for(uint i=0;i<effects.Load(4816);++i){
-        float4 e=asfloat(effects.Load4(4824+i*16));float2 delta=q-e.xy;
+    [loop]for(uint i=0;i<effects.Load(EFFECT_volume_count);++i){
+        float4 e=asfloat(effects.Load4(EFFECT_volumes+i*16));float2 delta=q-e.xy;
         float d2=dot(delta,delta),wet=wl<0?1:saturate((max(q.y,e.y)-wl)/max(.01,abs(delta.y)));
         colour+=e.z*900/(900+d2)*(e.w>0?18*rgb(uint(e.w)):float3(18,10,3))*exp(-sqrt(d2)*wet*float3(.012,.005,.0025));
     }
@@ -310,9 +312,9 @@ void volumePass(uint3 id:SV_DispatchThreadID){
 // One output thread owns a subpixel, including every overlapping stamp.
 int3 compositeParticles(uint2 pixel,uint scale,uint mask,float4 light,int3 colour){
     int2 native=int2(pixel/scale);
-    uint node=effects.Load(4*((native.y/8)*40+native.x/8));
+    uint node=effects.Load(4*((native.y/8)*((rasterWidth+7)/8)+native.x/8));
     [loop]while(node){
-        uint at=43768+node*32;
+        uint at=EFFECT_nodes+node*32;
         int4 shape=asint(effects.Load4(at));
         uint4 data=effects.Load4(at+16);
         node=data.w;
@@ -366,7 +368,7 @@ int3 compositeParticles(uint2 pixel,uint scale,uint mask,float4 light,int3 colou
 // normal, so adjacent tiles of a multipart vehicle share a single contour.
 float rimMask(int2 pixel,int2 extent,bool scenery){
     pixel=clamp(pixel,0,extent-1);
-    uint tag=picture.Load(4*(pixel.y*extent.x+pixel.x))>>24;
+    uint tag=picture.Load(4*(pixel.y*pitchPixels(extent.x)+pixel.x))>>24;
     // Occluding sprites and HUD cover the scenery; never outline their cutouts.
     // Destructible sprite panels and terrain form one visible facade.
     // Both sides must recognize the union, including the inner rim tap.
@@ -394,20 +396,20 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
 
     float3 incident=0;
     if(facing>0){
-        int2 native=min(pixel/k,int2(319,239));
-        float sun=directField[19200+native.y*320+native.x].a;
+        int2 native=min(pixel/k,int2((rasterWidth-1),239));
+        float sun=directField[(size.x*120)+native.y*rasterWidth+native.x].a;
         float immersion=asint(scene.Load(8))<0?1:smoothstep(0,6,depth);
         float3 sunlight=lerp(float3(1.36,1.16,.92),float3(.98,1.20,1.38),immersion);
         incident+=sunlight*transmission(depth*.46)*sun*facing;
     }
     uint2 tile=uint2(p)/16;
-    uint bin=tile.y*10+tile.x;
+    uint bin=tile.y*((rasterWidth+31)/32)+tile.x;
     // The same bin walk as directPass, so slots match its visibility cache.
     int2 receiver=pixel/k;
-    uint4 cached=visCache.Load4(16*(receiver.y*320+receiver.x));
+    uint4 cached=visCache.Load4(16*(receiver.y*rasterWidth+receiver.x));
     uint ordinal=0;
     [loop] for(uint w=0;w<(scene.Load(0)+31)/32;++w){
-        uint bits=scene.Load(81300+20*bin+4*w);
+        uint bits=scene.Load(SCENE_light_bins+20*bin+4*w);
         [loop] while(bits){
             uint i=w*32+firstbitlow(bits);bits&=bits-1;
             uint slot=ordinal++;
@@ -431,7 +433,7 @@ float3 rimLight(int2 pixel,int k,int2 extent,uint flags,bool scenery){
     return incident*(scenery?.62:1.)/(1+.68*max(incident.r,max(incident.g,incident.b)));
 }
 // Player strength settings: 1 = as designed (zero, from older callers, reads as 1).
-float strength(uint i){float v=asfloat(scene.Load(428940+4*i));return v>0?v:1;}
+float strength(uint i){float v=asfloat(scene.Load(SCENE_strengths+4*i));return v>0?v:1;}
 // Scales an attenuation factor; exactly unchanged at strength 1.
 float3 strengthen(float3 f,float s){return s==1?f:pow(max(f,0),s);}
 // Sunlight focused by the moving surface: two sheets of warped ridges in
@@ -442,16 +444,16 @@ float causticRidges(float2 p,float t){
     return pow(saturate(1-abs(v)*1.55),5);
 }
 float caustics(int2 native){
-    int scroll=asint(effects.Load(4820));
+    int scroll=asint(effects.Load(EFFECT_playfield_scroll));
     float2 world=float2(native)+float2(scroll&65535,(scroll>>16)&65535);
-    float t=asint(effects.Load(4812))*.012;
+    float t=asint(effects.Load(EFFECT_volume_time))*.012;
     return .62*causticRidges(world*.085,t)+.45*causticRidges(world*.137+float2(3.1,1.7),t*1.31);
 }
 [numthreads(8,8,1)]
 void shadePass(uint3 id:SV_DispatchThreadID){
-    uint k=scene.Load(12);uint2 extent=uint2(320,240)*k;
+    uint k=scene.Load(12);uint2 extent=uint2(rasterWidth,240)*k;
     if(any(id.xy>=extent))return;
-    uint offset=(id.y*extent.x+id.x)*4,c=picture.Load(offset);float3 base=rgb(c);
+    uint offset=(id.y*pitchPixels(extent.x)+id.x)*4,c=picture.Load(offset);float3 base=rgb(c);
     uint tag=c>>24,flags=scene.Load(4);
     bool terrainRim=tag>=96 && tag<160;
     uint plane=255;
@@ -463,7 +465,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(tag==255){result.Store(offset,c);if(flags&8)history.Store(offset,0);return;}
     if((flags&4096) && (tag&240)==224){
         uint row=id.y/k;
-        if(effects.Load(43736+(row/32)*4)&(1u<<(row%32))){
+        if(effects.Load(EFFECT_ocean_rows+(row/32)*4)&(1u<<(row%32))){
             int3 v=int3(round(base*255));
             int lum=(v.r*3+v.g*5+v.b*2)/10;
             int cool=clamp((max(v.g,v.b)-v.r)*3,0,255);
@@ -474,13 +476,13 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         }
     }
     if(flags&64){
-        int row=int(id.y/k)-asint(effects.Load(5208));
-        if(row>=0 && row<asint(effects.Load(5212))){
-            uint sampleMask=effects.Load(5336+(row*320+id.x/k)*4);
+        int row=int(id.y/k)-asint(effects.Load(EFFECT_reflect_row));
+        if(row>=0 && row<asint(effects.Load(EFFECT_reflect_rows))){
+            uint sampleMask=effects.Load(EFFECT_mirror+(row*MAX_RASTER_WIDTH+id.x/k)*4);
             if(sampleMask&(1u<<((id.y%k)*k+id.x%k))){
-                int x=clamp(int(id.x)+asint(effects.Load(5216+4*row)),0,int(extent.x)-1);
-                int y=2*asint(effects.Load(5208))*k-1-int(id.y);
-                uint mirror=picture.Load((uint(y)*extent.x+x)*4);
+                int x=clamp(int(id.x)+asint(effects.Load(EFFECT_ripple+4*row)),0,int(extent.x)-1);
+                int y=2*asint(effects.Load(EFFECT_reflect_row))*k-1-int(id.y);
+                uint mirror=picture.Load((uint(y)*pitchPixels(extent.x)+x)*4);
                 if((mirror>>24)!=255)
                     base=lerp(base,rgb(mirror),(sampleMask>>16)/256.);
             }
@@ -489,12 +491,12 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(flags&128){
         int3 v=int3(round(base*255));
         int lum=(v.r*3+v.g*5+v.b*2)/10;
-        if(flags&131072)base=saturate((lum+(v-lum)*asfloat(scene.Load(82912)))/255.);
+        if(flags&131072)base=saturate((lum+(v-lum)*asfloat(scene.Load((SCENE_water_grade+12))))/255.);
         else base=clamp(lum+(v-lum)*17/16,0,255)/255.;
     }
     int2 native=id.xy/k;
     float4 l=float4(0,0,0,1);
-    if(flags&LightFieldMask)l=directField[19200+native.y*320+native.x];
+    if(flags&LightFieldMask)l=directField[(size.x*120)+native.y*rasterWidth+native.x];
     int wl=asint(scene.Load(8));
     float wet=wl<0?1:saturate((float(native.y)-wl)/8);
     float depth=wet*saturate((native.y-(wl==-1?0:wl))/195.);
@@ -502,12 +504,12 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     float3 lit=l.rgb*lightS;
     float3 energy=lit/(1+.90*max(lit.r,max(lit.g,lit.b)));
     float3 colour=base;
-    if(flags&65536)colour*=strengthen(lerp(1,(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79),depth),strength(2));
+    if(flags&65536)colour*=strengthen(lerp(1,(flags&131072)?asfloat(scene.Load3(SCENE_water_grade)):float3(.53,.65,.79),depth),strength(2));
     bool surface=caster(native)!=0;
     if((flags&2) && !(flags&524288) && skyReaches(native)){
         float3 occluded=surface?float3(.49,.55,.72):float3(.87,.91,.95);
         // Open water shows suspended light; the sky never receives a projected silhouette.
-        float3 deepTint=(flags&131072)?asfloat(scene.Load3(82900)):float3(.53,.65,.79);
+        float3 deepTint=(flags&131072)?asfloat(scene.Load3(SCENE_water_grade)):float3(.53,.65,.79);
         float deepContrast=dot(deepTint,float3(.25,.50,.25));
         float receive=(surface?1:wet)*lerp(1,deepContrast,depth);
         colour*=strengthen(lerp(float3(1.02,1.01,1),occluded,(1-l.a)*receive*stageLight(2).y),strength(1));
@@ -537,10 +539,10 @@ void shadePass(uint3 id:SV_DispatchThreadID){
     if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb*lightS;
     if(flags&4)colour+=wet*energy*float3(.042,.049,.056);
     if((flags&(32|512)) && (tag&240)==224){
-        float2 pos=clamp((float2(id.xy/k)-2)*.25,0,float2(79,59));
-        uint2 v0=uint2(pos),v1=min(v0+1,uint2(79,59));float2 f=frac(pos);
-        colour+=.52*lerp(lerp(volumes[v0.y*80+v0.x].rgb,volumes[v0.y*80+v1.x].rgb,f.x),
-                     lerp(volumes[v1.y*80+v0.x].rgb,volumes[v1.y*80+v1.x].rgb,f.x),f.y)*strength(3);
+        float2 pos=clamp((float2(id.xy/k)-2)*.25,0,float2(rasterWidth/4-1,59));
+        uint2 v0=uint2(pos),v1=min(v0+1,uint2(rasterWidth/4-1,59));float2 f=frac(pos);
+        colour+=.52*lerp(lerp(volumes[v0.y*(rasterWidth/4)+v0.x].rgb,volumes[v0.y*(rasterWidth/4)+v1.x].rgb,f.x),
+                     lerp(volumes[v1.y*(rasterWidth/4)+v0.x].rgb,volumes[v1.y*(rasterWidth/4)+v1.x].rgb,f.x),f.y)*strength(3);
     }
     // Caustics land on sunlit rock, seabed and structures below the surface:
     // the two world layers (planes 250..252). Sprites include on-screen
@@ -575,7 +577,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         v=particles;
     }
     if(flags&8){
-        if(!effects.Load(4804)){
+        if(!effects.Load(EFFECT_history_reset)){
             uint old=history.Load(offset);
             v=max(v,(uint3((old>>16)&255,(old>>8)&255,old&255)*4)>>4);
         }

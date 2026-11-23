@@ -64,7 +64,7 @@ void world_scene_init_impact_art(const uint8_t *program_rom);
 void world_scene_submit(const WorldSceneFrame *frame);
 /* Largest supported K. */
 enum { WORLD_SCENE_MAX_K = 4 };
-/* Render the scene into out (320*K x 240*K ARGB). alpha is the position
+/* Render the scene into out (frame.width*K x 240*K ARGB). alpha is the position
  * between the previous game frame (0) and the current one (1). Values from 1 to 2 predict camera motion only. Clock is in
  * 1/8 ms and animates the effects. Returns 0 until a frame was submitted. */
 int world_scene_render(uint32_t *out, unsigned k, double alpha, const WorldSceneFx *fx, uint32_t clock);
@@ -77,7 +77,7 @@ void world_scene_reset(void);
 void world_scene_camera_output(float offsets[4]);
 extern void (*world_scene_light_ready)(const WorldLightScene *);
 void world_scene_light_target(WorldLightScene *target);
-/* Test view of the light transport (320x240): rock in its own colour,
+/* Test view of the light transport (frame.width x 240): rock in its own colour,
    open water grey by sun visibility, plus the traced light. */
 void world_scene_debug(uint32_t *out);
 #endif

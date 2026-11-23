@@ -23,6 +23,36 @@ static std::string slurp(const char *path)
     return text;
 }
 
+// Older diagnostic captures were raw 320-wide structs, without a width field.
+// Read each contiguous region into its current member so the original files
+// remain usable with the current built-in transport shader.
+static bool read_capture(FILE *f, WorldLightScene &scene, uint32_t *frame)
+{
+    if (!f || std::fseek(f, 0, SEEK_END)) return false;
+    const long length = std::ftell(f);
+    std::rewind(f);
+    constexpr size_t oldPixels = 320 * 240, oldProbes = oldPixels / 4;
+    constexpr size_t oldSceneBytes = 428972 + 43768 + WORLD_EFFECT_NODES * sizeof(WorldEffectNode);
+    auto read = [&](void *dst, size_t bytes) { return std::fread(dst, 1, bytes, f) == bytes; };
+    if (length == long(oldSceneBytes + oldPixels * 4)) {
+        auto &effects = scene.effects;
+        scene.width = 320;
+        if (!read(&scene, offsetof(WorldLightScene, cells)) || !read(scene.cells, oldProbes * 4) ||
+            !read(&scene.revision, 4) || !read(scene.light_bins, 10 * 8 * 5 * 4) ||
+            !read(scene.water_grade, sizeof scene.water_grade) || !read(scene.ice_coverage, oldProbes) ||
+            !read(scene.sky_stop, 376) || !read(scene.point_coverage, oldProbes) ||
+            !read(scene.stage_light, sizeof scene.stage_light) || !read(scene.surface, oldPixels * 4) ||
+            !read(scene.strengths, sizeof scene.strengths) || !read(effects.heads, 40 * 30 * 4) ||
+            !read(&effects.count, offsetof(WorldEffectBatch, mirror) - offsetof(WorldEffectBatch, count)))
+            return false;
+        for (auto &row : effects.mirror) if (!read(row, 320 * 4)) return false;
+        if (!read(effects.ocean_rows, sizeof effects.ocean_rows) || !read(effects.nodes, sizeof effects.nodes))
+            return false;
+    } else if (!read(&scene, sizeof scene)) return false;
+    return (scene.width == WORLD_VIEW_ARCADE_WIDTH || scene.width == WORLD_VIEW_WIDE_WIDTH) &&
+           scene.effects.count < WORLD_EFFECT_NODES && read(frame, scene.width * 240 * 4);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 4) { std::puts("usage: bench_gpu_light RUNS OUT_DIR [--shader FILE]... SCENE..."); return 2; }
@@ -47,7 +77,7 @@ int main(int argc, char **argv)
     std::vector<std::string> labels(count);
     for (unsigned s = 0; s < count; ++s) {
         WorldLightScene *scene = new WorldLightScene();
-        uint32_t *frame = new uint32_t[320 * 240];
+        uint32_t *frame = new uint32_t[WORLD_VIEW_MAX_WIDTH * 240];
         const std::string &path = paths[s];
         size_t slash = path.find_last_of("/\\");
         size_t prior = slash == std::string::npos || !slash ? std::string::npos : path.find_last_of("/\\", slash - 1);
@@ -55,7 +85,7 @@ int main(int argc, char **argv)
         labels[s].resize(labels[s].size() - 4);
         for (char &c : labels[s]) if (c == '/' || c == '\\') c = '_';
         FILE *f = std::fopen(path.c_str(), "rb");
-        if (!f || std::fread(scene, sizeof(WorldLightScene), 1, f) != 1 || std::fread(frame, 4, 320 * 240, f) != 320 * 240) {
+        if (!read_capture(f, *scene, frame)) {
             std::printf("cannot read %s\n", path.c_str());
             return 1;
         }
@@ -63,7 +93,7 @@ int main(int argc, char **argv)
         scenes[s] = scene;
         frames[s] = frame;
     }
-    for (auto &p : shaded) p = new uint32_t[320 * 240];
+    for (auto &p : shaded) p = new uint32_t[WORLD_VIEW_MAX_WIDTH * 240];
     std::vector<double> ms(count * variants * 8);
     char error[512] = {};
     if (!world_gpu_light_benchmark(scenes.data(), frames.data(), count, sources.data(), variants, runs,
@@ -79,7 +109,7 @@ int main(int argc, char **argv)
         for (unsigned s = 0; s < count; ++s) {
             const double *m = &ms[(v * count + s) * 8];
             if (FILE *o = std::fopen((dir + "/" + labels[s] + ".rgba").c_str(), "wb")) {
-                std::fwrite(shaded[v * count + s], 4, 320 * 240, o);
+                std::fwrite(shaded[v * count + s], 4, scenes[s]->width * 240, o);
                 std::fclose(o);
             }
             if (std::getenv("BENCH_SCENES")) {

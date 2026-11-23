@@ -28,9 +28,6 @@ const char *const world_gpu_preset_path[WORLD_GPU_PRESETS] = {
 #undef WORLD_CRT_PRESET
 };
 
-static_assert(offsetof(WorldLightScene,stage_light)==121692);
-static_assert(offsetof(WorldLightScene,surface)==121740);
-
 namespace {
 
 template <class T> struct Com {
@@ -490,7 +487,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
     auto *cmd=p->light_cmd.get();
     if(sample)cmd->EndQuery(transport.time_queries.get(),D3D12_QUERY_TYPE_TIMESTAMP,f*4);
     bool had_field=transport.have_field;
-    auto old_revision=transport.revision,old_flags=transport.flags;
+    auto old_revision=transport.revision,old_flags=transport.flags,old_width=transport.width;
     int old_scale=transport.scale;
     bool ok=transport.prepare(cmd,p->light_upload[f].get(),data->scale,*data,transport.dispatch_flags(*data),f);
     if(sample){
@@ -499,7 +496,7 @@ extern "C" void world_gpu_prepare_lights(const WorldLightScene *data)
                               transport.time_readback.get(),f*32);
     }
     if(FAILED(cmd->Close()) || !ok){
-        transport.have_field=had_field;
+        transport.have_field=had_field;transport.width=old_width;
         transport.revision=old_revision;transport.flags=old_flags;transport.scale=old_scale;
         p->early_light_failed=true;
         return;
@@ -877,15 +874,22 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
     device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(alloc.put()));
     device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.get(), nullptr, IID_PPV_ARGS(cmd.put()));
     device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.put()));
-    texture(device.get(), W, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, picture.put());
-    UINT64 outputs = (UINT64)W * H * 4 * count * variants;
-    buffer(device.get(), D3D12_HEAP_TYPE_UPLOAD, (UINT64)W * H * 4 * count, D3D12_RESOURCE_STATE_GENERIC_READ, source.put());
+    // Frames share a staging slot size, but each scene keeps its own row pitch.
+    const size_t slotBytes=((WORLD_VIEW_MAX_WIDTH*4+255)&~255u)*H;
+    texture(device.get(), WORLD_VIEW_MAX_WIDTH, H, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST, picture.put());
+    UINT64 outputs = (UINT64)slotBytes * count * variants;
+    buffer(device.get(), D3D12_HEAP_TYPE_UPLOAD, (UINT64)slotBytes * count, D3D12_RESOURCE_STATE_GENERIC_READ, source.put());
     buffer(device.get(), D3D12_HEAP_TYPE_READBACK, outputs, D3D12_RESOURCE_STATE_COPY_DEST, readback.put());
-    buffer(device.get(), D3D12_HEAP_TYPE_DEFAULT, W * H * 4, D3D12_RESOURCE_STATE_COPY_DEST, one.put());
+    buffer(device.get(), D3D12_HEAP_TYPE_DEFAULT, slotBytes, D3D12_RESOURCE_STATE_COPY_DEST, one.put());
     if (!alloc || !cmd || !fence || !picture || !source || !readback || !one) { say(error, error_size, "Could not create resources."); return 0; }
     uint8_t *map = nullptr;
     if (FAILED(source->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Upload map failed."); return 0; }
-    for (unsigned s = 0; s < count; ++s) memcpy(map + (size_t)s * W * H * 4, pixels[s], W * H * 4);
+    for (unsigned s=0;s<count;++s) {
+        unsigned bytes=(scenes[s]->width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH)*4;
+        unsigned pitch=(bytes+255)&~255u;
+        for(int y=0;y<H;++y)
+            memcpy(map+s*slotBytes+y*pitch,pixels[s]+y*(bytes/4),bytes);
+    }
     source->Unmap(0, nullptr);
     std::unique_ptr<WorldLightScene> copy(new WorldLightScene());
     std::vector<std::unique_ptr<GpuTransport>> transports;
@@ -916,7 +920,7 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
             copy->revision = ++revision;   /* force the light field to be rebuilt */
             alloc->Reset(); cmd->Reset(alloc.get(), nullptr);
             if (copied) { auto b = barrier(one.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST); cmd->ResourceBarrier(1, &b); }
-            cmd->CopyBufferRegion(one.get(), 0, source.get(), (UINT64)s * W * H * 4, W * H * 4);
+            cmd->CopyBufferRegion(one.get(), 0, source.get(), (UINT64)s * slotBytes, slotBytes);
             { auto b = barrier(one.get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE); cmd->ResourceBarrier(1, &b); }
             copied = true;
             for (int n = 0; n < 8; ++n) { g.pass_sum[n] = 0; g.pass_n[n] = 0; }
@@ -924,7 +928,7 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
             if (!warm && run == runs) {
                 auto r = barrier(g.result.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 cmd->ResourceBarrier(1, &r);
-                cmd->CopyBufferRegion(readback.get(), (UINT64)(v * count + s) * W * H * 4, g.result.get(), 0, W * H * 4);
+                cmd->CopyBufferRegion(readback.get(), (UINT64)(v * count + s) * slotBytes, g.result.get(), 0, slotBytes);
                 r = barrier(g.result.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 cmd->ResourceBarrier(1, &r);
             }
@@ -941,7 +945,12 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
         if (!warm) ++run;
     }
     if (FAILED(readback->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Readback failed."); return 0; }
-    for (unsigned i = 0; i < count * variants; ++i) if (shaded && shaded[i]) memcpy(shaded[i], map + (size_t)i * W * H * 4, W * H * 4);
+    for(unsigned i=0;i<count*variants;++i) if(shaded && shaded[i]) {
+        unsigned bytes=(scenes[i%count]->width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH)*4;
+        unsigned pitch=(bytes+255)&~255u;
+        for(int y=0;y<H;++y)
+            memcpy(shaded[i]+y*(bytes/4),map+i*slotBytes+y*pitch,bytes);
+    }
     D3D12_RANGE none = {0, 0};
     readback->Unmap(0, &none);
     return 1;
@@ -956,11 +965,11 @@ extern "C" int world_gpu_render_offscreen(const uint32_t *frame,unsigned source_
 extern "C" int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
                                          unsigned source_w,char *error,size_t size)
 {
-    return render_offscreen(nullptr,scene,pixels,source_w,"",0,W,H,out,error,size);
+    return render_offscreen(nullptr,scene,pixels,source_w,"",2,source_w,H,out,error,size);
 }
 
 extern "C" int world_gpu_camera_offscreen(const float offsets[4],const uint32_t *pixels,uint32_t *out,
                                           unsigned source_w,unsigned scale,char *error,size_t size)
 {
-    return render_offscreen(offsets,nullptr,pixels,source_w,"",0,source_w*scale,H*scale,out,error,size);
+    return render_offscreen(offsets,nullptr,pixels,source_w,"",2,source_w*scale,H*scale,out,error,size);
 }

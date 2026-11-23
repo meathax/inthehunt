@@ -221,9 +221,7 @@ static int enhance(const uint32_t *source, uint32_t *target, uint32_t time, int 
     WorldSceneFx fx = settings.fx_enable ? scene_effects() : (WorldSceneFx){0};
     fx.smooth = 1;
     fx.interp = 0;
-    /* The scene renderer only knows the legacy raster until widescreen scene
-       work lands; outside it the plain picture is the correct output. */
-    if (frame_w == WORLD_VIEW_ARCADE_WIDTH && world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
+    if (world_scene_render(target, (unsigned)k, alpha, &fx, time)) {
         unsigned strength = world_scene_take_rumble();
         if (strength && settings.fx_shake) world_window_rumble(strength, 160);
         return k;
@@ -302,14 +300,7 @@ static void present_game(const uint32_t *source)
     /* The title menu sits over the running attract sequence, at 1x. */
     int title = menu.open && menu.title && !menu.title_hidden && !menu.peek;
     static WorldLightScene lights;
-    /* GPU light transport is sized for the legacy 320-wide frame; a
-       widescreen frame runs the plain path until the field grows too. */
-    int trace=frame_w == WORLD_VIEW_ARCADE_WIDTH && (!title || world_menu_main_title(&menu)) && settings.fx_enable && (settings.fx_lights || settings.fx_sunshadow || settings.fx_glow ||
-        settings.fx_rays || settings.fx_particles || settings.fx_snow || settings.fx_trails || settings.fx_wakes ||
-        settings.fx_headlights || settings.fx_rim || settings.fx_bubble_light || settings.fx_debris || settings.fx_silt || settings.fx_splashes ||
-        settings.fx_sparks || settings.fx_impact_motes || settings.fx_pressure || settings.fx_sediment_light ||
-        settings.fx_aftermath || settings.fx_blast_reflect || settings.fx_water_volume || settings.fx_reflect || settings.fx_vivid ||
-        settings.fx_ocean_depth || settings.fx_caustics)
+    int trace=(!title || world_menu_main_title(&menu)) && settings.fx_enable
         && world_gpu_transport_available();
     float offsets[4]={0};
     int pixel_camera=!title && !settings.crt_shader && world_gpu_visible() &&
@@ -319,6 +310,14 @@ static void present_game(const uint32_t *source)
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
     world_scene_light_ready=NULL;
+    /* Some stages keep their 4:3 aperture inside the widescreen canvas. */
+    if (frame_w == WORLD_VIEW_WIDE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH) {
+        int inset = WORLD_VIEW_WING*k, stride = (int)frame_w*k;
+        for (int y=0; y<240*k; ++y) {
+            uint32_t *row = shown + y*stride;
+            for (int x=0; x<inset; ++x) row[x] = row[stride-1-x] = 0xff000000u;
+        }
+    }
     apply_brightness(shown, (size_t)frame_w * 240 * k * k);
     if (trace && settings.gfx_quality<WORLD_GFX_HIGH) lights.flags |= 1024u;
     if (title && trace && lights.scale == k) {
@@ -799,7 +798,7 @@ static void observe_boss(unsigned actor,unsigned sprite)
     if(!lamp.kind)return;
     int x=(int16_t)word(ram+sprite+4)-96+((ram[sprite+9]&1)?-lamp.x:lamp.x);
     int y=375-(int16_t)word(ram+sprite+6)+((ram[sprite+9]&2)?-lamp.y:lamp.y);
-    if(x < -64 || x >= 384 || y < -64 || y >= 304)return;
+    if(x < frame_left()-64 || x >= frame_left()+(int)frame_w+64 || y < -64 || y >= 304)return;
     boss_lamps[boss_lamp_count].actor=actor;
     boss_lamps[boss_lamp_count++].light=(WeaponEmitter){x,y,0,0,lamp.kind,0,0,0};
 }
@@ -1579,7 +1578,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                     char path[4096];
                     snprintf(path,sizeof path,"%s/light-%06lu.bin",dir,ticks);
                     FILE *f=world_fopen(path,"wb");
-                    if(f){fwrite(&capture,sizeof capture,1,f);fwrite(shown,sizeof(uint32_t),320*240,f);fclose(f);}
+                    if(f){fwrite(&capture,sizeof capture,1,f);fwrite(shown,sizeof(uint32_t),frame_w*240,f);fclose(f);}
                 }
             }
             world_scene_light_target(NULL);
