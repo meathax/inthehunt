@@ -1,0 +1,14 @@
+In the Hunt v0.9.17 for Windows x64
+
+Experimental 16:9 widescreen
+
+Choose Arcade for the original 4:3 view or Widescreen for the wider playfield.
+Stage five keeps its original-width shaft in both modes.
+
+This update fixes the placement of freeze-ray launchers, mounted enemies,
+breakable scenery, and the stage-six lift. All six stage spawn tables were
+checked against MAME 0.289.
+
+Extract the entire ZIP and open InTheHunt.exe. On first launch, select your
+own supported MAME ROM archive. To carry over saves and settings, copy
+your existing .local/world folder into the new installation.

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = {
     "InTheHunt.exe": ".local/native/InTheHunt.exe",
     "recomplauncher.json": "recomplauncher.json",
+    "RELEASE-NOTES.txt": "RELEASE-NOTES.txt",
     # Notices for third-party code compiled into the executable.
     "LICENSES/MAME-Timing-BSD-3-Clause.txt": "LICENSES/MAME-Timing-BSD-3-Clause.txt",
     "LICENSES/ymfm-BSD-3-Clause.txt": "LICENSES/ymfm-BSD-3-Clause.txt",
