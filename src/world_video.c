@@ -114,7 +114,7 @@ void world_video_scanline(uint16_t *output, unsigned y, const uint8_t *tiles,
             int xpos = sprite_left + (int)display_col * 16;
             if (xpos < right && xpos > left - 16)
                 sprite_row(output, priority, gfx2, code, local_y, xpos, flip_x, bank, behind, left, right);
-            if (xpos >= 497)
+            if (xpos - 512 > left - 16 && xpos - 512 < right)
                 sprite_row(output, priority, gfx2, code, local_y, xpos - 512, flip_x, bank, behind, left, right);
             code += 8;
         }

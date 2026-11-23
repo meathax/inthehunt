@@ -7410,6 +7410,39 @@ static int s2b_frames(uint8_t *ram, const uint8_t *bank, uint16_t actor, uint16_
     return 1;
 }
 
+/* Bosses with scripted attack lanes fire one visible, dodgeable shot at the sampled position.
+   Stagger P2 by half a cycle so opposite wings get independent coverage. */
+static void boss_wing_shot(uint8_t *ram, const uint8_t *rom, uint16_t actor, int wing)
+{
+    unsigned tick = read_word(ram, 0x274);
+    if ((tick & 127) || world_view_width() == WORLD_VIEW_ARCADE_WIDTH) return;
+    unsigned player = (tick >> 7) & 1;
+    if (!(ram[0x264] & (1u << player))) return;
+    uint16_t sub = read_word(ram, 0x90 + 2 * player);
+    int x = (int16_t)read_word(ram, sub + 0x21);
+    if ((x >= 0x70 && x <= 0x188) || !read_word(ram, sub + 0x26)) return;
+    if ((wing < 0 && x >= 0x70) || (wing > 0 && x <= 0x188)) return;
+    int origin = (int16_t)read_word(ram, actor + 0x21);
+    int height = (int16_t)read_word(ram, actor + 0x24);
+    /* Show the launch animation inside the aperture even when a moving
+       hull is entering or leaving the arena. */
+    if (origin < 0x3a || origin > 0x1c6 || height < 0x98 || height > 0x168) return;
+    int dx = x - origin;
+    int dy = (int16_t)read_word(ram, sub + 0x24) - height;
+    /* Allow room to react when the second-phase hull moves near a wing. */
+    if (abs(dx) + abs(dy) < 64) return;
+    uint16_t shot = world_spawn_child(ram, actor, 0xc97b);
+    if (!shot) return;
+    write_word(ram, shot + 2, 0xb000);
+    ram[shot + 0x2c] = ram[actor + 0x2c];
+    ram[shot + 0x28] = aim_angle(rom, dx, dy);
+    write_word(ram, shot + 0x2e, 0x200);
+    /* The launchers sit above the waterline. These rounds must enter the
+       water to threaten a submerged submarine. */
+    write_word(ram, shot + 0x1e, 0x8000);
+    world_queue_sound(ram, 0x64);
+}
+
 static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint16_t actor, uint32_t address)
 {
     const uint8_t *bank = rom + 0x10000;
@@ -7526,6 +7559,7 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
             read_word(ram, actor + 0x7e) == read_word(bank, 0x223c + side) + 8 &&
             remaining <= 4 * WORLD_VIEW_WING && remaining % 4 == 0)
             write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? 1 : -1));
+        boss_wing_shot(ram, rom, actor, read_word(ram, actor + 0x1e) ? -1 : 1);
         int step = step_flight_script(ram, rom, actor);
         if (!step) {
             world_dispatch_detail = "stage-two boss flight script kind";
@@ -7568,6 +7602,7 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         write_word(ram, actor, 0x2c52);
         /* fall through */
     case 0x12c52: {
+        boss_wing_shot(ram, rom, actor, 0);
         if (!tiles) return 0;
         if (!decrement(ram, actor + 0x5e)) {
             write_word(ram, actor + 0x5e, 0x20);
@@ -7581,7 +7616,10 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
             uint16_t row = read_word(ram, actor + 0x1e) + ((read_word(ram, actor + 0x4a) & 1) ? 4 : 0);
             uint16_t x = read_word(ram, target + 0x21) + read_word(bank, (uint16_t)(0x2234 + row));
             uint16_t y = read_word(ram, target + 0x24);
-            x = x < 0xa0 ? 0xa0 : x >= 0x160 ? 0x160 : x;
+            /* Preserve clearance for the surviving hull at either arena edge. */
+            int left = 0xa0 + world_view_left(), right = 0x160 - world_view_left();
+            int aim_x = world_view_left() ? (int16_t)x : (int)x;
+            x = aim_x < left ? left : aim_x > right ? right : aim_x;
             y = y < 0xd0 ? 0xd0 : y >= 0x130 ? 0x130 : y;
             ram[actor + 0x28] = aim_angle(rom, x - read_word(ram, actor + 0x21), y - read_word(ram, actor + 0x24));
             s5_velocity(ram, rom, actor);
@@ -9433,7 +9471,7 @@ static int stage_three_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terrain,
         if (read_word(ram, actor + 0x50) & 1) {
             write_word(ram, actor + 0x42, 0x40);
             write_word(ram, actor, 0xecd8);
-        }
+        } else boss_wing_shot(ram, rom, actor, 0);
         return 1;
     case 0x1ecd8:
         if (decrement(ram, actor + 0x42)) return 1;
@@ -10559,6 +10597,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             write_word(ram, actor + 0x21, 0x100 + remaining + remaining * WORLD_VIEW_WING / 224);
         }
         if (read_word(ram, 0xb700) >= 0x11bf) {
+            world_stage_three_boss_wall(ram, terrain - 0x4000);
             for (unsigned i = 0; i < 2; ++i) {
                 child = s3b_child(ram, actor, 0x4cba);
                 write_word(ram, child + 0x15, read_word(ram, actor + 0x15));
@@ -10593,6 +10632,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x1465a:
     case 0x146a5:
     case 0x146e4: {
+        boss_wing_shot(ram, rom, actor, 0);
         if (address == 0x1465a && read_word(ram, actor + 0x60) >= read_word(ram, actor + 0x26)) {
             write_word(ram, actor + 0x2a, 0xa9fe);
             ram[actor + 0x19] = 0x20;
@@ -10709,6 +10749,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     case 0x148a4:
     case 0x149ab:
     case 0x149ce: {
+        boss_wing_shot(ram, rom, actor, 0);
         if (address == 0x148a4) {
             int step = step_flight_script(ram, rom, actor);
             if (!step) {
@@ -13672,7 +13713,10 @@ static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *t
             return 1;
         }
         uint16_t x = read_word(ram, actor + 0x21), y = read_word(ram, actor + 0x24);
-        if (world_terrain_mask(ram, terrain, x, y) & 0xff1a) {
+        /* The boss round crosses both the surface (3) and submerged water
+           (4), and stops on the same solid materials as a submarine. */
+        unsigned solid = read_word(ram, actor + 0x1e) == 0x8000 ? 0xff02 : 0xff1a;
+        if (world_terrain_mask(ram, terrain, x, y) & solid) {
             finish_animation(ram, actor);
             return 1;
         }
@@ -28887,11 +28931,24 @@ stage2_jumper_terrain:
     case 0x6fb1:
         update_radial_effect(ram, main_rom, actor, address == 0x6f84);
         break;
-    /* 6D91: dead deck-gun husk emits a periodic puff; the exact sprite
-       table is undecoded, so the spawned effect retires immediately
-       rather than aborting the run (cosmetic gap, 5CD0 respawns it). */
+    /* Smoke from the destroyed warship deck guns, B000:6D91..6DF6. */
     case 0xb6d91:
-        finish_animation(ram, actor);
+        world_acquire_resource(ram, actor, 0x65);
+        write_word(ram, actor + 0x3c, 0xffff);
+        ram[actor + 0x2d] = 0x29;
+        write_word(ram, actor + 0x3a, 0x100);
+        write_word(ram, actor + 0x44, 1);
+        write_word(ram, actor, 0x6db2);
+        break;
+    case 0xb6db2:
+        scroll_actor(ram, actor, 0xb71a);
+        move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        if (!decrement(ram, actor + 0x44) &&
+            !s2b_frames(ram, main_rom + 0xb0000, actor, 0x546e, 0x5480)) {
+            finish_animation(ram, actor);
+            break;
+        }
+        queue_sprite(ram, main_rom, actor, 1);
         break;
     case 0x7f73:
         ram[actor + 0x2c] = 3;

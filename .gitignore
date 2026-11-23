@@ -23,6 +23,7 @@ __pycache__/
 /tools/*
 !/tools/test_surface_enemy_dispatch.c
 !/tools/test_wide_entrances.c
+!/tools/test_sprite_wrap.c
 /.codex-attachments/
 
 /docs/

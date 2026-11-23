@@ -10,6 +10,7 @@
 #include "world_boot.h"
 #include "world_dispatch.h"
 #include "world_frame.h"
+#include "world_stage.h"
 #include "world_palette.h"
 #include "world_video.h"
 #include "world_window.h"
@@ -1211,6 +1212,7 @@ static int restore_snapshot(const char *load_path)
                 failed = fread(&stage6_timing, sizeof stage6_timing, 1, f) != 1;
             }
             world_view_set_stage(word(ram + 0x84));
+            world_stage_three_boss_wall(ram, tiles);
             memcpy(slowdown_shadow, tiles, sizeof slowdown_shadow);
         }
         if(f)fclose(f);

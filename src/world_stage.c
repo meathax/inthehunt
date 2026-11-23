@@ -12,7 +12,9 @@ uint16_t world_spawn_child(uint8_t *, uint16_t, uint16_t);
  * scroll-locked decoration. See docs/widescreen-geometry.md. */
 static int world_anchored_kind(uint16_t kind)
 {
-    return kind == 0xda13 || kind == 0xdb86 || kind == 0x8309;
+    /* EC04 carries the bridge weak point and repaints a fixed section of
+       terrain on collapse. Its offscreen spawn is a world-space pivot. */
+    return kind == 0xda13 || kind == 0xdb86 || kind == 0x8309 || kind == 0xec04;
 }
 
 static uint16_t word(const uint8_t *p, uint16_t a)
@@ -61,6 +63,19 @@ static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
     if (x && (int16_t)x < 0x60)
         return moved > left - 16 ? left - 16 : moved;
     return moved - late;
+}
+
+void world_stage_three_boss_wall(const uint8_t *ram, uint8_t *tiles)
+{
+    if (world_view_width() != WORLD_VIEW_WIDE_WIDTH || word(ram, 0x84) != 2 ||
+        word(ram, 0x80) != 0xb2e || word(ram, 0xb70a) != 0x11bf) return;
+    /* At the final horizontal lock, the authored industrial wall ends at
+       field column 43 in the 64-tile ring. Its girders repeat every 16
+       tiles. Publish the next seven columns, including collision material. */
+    for (unsigned row = 0; row < 64; ++row) {
+        uint8_t *line = tiles + 0x4000 + row * 256;
+        memcpy(line + 44 * 4, line + 28 * 4, 7 * 4);
+    }
 }
 
 /* 1000:5D98. Drain due twelve-byte records in ROM order. A full actor
