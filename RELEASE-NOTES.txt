@@ -1,13 +1,14 @@
-In the Hunt v0.9.17 for Windows x64
+In the Hunt v0.9.18 for Windows x64
 
-Experimental 16:9 widescreen
+Ultrawide (21:9) mode
 
-Choose Arcade for the original 4:3 view or Widescreen for the wider playfield.
-Stage five keeps its original-width shaft in both modes.
-
-This update fixes the placement of freeze-ray launchers, mounted enemies,
-breakable scenery, and the stage-six lift. All six stage spawn tables were
-checked against MAME 0.289.
+- New Ultrawide mode beside Arcade and Widescreen: a 64:27 playfield (568 columns) for 21:9 monitors, chosen from the mode selector or with --mode=ultrawide.
+- Scenery, enemies, HUD panels and menus fill the wider view on all six stages; each mode keeps its own high scores.
+- Bosses now reach and shoot at subs camping in the far wings, including the stage-one claw submarine.
+- Fixed the sub wrapping from the left wing to the right side of the screen.
+- Wider stage-three boss wall; unwritten background cells in the wings render black instead of grey.
+- New radiance-cascade bounce lighting, soft shadows and light rays in the GPU effects.
+- Arcade mode output is unchanged.
 
 Extract the entire ZIP and open InTheHunt.exe. On first launch, select your
 own supported MAME ROM archive. To carry over saves and settings, copy
