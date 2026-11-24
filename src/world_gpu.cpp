@@ -143,7 +143,8 @@ static bool ambient_borders;
 void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h, unsigned source_w)
 {
     /* The widescreen session's visible aperture is exactly 16:9. */
-    const float aspect = source_w == 428 ? 16.0f / 9.0f : 4.0f / 3.0f;
+    /* The ultrawide raster is 568 columns; its 64:27 aperture is 568 8/9. */
+    const float aspect = source_w == 428 ? 16.0f / 9.0f : source_w == 568 ? 64.0f / 27.0f : 4.0f / 3.0f;
     gdl::post::Settings &s = chain.settings();
     s.source_mode = gdl::post::SourceMode::AsIs;
     s.base_width = source_w;
@@ -646,7 +647,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     Presenter *p = gpu;
     if (!p) return;
     if (k < 1) k = 1;
-    if (source_w != 428) source_w = W;
+    if (source_w != 428 && source_w != 568) source_w = W;
     if (k != p->picture_k || source_w != p->picture_w) {
         /* The source picture changed size: new texture and upload buffers. */
         p->wait_all();
@@ -885,7 +886,7 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
     uint8_t *map = nullptr;
     if (FAILED(source->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Upload map failed."); return 0; }
     for (unsigned s=0;s<count;++s) {
-        unsigned bytes=(scenes[s]->width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH)*4;
+        unsigned bytes=(scenes[s]->width>WORLD_VIEW_ARCADE_WIDTH ? scenes[s]->width : WORLD_VIEW_ARCADE_WIDTH)*4;
         unsigned pitch=(bytes+255)&~255u;
         for(int y=0;y<H;++y)
             memcpy(map+s*slotBytes+y*pitch,pixels[s]+y*(bytes/4),bytes);
@@ -946,7 +947,7 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
     }
     if (FAILED(readback->Map(0, nullptr, reinterpret_cast<void **>(&map)))) { say(error, error_size, "Readback failed."); return 0; }
     for(unsigned i=0;i<count*variants;++i) if(shaded && shaded[i]) {
-        unsigned bytes=(scenes[i%count]->width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH)*4;
+        unsigned bytes=(scenes[i%count]->width>WORLD_VIEW_ARCADE_WIDTH ? scenes[i%count]->width : WORLD_VIEW_ARCADE_WIDTH)*4;
         unsigned pitch=(bytes+255)&~255u;
         for(int y=0;y<H;++y)
             memcpy(shaded[i]+y*(bytes/4),map+i*slotBytes+y*pitch,bytes);

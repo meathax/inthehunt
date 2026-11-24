@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "world_shadow.h"
 #include "world_scene.h"
 
 enum {
@@ -353,7 +354,7 @@ static void render_layer(int layer, int from, int to)
     unsigned master = cur.layers[layer].master;
     if (!layer_on[layer]) return;
     int stage=lighting_stage();
-    unsigned wide = master & 4, columns = wide ? 128 : 64;
+    unsigned wide = master & 4;
     for (int by = from; by < to; ++by) {
         unsigned sy = (unsigned)(by - MARGIN + 136 + cur.layers[layer].scroll_y) & 511;
         unsigned scroll = cur.layers[layer].scroll_x;
@@ -362,11 +363,13 @@ static void render_layer(int layer, int from, int to)
         uint8_t *pri = layer_pri[layer] + by * LW;
         for (int bx = 0; bx < LW;) {
             unsigned sx = (unsigned)(bx - MARGIN + scene_left + 80) + scroll - 2 * (unsigned)layer + (wide ? 256 : 0);
-            unsigned entry = (master & 3) * 0x4000 + ((sy / 8) * columns + ((sx / 8) & (columns - 1))) * 4;
-            const uint8_t *tile = cur.tiles + (entry & 0xffff);
+            static const uint8_t blank_cell[4];
+            const uint8_t *tile = world_tile_entry(cur.tiles, master, sx, sy);
+            int blank = !tile;
+            if (blank) tile = blank_cell;
             unsigned attr = word(tile + 2), bank = (attr & 0x7f) | ((cur.video_control >> 7) & 0x180);
             const uint8_t *row = gfx1 + word(tile)*8 + ((attr&0x400 ? ~sy : sy)&7);
-            uint64_t pens = decode_plane_row(row,0x80000);
+            uint64_t pens = blank ? 0 : decode_plane_row(row,0x80000);
             if (attr & 0x200) pens = __builtin_bswap64(pens);
             pens >>= 8*(sx&7);
             int end = bx + 8 - (int)(sx&7);
@@ -470,7 +473,8 @@ void world_scene_submit(const WorldSceneFrame *frame)
 {
     if (!ready) prepare();
     if (!gfx1 || !gfx2) return;
-    int width = frame->width == WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH;
+    int width = frame->width == WORLD_VIEW_WIDE_WIDTH || frame->width == WORLD_VIEW_ULTRA_WIDTH
+                ? (int)frame->width : WORLD_VIEW_ARCADE_WIDTH;
     if (width != W || frame->left != scene_left) {
         cur.valid = prev.valid = 0;
         W = width;
@@ -534,7 +538,8 @@ static int parse_sprites(const uint8_t *buffer, Sprite *list)
         s->slot=offset/8;
         offset += 8u * (unsigned)s->cols;
         s->top = 360 - (int)(geometry & 511) - 16 * (s->rows - 1);
-        s->left = (int)((word(entry + 6) - 16u) & 511) - 80 - scene_left;
+        s->left = (W > 512 ? (int16_t)word(entry + 6) - 96
+                           : (int)((word(entry + 6) - 16u) & 511) - 80) - scene_left;
         s->code = word(entry + 2);
         s->attr = word(entry + 4);
     }
@@ -703,7 +708,7 @@ static void draw_sprites(double alpha)
                     if (!pen) continue;
                     uint16_t index = (uint16_t)((bank * 16 + pen) & 1023);
                     /* A column starting at 497 or beyond wraps to the left edge. */
-                    int wrap = s->left + shown * 16 >= 497 ? 512 : 0;
+                    int wrap = W <= 512 && s->left + shown * 16 >= 497 ? 512 : 0;
                     int sx = s->left + shown * 16 + col - wrap;
                     int px = left + (shown * 16 + col - wrap) * k, py = top + row * k;
                     drawing.wanted = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive;

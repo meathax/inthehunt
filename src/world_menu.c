@@ -40,7 +40,7 @@ enum {
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
     ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
     ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
-    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE
+    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE, ITEM_START_ULTRA
 };
 enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -266,6 +266,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             if (m->selector) {
                 ADD(ITEM_SELECT_ARCADE, "ARCADE", "ORIGINAL 4:3");
                 ADD(ITEM_START_WIDE, "WIDESCREEN", "EXPANDED 16:9");
+                ADD(ITEM_START_ULTRA, "ULTRAWIDE", "EXPANDED 21:9");
             } else ADD(ITEM_START, "PLAY", "INSERT A COIN AND DIVE IN");
             ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND, GAME AND CONTROLS");
             ADD(ITEM_QUIT, "EXIT", "CLOSE IN THE HUNT");
@@ -575,7 +576,7 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
         }
         if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-        else go(m, PAGE_MAIN, m->selector + (m->page == PAGE_OPTIONS ? 1 : 2));
+        else go(m, PAGE_MAIN, 2 * m->selector + (m->page == PAGE_OPTIONS ? 1 : 2));
         return 0;
     }
     if (m->page == PAGE_OPTIONS && (pressed & (WORLD_MENU_TAB_PREV | WORLD_MENU_TAB_NEXT))) {
@@ -607,17 +608,18 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
         case ITEM_START: m->open = 0; return WORLD_MENU_START | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_SELECT_ARCADE: m->open = 0; return WORLD_MENU_SELECT_ARCADE | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_START_WIDE: m->open = 0; return WORLD_MENU_SELECT_WIDE | (m->dirty ? WORLD_MENU_SAVE : 0);
+        case ITEM_START_ULTRA: m->open = 0; return WORLD_MENU_SELECT_ULTRA | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_OPTIONS: go(m, PAGE_OPTIONS, m->rows[PAGE_OPTIONS] ? m->rows[PAGE_OPTIONS] : 1); return 0;
         case ITEM_CONTROLS: go(m, PAGE_CONTROLS, 0); return 0;
         case ITEM_QUIT: go(m, PAGE_QUIT, 0); return 0;
-        case ITEM_NO: go(m, PAGE_MAIN, m->selector + 2); return 0;
+        case ITEM_NO: go(m, PAGE_MAIN, 2 * m->selector + 2); return 0;
         case ITEM_YES:
             if (m->title) return WORLD_MENU_QUIT | (m->dirty ? WORLD_MENU_SAVE : 0);
             m->open = 0;
             return WORLD_MENU_TITLE | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_BACK:
             if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-            else go(m, PAGE_MAIN, m->selector + 1);
+            else go(m, PAGE_MAIN, 2 * m->selector + 1);
             return 0;
         case ITEM_TABS: m->tab = (m->tab + 1) % TAB_COUNT; return 0;
         case ITEM_DEFAULTS: {
@@ -788,14 +790,14 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
         Item rows[MAX_ITEMS];
         unsigned count = page_items(m, rows);
         for (unsigned i = 0; i < count; ++i) {
-            int y = 55 + 39 * i;
+            int y = 52 + 32 * i;
             if (m->row == i) {
                 shade(c, x + 12, y - 5, 142, 29, 0xff18455a, 230);
                 fill(c, x + 12, y - 5, 2, 29, 0xffe4b15c);
                 torpedo(c, x + 18, y + 2, 0);
             }
             text(c, gfx1, x + 34, y, rows[i].label, m->row == i ? &brass : &light);
-            if (i < 2) text(c, gfx1, x + 34, y + 12, rows[i].help, &blue);
+            if (i < 3) text(c, gfx1, x + 34, y + 12, rows[i].help, &blue);
         }
         text(c, gfx1, x + 18, 210, m->gamepad ? "A  SELECT" : "ENTER  SELECT", &blue);
         return;

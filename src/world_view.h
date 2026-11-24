@@ -11,15 +11,31 @@
  * in [0,320); Widescreen sees [-54,374) in a 428-wide raster where
  * raster X = screen X + 54. The visible 16:9 aperture is the middle
  * 426 2/3 columns; 2/3 column of overscan stays on each side. */
-enum { WORLD_VIEW_ARCADE = 0, WORLD_VIEW_WIDE = 1 };
+enum { WORLD_VIEW_ARCADE = 0, WORLD_VIEW_WIDE = 1, WORLD_VIEW_ULTRA = 2 };
 
+/* Ultrawide (64:27, sold as 21:9) sees legacy X in [-124,444) in a 568-wide
+   raster; its 568 8/9-column aperture overscans by 4/9 column per side. */
 enum {
     WORLD_VIEW_HEIGHT = 240,
     WORLD_VIEW_ARCADE_WIDTH = 320,
     WORLD_VIEW_WIDE_WIDTH = 428,
-    WORLD_VIEW_MAX_WIDTH = 428,
-    WORLD_VIEW_WING = 54              /* wide raster X = screen X + 54 */
+    WORLD_VIEW_ULTRA_WIDTH = 568,
+    WORLD_VIEW_MAX_WIDTH = 568,
+    WORLD_VIEW_WING = 54,             /* wide raster X = screen X + 54 */
+    WORLD_VIEW_ULTRA_WING = 124       /* ultrawide raster X = screen X + 124 */
 };
+
+/* Wing of a raster width: (width - 320) / 2. */
+static inline int world_view_wing_of(unsigned width)
+{
+    return width > WORLD_VIEW_ARCADE_WIDTH ? (int)(width - WORLD_VIEW_ARCADE_WIDTH) / 2 : 0;
+}
+/* Session width of a mode. */
+static inline unsigned world_view_mode_width(unsigned mode)
+{
+    return mode == WORLD_VIEW_ULTRA ? WORLD_VIEW_ULTRA_WIDTH
+         : mode == WORLD_VIEW_WIDE ? WORLD_VIEW_WIDE_WIDTH : WORLD_VIEW_ARCADE_WIDTH;
+}
 
 /* Set once per session before any mode-dependent camera, buffers, actors or
  * first frame initialize. Arcade is the power-on default. */
@@ -28,8 +44,10 @@ unsigned world_view_mode(void);
 void world_view_set_stage(unsigned stage);
 unsigned world_view_canvas_width(void);
 
-/* Raster columns of the working frame: 320 or 428. */
+/* Raster columns of the working frame: 320, 428 or 568. */
 unsigned world_view_width(void);
+/* Columns added on each side of the arcade picture: 0, 54 or 124. */
+int world_view_wing(void);
 /* Legacy screen X at raster column 0: 0 or -54. */
 int world_view_left(void);
 /* Raster column of a signed legacy screen X (may be < 0 or >= width). */
@@ -68,6 +86,10 @@ int world_view_edge_eq(uint16_t x, unsigned c);        /* x == c */
  * boundary is ambiguous in the source, so the caller picks by semantics. */
 uint16_t world_view_edge_right(unsigned c);
 uint16_t world_view_edge_left(unsigned c);
+/* x >= edge_left(c) for a left-margin "has entered the picture" gate. The
+   ROM compares unsigned; ultrawide edges lie at negative fields, so that
+   mode compares signed. */
+int world_view_edge_ge_left(uint16_t x, unsigned c);
 
 /* Tilemap byte-column shift applied to per-player HUD panel destinations.
  * The HUD plane's rows 45/46 hold P1's left panel and P2's right panel;

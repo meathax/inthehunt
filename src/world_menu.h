@@ -22,7 +22,8 @@ enum {
     WORLD_MENU_START = 256,         /* title menu: start the arcade game */
     WORLD_MENU_TITLE = 512,         /* pause menu: end this game and return to the title menu */
     WORLD_MENU_SELECT_ARCADE = 2048,
-    WORLD_MENU_SELECT_WIDE = 1024    /* title menu: start the widescreen session */
+    WORLD_MENU_SELECT_WIDE = 1024,   /* title menu: start the widescreen session */
+    WORLD_MENU_SELECT_ULTRA = 4096   /* title menu: start the ultrawide session */
 };
 
 typedef struct {

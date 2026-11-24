@@ -11,7 +11,7 @@
 #include "world_window.h"
 #include "world_gpu.h"
 
-enum { WIDTH = 320, HEIGHT = 240, MAX_WIDTH = 428 };
+enum { WIDTH = 320, HEIGHT = 240, WIDE_WIDTH = 428, MAX_WIDTH = 568 };
 static const wchar_t window_class[] = L"InTheHuntNativeViewport";
 static HWND window;
 static BITMAPINFO bitmap;
@@ -49,7 +49,7 @@ static int back_width, back_height;
  * (2/3 of a raster column of overscan each side, rounded per k). */
 static void paint_area(HDC dc, RECT rect)
 {
-    int crop = source_w == (unsigned)MAX_WIDTH ? (2 * frame_k + 1) / 3 : 0;
+    int crop = source_w == (unsigned)WIDE_WIDTH ? (2 * frame_k + 1) / 3 : 0;
     int src_x0 = crop, src_w = (int)source_w * frame_k - 2 * crop, src_h = HEIGHT * frame_k;
     int scale = smaller(rect.right / (src_w / frame_k), rect.bottom / HEIGHT);
     if (scale < 1) scale = 1;
@@ -632,7 +632,8 @@ void world_window_set_display(int full, unsigned scale, unsigned session_width)
     RECT work = info.rcWork, frame_rect = {0, 0, 0, 0};
     AdjustWindowRect(&frame_rect, WS_OVERLAPPEDWINDOW, FALSE);
     int dw = frame_rect.right - frame_rect.left, dh = frame_rect.bottom - frame_rect.top;
-    int aperture_thirds = session_width == (unsigned)MAX_WIDTH ? 1280 : 3 * WIDTH;
+    int aperture_thirds = session_width == (unsigned)WIDE_WIDTH ? 1280
+                        : session_width == (unsigned)MAX_WIDTH ? 3 * MAX_WIDTH : 3 * WIDTH;
     int fit = smaller(3 * (work.right - work.left - dw) / aperture_thirds, (work.bottom - work.top - dh) / HEIGHT);
     if (scale < 1) scale = 1;
     if ((int)scale > fit && fit >= 1) scale = (unsigned)fit;

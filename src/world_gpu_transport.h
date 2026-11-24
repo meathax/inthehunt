@@ -200,7 +200,7 @@ struct GpuTransport {
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
-        int cols=data.width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : W;
+        int cols=data.width>W && data.width<=WORLD_VIEW_MAX_WIDTH ? (int)data.width : W;
         if (changed || scale!=k) {
             void *map=nullptr;
             D3D12_RANGE empty={0,0};
@@ -264,7 +264,7 @@ struct GpuTransport {
         auto transition=[&](ID3D12Resource *r,D3D12_RESOURCE_STATES from,D3D12_RESOURCE_STATES to){
             auto b=barrier(r,from,to);cmd->ResourceBarrier(1,&b);
         };
-        const int cols=data.width==WORLD_VIEW_WIDE_WIDTH ? WORLD_VIEW_WIDE_WIDTH : W;
+        const int cols=data.width>W && data.width<=WORLD_VIEW_MAX_WIDTH ? (int)data.width : W;
         const UINT pitch=(cols*k*4+255)&~255u;
         read_time(frame);
         bool medium=adaptive(data);

@@ -52,7 +52,7 @@ static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
 {
     if (world_view_width() == WORLD_VIEW_ARCADE_WIDTH || world_anchored_kind(segment, kind))
         return x - late;
-    const int left = 96 - WORLD_VIEW_WING, right = left + WORLD_VIEW_WIDE_WIDTH;
+    const int left = 96 - world_view_wing(), right = left + (int)world_view_width();
     /* Stage two's paired submarines straddle the old right boundary.
        The first 4032 hull piece starts 24 pixels left of the pivot. */
     if (segment == 0xb000 && kind == 0x909f && x >= 0x198 && x <= 0x1a0)

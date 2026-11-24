@@ -127,7 +127,7 @@ void world_frame_tag_blast(unsigned first,unsigned end,int blast)
 static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
 {
     unsigned priority, out = 0;
-    int wide = word(ram + 0x80) == 0xb2e && world_view_width() == WORLD_VIEW_WIDE_WIDTH;
+    int wing = word(ram + 0x80) == 0xb2e ? world_view_wing() : 0, wide = wing != 0;
     memset(world_sprite_owners,0,sizeof world_sprite_owners);
     for (priority = 0; priority < 128; priority += 2) {
         uint16_t actor = word(ram + 0x9c00 + priority);
@@ -154,8 +154,8 @@ static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
                        A hull may cross an edge before its anchor does. */
                     int left = (int16_t)x - 96;
                     int width = 16 << ((attr >> 3) & 3);
-                    if (left >= WORLD_VIEW_ARCADE_WIDTH + WORLD_VIEW_WING ||
-                        left + width <= -WORLD_VIEW_WING) continue;
+                    if (left >= WORLD_VIEW_ARCADE_WIDTH + wing ||
+                        left + width <= -wing) continue;
                 } else if (distance_from_center(x) > 0xb1) continue;
                 put(oam + out + 6, x);
                 if (sprite[9] & 2) y = (uint16_t)(-y - word(rom + 0xd55 + (attr & 7)));

@@ -29,6 +29,7 @@
 #include "world_file.h"
 #include "world_setup.h"
 #include "world_menu.h"
+#include "world_shadow.h"
 #include "world_view.h"
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
@@ -41,7 +42,7 @@ static unsigned frame_w = 320;
 static unsigned shot_w = 320;          /* unscaled width of the last captured frame */
 static int frame_left(void)
 {
-    return frame_w == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
+    return -world_view_wing_of(frame_w);
 }
 /* Title entry at 0:1D52 programs all three playfield controls. */
 static const uint16_t title_master_controls[3] = {0, 0x41, 2};
@@ -146,7 +147,7 @@ static void scene_submit(void)
     frame.waterline = waterline_row();
     frame.scene_id = word(ram + 0x80) | word(ram + 0x84) << 16;
     frame.width = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
-    frame.left = frame.width == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
+    frame.left = -world_view_wing_of(frame.width);
     /* The camera keeps a fraction of a pixel (byte 51h of its actor) that
        the whole-pixel scroll registers drop. The background scrolls at half
        the playfield's rate, so its fraction follows from the same value. */
@@ -245,7 +246,7 @@ static void overlay_notices(uint32_t *frame, int k)
         apply_view();
         show_notice("CRT SHADER FAILED");
     } else if (notice_until && !strcmp(notice, "LOADING CRT SHADER")) notice_until = GetTickCount();
-    int inset = frame_w == WORLD_VIEW_WIDE_WIDTH ? (int)(frame_w - world_view_width()) / 2 : 0;
+    int inset = frame_w > world_view_width() ? (int)(frame_w - world_view_width()) / 2 : 0;
     if (notice[0] && (int)(notice_until - GetTickCount()) > 0) {
         world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, (inset + 5) * k, 5 * k, (unsigned)k, 0xff000000, notice);
         world_menu_draw_text(frame, (unsigned)frame_w * k, 240u * k, (inset + 4) * k, 4 * k, (unsigned)k, 0xffff8060, notice);
@@ -304,15 +305,15 @@ static void present_game(const uint32_t *source)
         && world_gpu_transport_available();
     float offsets[4]={0};
     int pixel_camera=!title && !settings.crt_shader && world_gpu_visible() &&
-                     !(frame_w == WORLD_VIEW_WIDE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH);
+                     !(frame_w > WORLD_VIEW_ARCADE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH);
     world_scene_camera_output(pixel_camera ? offsets : NULL);
     world_scene_light_ready=trace && !title && settings.gfx_quality==WORLD_GFX_HIGH ? world_gpu_prepare_lights : NULL;
     world_scene_light_target(trace ? &lights : NULL);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
     world_scene_light_ready=NULL;
     /* Some stages keep their 4:3 aperture inside the widescreen canvas. */
-    if (frame_w == WORLD_VIEW_WIDE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH) {
-        int inset = WORLD_VIEW_WING*k, stride = (int)frame_w*k;
+    if (frame_w > WORLD_VIEW_ARCADE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH) {
+        int inset = world_view_wing_of(frame_w)*k, stride = (int)frame_w*k;
         for (int y=0; y<240*k; ++y) {
             uint32_t *row = shown + y*stride;
             for (int x=0; x<inset; ++x) row[x] = row[stride-1-x] = 0xff000000u;
@@ -328,7 +329,7 @@ static void present_game(const uint32_t *source)
     if (settings.show_fps && shown_fps) {
         char label[32];
         snprintf(label, sizeof label, "%u FPS %u%%", shown_fps, shown_speed);
-        int inset = frame_w == WORLD_VIEW_WIDE_WIDTH ? (int)(frame_w - world_view_width()) / 2 : 0;
+        int inset = frame_w > world_view_width() ? (int)(frame_w - world_view_width()) / 2 : 0;
         int x = (int)frame_w - inset - world_menu_text_width(label, 1) - 4;
         world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, (x + 1) * k, 5 * k, (unsigned)k, 0xff000000, label);
         world_menu_draw_text(shown, (unsigned)frame_w * k, 240u * k, x * k, 4 * k, (unsigned)k, 0xffffe070, label);
@@ -434,7 +435,7 @@ static void locate_sounds(unsigned actor,unsigned tail)
         /* Listener window: the aperture plus 48 px of margin each side;
            pan normalizes to the aperture half-width, clamped at output. */
         int lo=frame_left()-48, hi=frame_left()+(int)frame_w+48;
-        float half=frame_w==WORLD_VIEW_WIDE_WIDTH?640.f/3.f:160.f;
+        float half=frame_w==WORLD_VIEW_ULTRA_WIDTH?2560.f/9.f:frame_w==WORLD_VIEW_WIDE_WIDTH?640.f/3.f:160.f;
         if(x>=lo && x<hi && y>=-48 && y<288){
             origin.pan=fmaxf(-.72f,fminf(.72f,(x-159.5f)*(.72f/half)));
             int wl=waterline_row();
@@ -624,6 +625,8 @@ static void sound_frame_body(void)
 
 static void capture_video(void)
 {
+    world_shadow_end_pass(ram, tiles);
+    { extern void world_shadow_debug(const uint8_t *, unsigned long); world_shadow_debug(ram, ticks); }
     frame_w = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
     shot_w = frame_w;
     WorldVideoLayer layers[3];
@@ -648,7 +651,7 @@ static void draw_captured_pixels(void)
 {
     unsigned width = frame_w < world_view_width() ? frame_w : world_view_width();
     unsigned inset = (frame_w - width) / 2;
-    int left = width == WORLD_VIEW_WIDE_WIDTH ? -WORLD_VIEW_WING : 0;
+    int left = -world_view_wing_of(width);
     for (unsigned y = 0; y < 240; ++y) {
         uint16_t line[WORLD_VIEW_MAX_WIDTH];
         world_video_scanline(line, y, tiles, gfx1, gfx2, drawn_sprites, drawn_layers,
@@ -847,6 +850,7 @@ static int tick(uint16_t pads, uint16_t system)
         WorldDispatch pass;
         uint32_t addr;
         world_dispatch_begin(&pass, ram);
+        world_shadow_begin_pass(ram, tiles, layer_master);
         unsigned calls = 0;
         while (world_dispatch_target(&pass, ram, &addr)) {
             world_clock_note_unrecovered(&board_clock);
@@ -875,12 +879,15 @@ static int tick(uint16_t pads, uint16_t system)
             uint16_t rendered_actor=pass.actor,sprite=word(ram+0x9e04);
             unsigned sound_tail=word(ram+0xa6d4)&14;
             int old_x=weapon_position(rendered_actor+0x20),old_y=weapon_position(rendered_actor+0x23);
+            world_shadow_actor(ram, tiles, pass.actor, addr);
+            { extern void world_shadow_before_handler(const uint8_t *); world_shadow_before_handler(tiles); }
             if (!world_dispatch_native_video(&pass, ram, rom, tiles)) {
                 snprintf(failure, sizeof failure, "Unrecovered World handler %05lX, actor %04X, master %04X.%s%s",
                          (unsigned long)addr, pass.actor, word(ram + 0x80),
                          *world_dispatch_detail ? " " : "", world_dispatch_detail);
                 return 0;
             }
+            { extern void world_shadow_after_handler(const uint8_t *, const uint8_t *, uint16_t, uint32_t); world_shadow_after_handler(ram, tiles, rendered_actor, addr); }
             unsigned sprite_end=word(ram+0x9e04);
             if(sprite_end!=sprite){
                 int radial=addr==0x6f84 || addr==0x6fb1;
@@ -897,6 +904,7 @@ static int tick(uint16_t pads, uint16_t system)
                     375-(int16_t)word(ram+rendered_actor+0x24),waterline_row(),boss_lamp(state).kind);
             }
         }
+        world_shadow_end_pass(ram, tiles);
         weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
             unsigned actor=boss_lamps[i].actor;
@@ -1199,6 +1207,7 @@ static int restore_snapshot(const char *load_path)
             fread(layer_master, sizeof layer_master, 1, f) != 1 || fread(&ticks, sizeof ticks, 1, f) != 1 ||
             fread(&board_clock, sizeof board_clock, 1, f) != 1 || fread(sound_state, sizeof sound_state, 1, f) != 1;
         imm_reset(word(ram+0x84),settings.spatial_audio && word(ram+0x80)==0xb2e);
+        world_shadow_reset();
         memset(&acoustics,0,sizeof acoustics);
         memset(&stage6_timing, 0, sizeof stage6_timing);
         if (!failed) {
@@ -1757,7 +1766,8 @@ static void load_scores(void)
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, data_directory, -1, score_path, 4040);
     scores_active = n > 0;
     if (!scores_active) return;
-    wcscat(score_path, world_view_mode() == WORLD_VIEW_WIDE ? L"/scores-wide.dat" : L"/scores-arcade.dat");
+    wcscat(score_path, world_view_mode() == WORLD_VIEW_ULTRA ? L"/scores-ultrawide.dat"
+                     : world_view_mode() == WORLD_VIEW_WIDE ? L"/scores-wide.dat" : L"/scores-arcade.dat");
     FILE *f = _wfopen(score_path, L"rb");
     unsigned char rows[SCORE_BYTES];
     if (f) {
@@ -1800,6 +1810,7 @@ static void machine_reset(void)
 {
     set_cabinet_switches();
     world_dispatch_reset();
+    world_shadow_reset();
     world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
     memcpy(layer_master, title_master_controls, sizeof layer_master);
     weapon_lights_count=0;memset(flight,0,sizeof flight);
@@ -1886,8 +1897,9 @@ static int run_game(int argc, char **argv)
         }
         if (!strncmp(argv[i], "--mode=", 7)) {
             if (!strcmp(argv[i] + 7, "wide")) world_view_set(WORLD_VIEW_WIDE);
+            else if (!strcmp(argv[i] + 7, "ultrawide")) world_view_set(WORLD_VIEW_ULTRA);
             else if (strcmp(argv[i] + 7, "arcade")) {
-                fprintf(stderr, "Unknown --mode=%s. Use arcade or wide.\n", argv[i] + 7);
+                fprintf(stderr, "Unknown --mode=%s. Use arcade, wide or ultrawide.\n", argv[i] + 7);
                 return 1;
             }
             continue;
@@ -2040,8 +2052,9 @@ load_game_data:
             world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
-            if (result & (WORLD_MENU_SELECT_ARCADE | WORLD_MENU_SELECT_WIDE)) {
-                world_view_set(result & WORLD_MENU_SELECT_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE);
+            if (result & (WORLD_MENU_SELECT_ARCADE | WORLD_MENU_SELECT_WIDE | WORLD_MENU_SELECT_ULTRA)) {
+                world_view_set(result & WORLD_MENU_SELECT_ULTRA ? WORLD_VIEW_ULTRA
+                             : result & WORLD_MENU_SELECT_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE);
                 machine_reset();
                 load_scores();
                 if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, world_view_width());
@@ -2155,7 +2168,7 @@ load_game_data:
         if (pacing_log) QueryPerformanceCounter(&after_tick);
         if (advanced) {
             capture_video();
-            if (frame_w == WORLD_VIEW_WIDE_WIDTH) draw_captured_pixels();
+            if (frame_w > WORLD_VIEW_ARCADE_WIDTH) draw_captured_pixels();
             scene_submit();
         }
         /* Hold original multi-vblank slowdown frames. On extra display

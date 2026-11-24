@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+enum { WORLD_VIDEO_MAX_WIDTH = 576 };
+
 /* Use the user's imported gfx1 (2 MiB) and gfx2 (4 MiB) planar images. */
 uint8_t world_video_tile_pen(const uint8_t *gfx1, unsigned code, unsigned x, unsigned y);
 uint8_t world_video_sprite_pen(const uint8_t *gfx2, unsigned code, unsigned x, unsigned y);

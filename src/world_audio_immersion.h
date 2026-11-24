@@ -51,7 +51,7 @@ static void imm_reset(unsigned stage, unsigned active)
  * normalize against the aperture half-width (160 px arcade, 213 1/3 wide). */
 static float imm_half(void)
 {
-    return world_view_width()==WORLD_VIEW_WIDE_WIDTH?640.f/3.f:160.f;
+    return world_view_width()==WORLD_VIEW_ULTRA_WIDTH?2560.f/9.f:world_view_width()==WORLD_VIEW_WIDE_WIDTH?640.f/3.f:160.f;
 }
 static int imm_lo(void){return world_view_left()-48;}
 static int imm_hi(void){return world_view_left()+(int)world_view_width()+48;}

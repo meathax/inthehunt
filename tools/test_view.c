@@ -135,6 +135,24 @@ int main(void)
     world_view_set(WORLD_VIEW_WIDE);
     check(world_view_hud_shift(1) == -28, "wide hud P1");
     check(world_view_hud_shift(2) == 28, "wide hud P2");
+    /* --- Ultrawide (64:27) --- */
+    world_view_set(WORLD_VIEW_ULTRA);
+    check(world_view_mode() == WORLD_VIEW_ULTRA, "ultra mode");
+    check(world_view_width() == 568 && world_view_wing() == 124, "ultra width/wing");
+    check(world_view_raster(-124) == 0 && world_view_raster(443) == 567, "ultra endpoints");
+    check(world_view_raster(160) == 284, "ultra centre");
+    check(world_view_player_min_x() == 0 && world_view_player_max_x() == 0x204, "ultra clamps");
+    check(world_view_spawn_x(0x1a0) == 0x1a0 + 124 && world_view_spawn_x(0x5f) == (uint16_t)(0x5f - 124), "ultra spawn");
+    check(world_view_edge_less(0x0000, 0x3f) == 0, "ultra field 0 still inside");
+    check(world_view_edge_less((uint16_t)-62, 0x3f) == 1, "ultra left retire past -61");
+    check(world_view_edge_greater(0x1c1 + 124, 0x1c0) == 1 && world_view_edge_greater(0x1c0 + 124, 0x1c0) == 0, "ultra right retire");
+    check(world_view_edge_ge_left((uint16_t)-28, 0x60) == 1 && world_view_edge_ge_left((uint16_t)-29, 0x60) == 0, "ultra entered gate");
+    check(world_view_edge_ge_left(0x100, 0x60) == 1, "ultra entered gate interior");
+    check(world_view_hud_shift(1) == -48 && world_view_hud_shift(2) == 48, "ultra hud");
+    world_view_set_stage(4);
+    check(world_view_width() == 320 && world_view_canvas_width() == 568, "ultra shaft arcade aperture");
+    world_view_set_stage(0);
+
     world_view_set(WORLD_VIEW_ARCADE);
     check(world_view_hud_shift(1) == 0 && world_view_hud_shift(2) == 0, "arc hud zero");
     check(world_view_width() == 320, "back to arcade");

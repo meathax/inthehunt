@@ -3,6 +3,7 @@
 #include "world_stage.h"
 #include "world_title.h"
 #include "world_torpedo.h"
+#include "world_shadow.h"
 #include "world_tile_address.h"
 #include "world_view.h"
 #include <stdio.h>
@@ -3057,13 +3058,20 @@ static void update_rank(uint8_t *ram, const uint8_t *rom)
     write_word(ram, 0x8c, maximum);
 }
 
+/* Ultrawide streams scenery 64 pixels further ahead (world_shadow.h). The
+   column source/destination fields of each scroll-script row are then
+   applied by a lookahead cursor at the same lead, so the ordinary cursor
+   leaves them alone. */
+static int scroll_script_lookahead;
+static struct { uint16_t actor, row, trigger; } scroll_lookahead[4];
+
 static void load_scroll_script(uint8_t *ram, const uint8_t *rom, uint16_t actor)
 {
     uint16_t row = read_word(ram, actor + 0x40);
     uint16_t x = read_word(rom, row + 2), y = read_word(rom, row + 6);
-    if (x != 0xffff)
+    if (x != 0xffff && !scroll_script_lookahead)
         write_word(ram, actor + 0x42, x);
-    if (y != 0xffff)
+    if (y != 0xffff && !scroll_script_lookahead)
         write_word(ram, actor + 0x44, y);
     write_word(ram, actor, read_word(rom, row + 4));
     write_word(ram, actor + 0x4c, read_word(rom, row + 8));
@@ -3077,6 +3085,41 @@ static void advance_scroll_script(uint8_t *ram, const uint8_t *rom, uint16_t act
 {
     if ((int16_t)read_word(ram, actor + 0x46) <= (int16_t)read_word(ram, 0xb700))
         load_scroll_script(ram, rom, actor);
+}
+
+/* The lookahead cursor for a column-producing layer actor, created from the
+   ordinary cursor the first time the lead applies. */
+static unsigned scroll_lookahead_slot(const uint8_t *ram, uint16_t actor)
+{
+    unsigned free_slot = 4;
+    for (unsigned i = 0; i < 4; ++i) {
+        if (scroll_lookahead[i].actor == actor) return i;
+        if (!scroll_lookahead[i].actor && free_slot == 4) free_slot = i;
+    }
+    if (free_slot == 4) free_slot = 0;
+    scroll_lookahead[free_slot].actor = actor;
+    scroll_lookahead[free_slot].row = read_word(ram, actor + 0x40);
+    scroll_lookahead[free_slot].trigger = read_word(ram, actor + 0x46);
+    return free_slot;
+}
+
+static void advance_scroll_lookahead(uint8_t *ram, const uint8_t *rom, uint16_t actor, unsigned lead)
+{
+    unsigned i = scroll_lookahead_slot(ram, actor);
+    while (scroll_lookahead[i].trigger != 0xffff &&
+           (int16_t)scroll_lookahead[i].trigger <= (int16_t)(read_word(ram, 0xb700) + lead)) {
+        uint16_t row = scroll_lookahead[i].row;
+        uint16_t x = read_word(rom, row + 2), y = read_word(rom, row + 6);
+        if (x != 0xffff) write_word(ram, actor + 0x42, x);
+        if (y != 0xffff) write_word(ram, actor + 0x44, y);
+        scroll_lookahead[i].row = row + 14;
+        scroll_lookahead[i].trigger = read_word(rom, row + 14);
+    }
+}
+
+void world_dispatch_reset_lookahead(void)
+{
+    memset(scroll_lookahead, 0, sizeof scroll_lookahead);
 }
 
 static void update_camera_limits(uint8_t *ram, const uint8_t *rom, uint16_t actor)
@@ -3117,6 +3160,8 @@ static void init_tile_layer(uint8_t *ram, const uint8_t *rom, uint16_t actor, un
     }
     if (layer) write_word(ram, actor + 0x4e, read_word(rom, (layer == 1 ? 0x475d : 0x4773) + stage));
     write_word(ram, actor + 0x40, read_word(rom, script_table[layer] + stage));
+    for (unsigned i = 0; i < 4; ++i)
+        if (scroll_lookahead[i].actor == actor) scroll_lookahead[i].actor = 0;
     load_scroll_script(ram, rom, actor);
     if (layer == 1) {
         write_word(ram, actor + 0x68, read_word(rom, 0x47e1 + stage));
@@ -3186,7 +3231,9 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
         finish_animation(ram, actor);
         return;
     }
-    if (trigger > read_word(ram, 0xb700))
+    /* Ultrawide paints set pieces with the same 64-pixel lead as the
+       column producer (world_shadow.h). */
+    if (trigger > (uint16_t)(read_word(ram, 0xb700) + (world_shadow_active() ? 64 : 0)))
         return;
     uint16_t row = read_word(ram, actor + 0x40);
     uint16_t source = read_word(rom, row + 2), origin = read_word(rom, row + 4);
@@ -3211,8 +3258,10 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
             write_word(ram, 0xb89c, origin);
         }
     }
-    if (base && !trigger && world_view_width() == WORLD_VIEW_WIDE_WIDTH && !read_word(ram, 0x28c))
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING && !read_word(ram, 0x28c))
         extend_opening_rows(tiles, base, first_block, width, height, mode == 3);
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_ULTRA_WING && !read_word(ram, 0x28c))
+        world_shadow_extend_opening(tiles, base, first_block, width, height, mode == 3);
     write_word(ram, actor + 0x40, row + 10);
     trigger = read_word(rom, row + 10);
     if (trigger == 0xffff)
@@ -3736,7 +3785,8 @@ static void update_camera_layers(uint8_t *ram, const uint8_t *rom, uint8_t *tile
         }
     }
     uint16_t trigger = read_word(ram, actor + 0x6a);
-    if ((int16_t)trigger <= (int16_t)read_word(ram, background ? 0xb700 : 0xb70a)) {
+    unsigned lead = world_shadow_active() ? (background ? 128u : 64u) : 0u;
+    if ((int16_t)trigger <= (int16_t)(read_word(ram, background ? 0xb700 : 0xb70a) + lead)) {
         uint16_t source = read_word(ram, actor + 0x42), dest = read_word(ram, actor + 0x44);
         uint16_t base = (uint32_t)read_word(ram, actor + 0x60) << 4;
         for (unsigned block = 0; block < 11; block++) {
@@ -3747,7 +3797,13 @@ static void update_camera_layers(uint8_t *ram, const uint8_t *rom, uint8_t *tile
         ram[actor + 0x44] += 16;
         write_word(ram, actor + 0x6a, trigger + (background ? 64 : 32));
     }
-    advance_scroll_script(ram, rom, actor);
+    if (lead) {
+        advance_scroll_lookahead(ram, rom, actor, lead);
+        scroll_script_lookahead = 1;
+        advance_scroll_script(ram, rom, actor);
+        scroll_script_lookahead = 0;
+    } else
+        advance_scroll_script(ram, rom, actor);
 }
 
 int world_sub_open_water(uint8_t *, const uint8_t *, uint8_t *, uint16_t);
@@ -7555,10 +7611,13 @@ static int stage_two_boss(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
            over the approach and start the fight at the scripted positions. */
         unsigned side = read_word(ram, actor + 0x1e) & 2;
         unsigned remaining = read_word(ram, actor + 0x7c);
-        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH &&
-            read_word(ram, actor + 0x7e) == read_word(bank, 0x223c + side) + 8 &&
-            remaining <= 4 * WORLD_VIEW_WING && remaining % 4 == 0)
-            write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? 1 : -1));
+        if (read_word(ram, actor + 0x7e) == read_word(bank, 0x223c + side) + 8) {
+            int wing = world_view_wing(), d = 0;
+            if (wing == WORLD_VIEW_WING) d = remaining <= 4 * WORLD_VIEW_WING && remaining % 4 == 0;
+            else if (wing && remaining && remaining <= 232)
+                d = ((int)remaining * wing + 231) / 232 - ((int)(remaining - 1) * wing + 231) / 232;
+            if (d) write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? d : -d));
+        }
         boss_wing_shot(ram, rom, actor, read_word(ram, actor + 0x1e) ? -1 : 1);
         int step = step_flight_script(ram, rom, actor);
         if (!step) {
@@ -10586,7 +10645,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
     }
     case 0x145ba:
         scroll_actor(ram, actor, 0xb71a);
-        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH) {
+        if (world_view_wing()) {
             /* The hull is centered when the camera locks. Its approach
                runs from the 10DF spawn row to the 11BF lock (224 px).
                Consume the extra entry distance with camera progress,
@@ -10594,7 +10653,7 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
             int remaining = 0x11bf - (int)read_word(ram, 0xb700);
             if (remaining < 0) remaining = 0;
             if (remaining > 224) remaining = 224;
-            write_word(ram, actor + 0x21, 0x100 + remaining + remaining * WORLD_VIEW_WING / 224);
+            write_word(ram, actor + 0x21, 0x100 + remaining + remaining * world_view_wing() / 224);
         }
         if (read_word(ram, 0xb700) >= 0x11bf) {
             world_stage_three_boss_wall(ram, terrain - 0x4000);
@@ -11079,9 +11138,15 @@ static int stage_three_end_boss(uint8_t *ram, const uint8_t *rom, uint8_t *terra
         /* The first moving leg docks each pod at the center. Cover the
            extra wing during that leg so it still reaches its attachment. */
         uint16_t approach = read_word(bank, 0x402c + 2 * side) + 12;
-        if (world_view_width() == WORLD_VIEW_WIDE_WIDTH &&
-            read_word(ram, actor + 0x7e) == approach && read_word(ram, actor + 0x7c) <= WORLD_VIEW_WING)
-            write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? -1 : 1));
+        if (world_view_wing() && read_word(ram, actor + 0x7e) == approach) {
+            /* Spread the wing over the leg's final 54 ticks (1 px per tick
+               in Widescreen). */
+            int wing = world_view_wing(), left = read_word(ram, actor + 0x7c);
+            if (left > 0 && left <= 54) {
+                int d = (left * wing + 53) / 54 - ((left - 1) * wing + 53) / 54;
+                write_word(ram, actor + 0x21, read_word(ram, actor + 0x21) + (side ? -d : d));
+            }
+        }
         int step = step_flight_script(ram, rom, actor);
         if (!step) {
             world_dispatch_detail = "end boss pod script kind";
@@ -13626,7 +13691,7 @@ static int stage_four_drifter(uint8_t *ram, const uint8_t *rom, const uint8_t *t
             finish_animation(ram, actor);
             return 1;
         }
-        if (!s4_near_box(ram, rom, actor, 0xfb3b) && read_word(ram, actor + 0x21) >= world_view_edge_left(0x60)) {
+        if (!s4_near_box(ram, rom, actor, 0xfb3b) && world_view_edge_ge_left(read_word(ram, actor + 0x21), 0x60)) {
             if (read_word(ram, actor + 0x50))
                 decrement(ram, actor + 0x50);
             else if (read_word(ram, 0xb8a2) & 3) {
@@ -18259,7 +18324,7 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
                     write_word(ram, actor + 0x54, sprite);
                     write_word(ram, actor + 0x44, read_word(bank, 0x7892 + frame));
                     write_word(ram, actor + 0x24, read_word(ram, actor + 0x24) + read_word(bank, 0x789c + frame));
-                    if (frame == 4 && read_word(ram, actor + 0x21) >= world_view_edge_left(0xa0) &&
+                    if (frame == 4 && world_view_edge_ge_left(read_word(ram, actor + 0x21), 0xa0) &&
                         (ram[actor + 0x1e] & 4) && !decrement(ram, actor + 0x50)) {
                         if (ram[actor + 0x1e] & 2) {
                             uint16_t shot = bank_b_effect(ram, actor, 0x7cda);
@@ -18278,7 +18343,7 @@ int world_dispatch_native_video(WorldDispatch *pass, uint8_t *ram, const uint8_t
         } else {
             write_word(ram, actor + 0x2a, 0x3e56);
             queue_sprite(ram, main_rom, actor, 1);
-            if (read_word(ram, actor + 0x21) >= world_view_edge_left(0xa0) && !(ram[actor + 0x1e] & 4) &&
+            if (world_view_edge_ge_left(read_word(ram, actor + 0x21), 0xa0) && !(ram[actor + 0x1e] & 4) &&
                 !read_word(ram, actor + 0x3a) && !decrement(ram, actor + 0x50)) {
                 if (ram[actor + 0x1e] & 2) {
                     uint16_t shot = bank_b_effect(ram, actor, 0x7cda);

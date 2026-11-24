@@ -1,4 +1,5 @@
 #include "world_video.h"
+#include "world_shadow.h"
 
 static uint16_t word(const uint8_t *p)
 {
@@ -40,12 +41,11 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
         if (master & 0x40)
             scroll = word(tiles + 0xf400 + layer * 0x400 + sy * 2);
         unsigned wide = master & 4;
-        unsigned columns = wide ? 128 : 64;
-        /* sx stays non-negative for any supported view (x >= -54). */
+        /* Wraps modulo 2^32 on the ultrawide left wing; every tile period
+           divides it, so column selection is unaffected. */
         unsigned sx = (unsigned)(x + 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
-        unsigned entry = (master & 3) * 0x4000 +
-                         ((sy / 8) * columns + ((sx / 8) & (columns - 1))) * 4;
-        const uint8_t *tile = tiles + (entry & 0xffff);
+        const uint8_t *tile = world_tile_entry(tiles, master, sx, sy);
+        if (!tile) continue;
         unsigned attr = word(tile + 2);
         unsigned pen = world_video_tile_pen(gfx1, word(tile),
             (attr & 0x200) ? ~sx : sx, (attr & 0x400) ? ~sy : sy);
@@ -81,7 +81,7 @@ void world_video_scanline(uint16_t *output, unsigned y, const uint8_t *tiles,
                           const WorldVideoLayer layers[3], uint16_t video_control,
                           unsigned width, int left)
 {
-    uint8_t priority[512];
+    uint8_t priority[WORLD_VIDEO_MAX_WIDTH];
     int right = left + (int)width;
     for (unsigned x = 0; x < width; ++x) {
         WorldVideoPixel pixel = world_video_playfields(tiles, gfx1, layers, video_control, left + (int)x, y);
@@ -108,13 +108,16 @@ void world_video_scanline(uint16_t *output, unsigned y, const uint8_t *tiles,
         unsigned bank = (attr & (independent_priority ? 0x7f : 0xff)) |
                         ((video_control & 0x8000) ? 0x100 : 0);
         int behind = !independent_priority || !(attr & 0x80);
-        int sprite_left = (int)((word(entry + 6) - 16u) & 511) - 80;
+        /* An ultrawide picture is wider than the 512-pixel sprite X period;
+           gameplay sprites arrive culled in signed X (build_sprites). */
+        int sprite_left = width > 512 ? (int16_t)word(entry + 6) - 96
+                                      : (int)((word(entry + 6) - 16u) & 511) - 80;
         for (unsigned i = 0; i < columns; ++i) {
             unsigned display_col = flip_x ? columns - 1 - i : i;
             int xpos = sprite_left + (int)display_col * 16;
             if (xpos < right && xpos > left - 16)
                 sprite_row(output, priority, gfx2, code, local_y, xpos, flip_x, bank, behind, left, right);
-            if (xpos - 512 > left - 16 && xpos - 512 < right)
+            if (width <= 512 && xpos - 512 > left - 16 && xpos - 512 < right)
                 sprite_row(output, priority, gfx2, code, local_y, xpos - 512, flip_x, bank, behind, left, right);
             code += 8;
         }
