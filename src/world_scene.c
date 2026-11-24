@@ -622,7 +622,7 @@ static int motion_root(SpriteMotion *motion, int i)
 }
 
 static void sprite_motions(const Sprite *now, int count, const Sprite *before, int old,
-                           SpriteMotion *motion)
+                           SpriteMotion *motion, int camera)
 {
     for (int i=0; i<count; ++i) {
         const Sprite *s=&now[i];
@@ -640,15 +640,24 @@ static void sprite_motions(const Sprite *now, int count, const Sprite *before, i
     for (int i=0; i<count; ++i) {
         const Sprite *s=&now[i];
         if (s->top>=H+8 || s->top+s->rows*16<=-8) continue;
-        int match=-1;
+        /* Repeated identical graphics (a pair of ice-mount blocks, a row of
+           mines) offer several candidates. They are interchangeable when they
+           imply the same translation; otherwise the one that follows the
+           camera is the map-attached one. Anything else stays ambiguous. */
+        int match=-1, ambiguous=0;
         for (int j=0; j<old; ++j) {
             const Sprite *p=&before[j];
             if (s->code!=p->code || s->attr!=p->attr || s->rows!=p->rows || s->cols!=p->cols ||
                 abs(s->left-p->left)>20 || abs(s->top-p->top)>20) continue;
-            if (match>=0) { match=-1; break; }
-            match=j;
+            if (match<0) { match=j; continue; }
+            int dx0=s->left-before[match].left, dy0=s->top-before[match].top;
+            int dx1=s->left-p->left, dy1=s->top-p->top;
+            if (dx0==dx1 && dy0==dy1) continue;                   /* same translation: either will do */
+            int attached0=dx0==-camera && dy0==0, attached1=dx1==-camera && dy1==0;
+            if (attached1 && !attached0) match=j;                  /* prefer the camera-following one */
+            else if (!attached0 && !attached1) { ambiguous=1; break; }
         }
-        if (match<0) continue;
+        if (ambiguous || match<0) continue;
         SpriteMotion *m=&motion[motion_root(motion,i)];
         int dx=s->left-before[match].left, dy=s->top-before[match].top;
         if (!m->votes) { m->dx=dx; m->dy=dy; m->votes=1; }
@@ -672,8 +681,8 @@ static void draw_sprites(double alpha)
     int changed=memcmp(cur.sprites,prev.sprites,sizeof cur.sprites)!=0;
     int moving=g.fx->interp && alpha<1.0 && changed;
     int track=moving || (changed && g.fx->smooth && cur.frac[1]!=0);
-    if (track) sprite_motions(now,count,before,old,motion);
     int camera = (int16_t)(cur.layers[1].scroll_x - prev.layers[1].scroll_x);
+    if (track) sprite_motions(now,count,before,old,motion,camera);
     int independent = (cur.video_control & 0x2000) != 0;
     double fraction_now = g.fx->smooth ? cur.frac[1] / 256.0 : 0.0;
     double fraction_before = g.fx->smooth ? prev.frac[1] / 256.0 : 0.0;
