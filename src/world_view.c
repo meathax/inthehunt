@@ -18,6 +18,22 @@ void world_view_set_stage(unsigned stage)
     mode = stage == 4 ? WORLD_VIEW_ARCADE : session_mode;
 }
 
+static int wing_mirror;
+int world_view_wing_mirror(void) { return wing_mirror; }
+void world_view_set_wing_mirror(int m) { wing_mirror = m; }
+
+/* Tile-aligned reflection about the first tile edge at or left of x = 0 and
+ * the first at or right of x = 320, so every on-screen pixel keeps its own
+ * sample and a reflected tile is a whole tile. */
+int world_view_mirror_x(int x, int k)
+{
+    int x0 = -(k & 7);
+    int x1 = x0 + 8 * ((WORLD_VIEW_ARCADE_WIDTH - x0 + 7) / 8);
+    if (x < x0) return 2 * x0 - 1 - x;
+    if (x >= x1) return 2 * x1 - 1 - x;
+    return x;
+}
+
 unsigned world_view_canvas_width(void)
 {
     return world_view_mode_width(session_mode);

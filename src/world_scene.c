@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#include "world_view.h"
 #include <windows.h>
 #include <math.h>
 #include <emmintrin.h>  /* SSE2 is baseline on the Windows x64 target. */
@@ -36,6 +37,7 @@ typedef struct {
     int frac[3];
     int lamp[2][3]; /* native bow x, y, facing; zero facing disables */
     unsigned scene_id;
+    int wing_mirror;
     int valid;
 } Snapshot;
 
@@ -364,7 +366,23 @@ static void render_layer(int layer, int from, int to)
         for (int bx = 0; bx < LW;) {
             unsigned sx = (unsigned)(bx - MARGIN + scene_left + 80) + scroll - 2 * (unsigned)layer + (wide ? 256 : 0);
             static const uint8_t blank_cell[4];
-            const uint8_t *tile = world_tile_entry(cur.tiles, master, sx, sy);
+            uint8_t mirrored_cell[4];
+            int px_here = bx - MARGIN + scene_left, reflect = 0;
+            if (cur.wing_mirror && (px_here < 0 || px_here >= WORLD_VIEW_ARCADE_WIDTH) && layer == 0 && cur.wing_mirror == 2) {
+                /* The HUD plane keeps its own place: nothing of it in a wing. */
+                int run = 8 - (int)(sx & 7);
+                for (int i = 0; i < run && bx + i < LW; ++i) { idx[bx + i] = 0xffff; pri[bx + i] = 0; }
+                bx += run; continue;
+            }
+            const uint8_t *tile;
+            if (cur.wing_mirror && layer > 0 && (px_here < 0 || px_here >= WORLD_VIEW_ARCADE_WIDTH)) {
+                int k = 80 + (int)scroll - 2 * layer + (wide ? 256 : 0);
+                int xr = world_view_mirror_x(px_here, k);
+                tile = world_tile_entry(cur.tiles, master, (unsigned)(xr + k), sy);
+                if (tile) { memcpy(mirrored_cell, tile, 4); mirrored_cell[3] ^= 0x02; tile = mirrored_cell; }
+                reflect = 1;
+            } else tile = world_tile_entry(cur.tiles, master, sx, sy);
+            (void)reflect;
             int blank = !tile;
             if (blank) tile = blank_cell;
             unsigned attr = word(tile + 2), bank = (attr & 0x7f) | ((cur.video_control >> 7) & 0x180);
@@ -504,6 +522,7 @@ void world_scene_submit(const WorldSceneFrame *frame)
     memcpy(cur.lamp, frame->lamp, sizeof cur.lamp);
     for (int i=0;i<2;++i) cur.lamp[i][0] -= scene_left;
     cur.scene_id = frame->scene_id;
+    cur.wing_mirror = frame->wing_mirror;
     cur.valid = 1;
     if (!prev.valid || prev.scene_id != cur.scene_id) memcpy(&prev, &cur, sizeof prev);
     for (int layer=0; layer<3; ++layer) {

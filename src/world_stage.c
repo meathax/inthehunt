@@ -85,6 +85,58 @@ static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
     return moved - late;
 }
 
+/* Stage one, surface after the rock island: the far layer (page 2) turns
+ * from plain sky to the mountain range at world column 180. The arcade
+ * keeps that join behind the island until it leaves the left edge, but the
+ * island outruns the slower far layer, so in the wider views the join and
+ * the plain sky left of it come out into the left wing. Once the join is
+ * left of picture X 0 (the island still covers the wing there), the sky
+ * columns that can still reach the wing take the range's 16-column
+ * repeat. The tile checks make this a no-op anywhere else. */
+enum { FAR_PAGE = 2, FAR_JOIN = 180, FAR_REPEAT = 16, FAR_ROW = 18 };
+
+
+/* Ring cell of a far-layer world column (Widescreen has no shadow). */
+static uint8_t *far_ring(uint8_t *tiles, int world, unsigned row)
+{
+    return tiles + FAR_PAGE * 0x4000 + (row & 63) * 256 + ((unsigned)world & 63) * 4;
+}
+
+static uint16_t cell_tile(const uint8_t *cell) { return (uint16_t)(cell[0] | cell[1] << 8); }
+
+void world_stage_one_far_mountains(const uint8_t *ram, uint8_t *tiles)
+{
+    int wing = world_view_wing();
+    if (!wing || word(ram, 0x84) != 0 || word(ram, 0x80) != 0xb2e) return;
+    /* World column of picture X: floor((x + offset) / 8), from the line
+       scroll of the mountain rows (world_video_playfields). */
+    int offset = (int)word(tiles, (uint16_t)(0xf400 + FAR_PAGE * 0x400 + 2 * (FAR_ROW * 8 + 4))) + 80 - 2 * FAR_PAGE;
+    int join_x = 8 * FAR_JOIN - offset;
+    if (join_x >= 0 || join_x < -wing - 8 * FAR_REPEAT) return;
+    int shadow = world_shadow_active();
+    uint8_t join[4], cell[4];
+    if (shadow ? !world_shadow_get_column(FAR_PAGE, FAR_JOIN, FAR_ROW, join)
+               : !memcpy(join, far_ring(tiles, FAR_JOIN, FAR_ROW), 4)) return;
+    /* Tile numbers 213F (range) and 1Fxx (plain sky); bit 13 is the bank. */
+    if (cell_tile(join) != 0x213f) return;
+    for (int w = FAR_JOIN - (wing + 7) / 8 - 1; w < FAR_JOIN; ++w) {
+        int src = w + FAR_REPEAT * ((FAR_JOIN - w + FAR_REPEAT - 1) / FAR_REPEAT);
+        if (shadow) {
+            if (!world_shadow_get_column(FAR_PAGE, w, FAR_ROW, cell) || (cell_tile(cell) & 0xff00) != 0x1f00) continue;
+            for (unsigned row = 0; row < 64; ++row)
+                if (world_shadow_get_column(FAR_PAGE, src, row, cell))
+                    world_shadow_put_column(tiles, FAR_PAGE, w, row, cell);
+            continue;
+        }
+        /* The 64-column ring: the game draws ahead to picture X 473, so a
+           column at X -39 or further left already holds the range 512
+           pixels ahead (same 16-column phase). Patch only sky still there. */
+        if (8 * w - offset <= 473 - 512 || (cell_tile(far_ring(tiles, w, FAR_ROW)) & 0xff00) != 0x1f00) continue;
+        for (unsigned row = 0; row < 64; ++row)
+            memcpy(far_ring(tiles, w, row), far_ring(tiles, src, row), 4);
+    }
+}
+
 void world_stage_three_boss_wall(const uint8_t *ram, uint8_t *tiles)
 {
     if (world_view_width() <= WORLD_VIEW_ARCADE_WIDTH || word(ram, 0x84) != 2 ||

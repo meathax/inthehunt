@@ -43,6 +43,16 @@ void world_view_set(unsigned mode);
 unsigned world_view_mode(void);
 void world_view_set_stage(unsigned stage);
 unsigned world_view_canvas_width(void);
+/* Wings of a picture that has no authored content outside the arcade 320
+ * columns (locked arenas, the arcade-width shaft): the picture's edges are
+ * reflected into the wings, tile-aligned, for tile layers 1 and 2. 0 off;
+ * 1 reflect; 2 reflect and hide layer 0 in the wings (its HUD stays put). */
+int world_view_wing_mirror(void);
+void world_view_set_wing_mirror(int mode);
+/* The picture-x range reflected for a layer whose picture x 0 samples
+ * playfield column K: [-inf,*lo) and [*hi,inf) take the reflection, and
+ * the return is the reflected x of `x` (or x unchanged inside). */
+int world_view_mirror_x(int x, int k);
 
 /* Raster columns of the working frame: 320, 428 or 568. */
 unsigned world_view_width(void);

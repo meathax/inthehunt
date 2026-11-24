@@ -148,6 +148,7 @@ static void scene_submit(void)
     frame.scene_id = word(ram + 0x80) | word(ram + 0x84) << 16;
     frame.width = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
     frame.left = -world_view_wing_of(frame.width);
+    frame.wing_mirror = world_view_wing_mirror();
     /* The camera keeps a fraction of a pixel (byte 51h of its actor) that
        the whole-pixel scroll registers drop. The background scrolls at half
        the playfield's rate, so its fraction follows from the same value. */
@@ -321,7 +322,7 @@ static void present_game(const uint32_t *source)
     QueryPerformanceCounter(&prof1);
     world_scene_light_ready=NULL;
     /* Some stages keep their 4:3 aperture inside the widescreen canvas. */
-    if (frame_w > WORLD_VIEW_ARCADE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH) {
+    if (frame_w > WORLD_VIEW_ARCADE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH && !world_view_wing_mirror()) {
         int inset = world_view_wing_of(frame_w)*k, stride = (int)frame_w*k;
         for (int y=0; y<240*k; ++y) {
             uint32_t *row = shown + y*stride;
@@ -647,6 +648,20 @@ static void capture_video(void)
     { extern void world_shadow_debug(const uint8_t *, unsigned long); world_shadow_debug(ram, ticks); }
     frame_w = word(ram + 0x80) == 0xb2e ? world_view_canvas_width() : WORLD_VIEW_ARCADE_WIDTH;
     shot_w = frame_w;
+    /* Wings with no authored picture: the arcade-width shaft (stage 5) always,
+       and a locked stage-4 arena once the camera has held still. */
+    {
+        static unsigned held_b700, held_frames;
+        unsigned b700 = word(ram + 0xb700);
+        held_frames = b700 == held_b700 ? held_frames + 1 : 0;
+        held_b700 = b700;
+        int mirror = 0;
+        if (word(ram + 0x80) == 0xb2e && frame_w > WORLD_VIEW_ARCADE_WIDTH) {
+            if (word(ram + 0x84) == 4) mirror = 2;
+            else if (word(ram + 0x84) == 3 && held_frames >= 20 && b700 >= 0x500) mirror = 1; /* the final arena, not earlier holds */
+        }
+        world_view_set_wing_mirror(mirror);
+    }
     WorldVideoLayer layers[3];
     for (unsigned i = 0; i < 3; ++i) {
         unsigned pos = 0xb706 + 4*i;
@@ -667,7 +682,7 @@ static void capture_video(void)
 
 static void draw_captured_pixels(void)
 {
-    unsigned width = frame_w < world_view_width() ? frame_w : world_view_width();
+    unsigned width = frame_w < world_view_width() || world_view_wing_mirror() ? frame_w : world_view_width();
     unsigned inset = (frame_w - width) / 2;
     int left = -world_view_wing_of(width);
     for (unsigned y = 0; y < 240; ++y) {
@@ -923,6 +938,7 @@ static int tick(uint16_t pads, uint16_t system)
             }
         }
         world_shadow_end_pass(ram, tiles);
+        world_stage_one_far_mountains(ram, tiles);
         weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
             unsigned actor=boss_lamps[i].actor;
@@ -1289,10 +1305,24 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
     const char *stage_dir = getenv("WORLD_SNAPSHOT_STAGES");
     unsigned last_stage = 0xffff, stage_count = 0;
     for (;;) {
-        if (stage_dir && word(ram + 0x80) == 0xb2e && word(ram + 0x84) != last_stage) {
-            last_stage = word(ram + 0x84);
+        /* WORLD_SNAPSHOT_EVERY=n,dir (test-only): a snapshot every n ticks of
+           live play, named by tick. */
+        static unsigned long every_n, every_next;
+        static const char *every_dir;
+        if (!every_dir && getenv("WORLD_SNAPSHOT_EVERY")) {
+            const char *e = getenv("WORLD_SNAPSHOT_EVERY");
+            every_n = strtoul(e, NULL, 10);
+            every_dir = strchr(e, ',') ? strchr(e, ',') + 1 : "";
+        }
+        int every_due = every_n && *every_dir && word(ram + 0x80) == 0xb2e && ticks >= every_next;
+        if (every_due) every_next = ticks + every_n;
+        if ((stage_dir && word(ram + 0x80) == 0xb2e && word(ram + 0x84) != last_stage) || every_due) {
             char path[4096];
-            snprintf(path, sizeof path, "%s/stage%02u-%u.snap", stage_dir, stage_count++, last_stage);
+            if (every_due) snprintf(path, sizeof path, "%s/t%06lu.snap", every_dir, ticks);
+            else {
+                last_stage = word(ram + 0x84);
+                snprintf(path, sizeof path, "%s/stage%02u-%u.snap", stage_dir, stage_count++, last_stage);
+            }
             FILE *f = world_fopen(path, "wb");
             if (f) {
                 fwrite(ram, sizeof ram, 1, f);

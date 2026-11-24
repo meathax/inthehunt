@@ -20,6 +20,9 @@ static uint8_t ring_pending[PAGES][ROWS][RING][4];
 static int row_offset[PAGES][ROWS];
 static uint8_t row_fixed[PAGES][ROWS];
 static uint8_t shadowed[PAGES];
+/* Rows the game repaints across all 64 ring columns at once (DBFD's
+   surface waves): a 512-pixel repeating band, read wrapping from the ring. */
+static uint8_t band[PAGES][ROWS];
 static int active, focus;
 uint8_t *world_shadow_debug_tiles;
 static uint16_t layer_master_dbg[3];
@@ -53,6 +56,7 @@ void world_shadow_reset(void)
     world_dispatch_reset_lookahead();
     active = 0;
     openings = 0;
+    memset(band, 0, sizeof band);
     for (unsigned p = 0; p < PAGES; ++p) { world_tile_shadow_page[p] = 0; world_tile_shadow_tags[p] = 0; world_tile_shadow_rows[p] = 0; }
     world_tile_shadow_clip = 0;
 }
@@ -60,6 +64,14 @@ void world_shadow_reset(void)
 int world_shadow_world_column(unsigned page, unsigned row, int screen_x)
 {
     return wrap_world(floor_div8(screen_x + row_offset[page & 3][row & 63]));
+}
+
+void world_shadow_ring_band(unsigned page, unsigned row)
+{
+    page &= 3; row &= 63;
+    band[page][row] = 1;
+    /* Effective at once, so later rebases this pass leave the new frame. */
+    if (active && shadowed[page] && !row_fixed[page][row]) row_fixed[page][row] = 1;
 }
 
 int world_shadow_get_column(unsigned page, int world, unsigned row, uint8_t cell[4])
@@ -204,10 +216,7 @@ void world_shadow_begin_pass(const uint8_t *ram, uint8_t *tiles, const uint16_t 
     world_shadow_debug_tiles = tiles;
     memcpy(layer_master_dbg, layer_master, sizeof layer_master_dbg);
     for (unsigned l = 0; l < 3; ++l) pass_scroll[l] = word(ram + 0xb706 + 4 * l);
-    /* Both wide views: Widescreen's 428-pixel picture plus the game's
-       ahead-drawn columns (picture X 449..473) also exceed the 512-pixel
-       ring, which wrapped those columns into the leftmost wing pixels. */
-    int want = world_view_wing() != 0 && word(ram + 0x80) == 0xb2e;
+    int want = world_view_width() == WORLD_VIEW_ULTRA_WIDTH && word(ram + 0x80) == 0xb2e;
     if (!want) {
         if (active) world_shadow_reset();
         return;
@@ -236,7 +245,7 @@ void world_shadow_begin_pass(const uint8_t *ram, uint8_t *tiles, const uint16_t 
                 direct = v == 0 || (l == 0 && v == 16);
             }
             row_offset[p][r] = 96 + (int)scroll_reg;
-            row_fixed[p][r] = (uint8_t)(direct ? (l == 0 ? 2 : 1) : 0);
+            row_fixed[p][r] = (uint8_t)(direct ? (l == 0 ? 2 : 1) : band[p][r] ? 1 : 0);
         }
         shadowed[p] = 1;
     }
@@ -351,6 +360,22 @@ static uint16_t layer_master_dbg[3];
         for (unsigned p = 0; p < 4; ++p) { fprintf(stderr, " P%u:", p); for (unsigned r = 40; r < 50; ++r) fprintf(stderr, "%u", row_fixed[p][r]); }
         for (unsigned l = 0; l < 3; ++l) { fprintf(stderr, " L%u", l);
             for (unsigned y = 344; y < 392; y += 8) fprintf(stderr, " %d", (int16_t)word(world_shadow_debug_tiles + 0xf400 + l * 0x400 + y * 2)); }
+    }
+    if (getenv("WORLD_SHADOW_GAPS")) {   /* rows whose visible columns lack a tag, per page */
+        for (unsigned p = 0; p < PAGES; ++p) {
+            if (!shadowed[p]) continue;
+            for (unsigned r = 0; r < ROWS; ++r) {
+                int lo = 9999, hi = -9999, n = 0;
+                if (row_fixed[p][r]) continue;
+                for (int x = -124; x < 444; x += 8) {
+                    int w = wrap_world(floor_div8(x + row_offset[p][r]));
+                    if (tags[p][r][w & 127] != w) { ++n; if (x < lo) lo = x; if (x > hi) hi = x; }
+                }
+                if (n) fprintf(stderr, " G p%u r%u n%d x%d..%d", p, r, n, lo, hi);
+            }
+        }
+        fputc(10, stderr);
+        return;
     }
     for (unsigned p = 0; p < PAGES; ++p) {
         if (!shadowed[p]) continue;

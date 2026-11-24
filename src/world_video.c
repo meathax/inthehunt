@@ -1,5 +1,6 @@
 #include "world_video.h"
 #include "world_shadow.h"
+#include "world_view.h"
 
 static uint16_t word(const uint8_t *p)
 {
@@ -41,9 +42,14 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
         if (master & 0x40)
             scroll = word(tiles + 0xf400 + layer * 0x400 + sy * 2);
         unsigned wide = master & 4;
+        int xs = x, mirror = world_view_wing_mirror();
+        if (mirror && (x < 0 || x >= WORLD_VIEW_ARCADE_WIDTH)) {
+            if (layer == 0) { if (mirror == 2) continue; }
+            else xs = world_view_mirror_x(x, 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
+        }
         /* Wraps modulo 2^32 on the ultrawide left wing; every tile period
            divides it, so column selection is unaffected. */
-        unsigned sx = (unsigned)(x + 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
+        unsigned sx = (unsigned)(xs + 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
         const uint8_t *tile = world_tile_entry(tiles, master, sx, sy);
         if (!tile) continue;
         unsigned attr = word(tile + 2);

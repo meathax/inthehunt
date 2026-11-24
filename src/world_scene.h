@@ -55,6 +55,7 @@ typedef struct {
      * raster column 0 (0 arcade, -54 widescreen). */
     unsigned width;
     int left;
+    int wing_mirror;             /* see world_view_wing_mirror */
 } WorldSceneFrame;
 
 #include "world_weapon_light.h"

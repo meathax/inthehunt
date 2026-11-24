@@ -4,11 +4,10 @@
 #include <stdint.h>
 #include "world_video.h"
 
-/* Wide-view tile shadow.
+/* Ultrawide tile shadow.
  *
  * Each M92 playfield page is a 64-column (512-pixel) ring, but the
- * ultrawide view is 568 pixels wide, and the widescreen view (428) plus the
- * columns the game draws ahead of it (to picture X 473) also needs more. The game keeps addressing its rings;
+ * ultrawide view is 568 pixels wide. The game keeps addressing its rings;
  * this module maintains a 128-column (1024-pixel) copy of every scrolling
  * page in which each ring column is filed under the world column it
  * represents. Before an actor runs, the ring is rebased so that the 64
@@ -51,7 +50,7 @@ static inline const uint8_t *world_tile_entry(const uint8_t *tiles, unsigned mas
     return tiles + ((page * 0x4000 + (row * columns + ((sx / 8) & (columns - 1))) * 4) & 0xffff);
 }
 
-/* Start a logic pass. Activates in wide-view gameplay; layers carry the
+/* Start a logic pass. Activates in ultrawide gameplay; layers carry the
  * current scroll registers (scroll_x biased as in capture_video). */
 void world_shadow_begin_pass(const uint8_t *ram, uint8_t *tiles, const uint16_t layer_master[3]);
 /* Before an actor's handler: rebase the rings around a picture X. */
@@ -73,6 +72,9 @@ void world_shadow_put_column(uint8_t *tiles, unsigned page, int world, unsigned 
 /* The world column of a picture X on a page row (for callers that must
    address a column the ring cannot hold). */
 int world_shadow_world_column(unsigned page, unsigned row, int screen_x);
+/* A page row the game repaints across its whole ring: render it straight
+   from the ring, wrapping (until the shadow resets). */
+void world_shadow_ring_band(unsigned page, unsigned row);
 /* Copy a world column's cell out of the shadow. Returns 0 when the shadow
    does not hold that column or the row is not shadowed. */
 int world_shadow_get_column(unsigned page, int world, unsigned row, uint8_t cell[4]);

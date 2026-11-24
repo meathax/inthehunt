@@ -3283,14 +3283,6 @@ static void extend_opening_rows(uint8_t *tiles, uint16_t base, uint16_t origin,
     }
 }
 
-/* Ultrawide's right edge (picture X 444) nearly meets the game's own
-   ahead-drawn columns, so its producers and set pieces run further ahead.
-   Widescreen (right edge 374) keeps the game's timing. */
-static int ultrawide_lead(void)
-{
-    return world_shadow_active() && world_view_wing() == WORLD_VIEW_ULTRA_WING;
-}
-
 static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
                                uint16_t actor, uint16_t base)
 {
@@ -3301,7 +3293,7 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     }
     /* Ultrawide paints set pieces with the same 64-pixel lead as the
        column producer (world_shadow.h). */
-    if (trigger > (uint16_t)(read_word(ram, 0xb700) + (ultrawide_lead() ? 64 : 0)))
+    if (trigger > (uint16_t)(read_word(ram, 0xb700) + (world_shadow_active() ? 64 : 0)))
         return;
     uint16_t row = read_word(ram, actor + 0x40);
     uint16_t source = read_word(rom, row + 2), origin = read_word(rom, row + 4);
@@ -3328,9 +3320,9 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     }
     /* The attract demo opens its stage the same way; without the extension
        its wings start black until the camera scrolls real columns in. */
-    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING && !world_shadow_active())
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING)
         extend_opening_rows(tiles, base, first_block, width, height, mode == 3);
-    else if (base && !trigger && world_view_wing())
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_ULTRA_WING)
         world_shadow_extend_opening(tiles, base, first_block, width, height, mode == 3);
     write_word(ram, actor + 0x40, row + 10);
     trigger = read_word(rom, row + 10);
@@ -3855,7 +3847,7 @@ static void update_camera_layers(uint8_t *ram, const uint8_t *rom, uint8_t *tile
         }
     }
     uint16_t trigger = read_word(ram, actor + 0x6a);
-    unsigned lead = ultrawide_lead() ? (background ? 128u : 64u) : 0u;
+    unsigned lead = world_shadow_active() ? (background ? 128u : 64u) : 0u;
     if ((int16_t)trigger <= (int16_t)(read_word(ram, background ? 0xb700 : 0xb70a) + lead)) {
         uint16_t source = read_word(ram, actor + 0x42), dest = read_word(ram, actor + 0x44);
         uint16_t base = (uint32_t)read_word(ram, actor + 0x60) << 4;
@@ -19683,8 +19675,15 @@ stage2_jumper_terrain:
         /* WORLD_GODMODE=1 (test-only): the sub survives every hit, so
            headless runs reach each boss. Never set by the game. */
         static int godmode = -1;
-        if (godmode < 0) godmode = getenv("WORLD_GODMODE") != NULL;
-        if (godmode && !read_word(ram, actor + 0x26)) write_word(ram, actor + 0x26, 1);
+        static int godmode_hits = -1;      /* WORLD_GODMODE=hits: log each absorbed hit */
+        if (godmode < 0) {
+            godmode = getenv("WORLD_GODMODE") != NULL;
+            godmode_hits = godmode && !strcmp(getenv("WORLD_GODMODE"), "hits");
+        }
+        if (godmode && !read_word(ram, actor + 0x26)) {
+            write_word(ram, actor + 0x26, 1);
+            if (godmode_hits) fprintf(stderr, "GODHIT %04x %04x\n", read_word(ram, actor + 0x21), read_word(ram, actor + 0x24));
+        }
     }
         if (read_word(ram, 0x2a4) || (read_word(ram, 0x262) & 0x8080)
             || ram[actor + 0xa] || read_word(ram, actor + 0x26)
@@ -24191,7 +24190,9 @@ stage2_jumper_terrain:
         break;
     }
     case 0xb5f0d:
-        warship_attachment(ram, actor);
+        /* A parent that died this pass has already retired the part (its
+           handler and segment cleared); the part must not run on into 6084. */
+        if (!warship_attachment(ram, actor)) break;
         queue_sprite(ram, main_rom, actor, 1);
         if (!decrement(ram, actor + 0x42)) {
             for (unsigned i = 0; i < 2; ++i) {
@@ -28986,6 +28987,8 @@ stage2_jumper_terrain:
         keep_si();
         if (!decrement(ram, actor + 0x42)) {
             uint16_t source = 0x3118 + read_word(ram, actor + 0x52), dest = 0x2430;
+            for (unsigned row = 0; row < 4; ++row)
+                world_shadow_ring_band(0, ((dest >> 8) & 0x3f) + row);
             write_word(ram, 0xb89a, 0x1001);
             write_word(ram, 0xb89c, dest);
             for (unsigned strip = 0; strip < 16; strip++) {
