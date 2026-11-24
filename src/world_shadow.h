@@ -4,10 +4,11 @@
 #include <stdint.h>
 #include "world_video.h"
 
-/* Ultrawide tile shadow.
+/* Wide-view tile shadow.
  *
  * Each M92 playfield page is a 64-column (512-pixel) ring, but the
- * ultrawide view is 568 pixels wide. The game keeps addressing its rings;
+ * ultrawide view is 568 pixels wide, and the widescreen view (428) plus the
+ * columns the game draws ahead of it (to picture X 473) also needs more. The game keeps addressing its rings;
  * this module maintains a 128-column (1024-pixel) copy of every scrolling
  * page in which each ring column is filed under the world column it
  * represents. Before an actor runs, the ring is rebased so that the 64
@@ -50,7 +51,7 @@ static inline const uint8_t *world_tile_entry(const uint8_t *tiles, unsigned mas
     return tiles + ((page * 0x4000 + (row * columns + ((sx / 8) & (columns - 1))) * 4) & 0xffff);
 }
 
-/* Start a logic pass. Activates in ultrawide gameplay; layers carry the
+/* Start a logic pass. Activates in wide-view gameplay; layers carry the
  * current scroll registers (scroll_x biased as in capture_video). */
 void world_shadow_begin_pass(const uint8_t *ram, uint8_t *tiles, const uint16_t layer_master[3]);
 /* Before an actor's handler: rebase the rings around a picture X. */
@@ -72,6 +73,18 @@ void world_shadow_put_column(uint8_t *tiles, unsigned page, int world, unsigned 
 /* The world column of a picture X on a page row (for callers that must
    address a column the ring cannot hold). */
 int world_shadow_world_column(unsigned page, unsigned row, int screen_x);
+/* Copy a world column's cell out of the shadow. Returns 0 when the shadow
+   does not hold that column or the row is not shadowed. */
+int world_shadow_get_column(unsigned page, int world, unsigned row, uint8_t cell[4]);
 void world_shadow_reset(void);
+/* World-column offset (96 + layer scroll at the start of this pass) of a
+   page shown by a plain scrolling layer, in any mode: world column of a
+   picture X = floor((x + offset) / 8). Returns 0 for HUD, line-scrolled,
+   128-column or hidden pages. */
+int world_shadow_page_offset(unsigned page, int *offset);
+/* Store one 16-bit word (byte 0 tile, 2 attribute) of a world column's cell
+   in the shadow and, when that column is mapped, in the ring. Columns the
+   shadow does not hold yet are left for the game to draw. */
+void world_shadow_put_word(uint8_t *tiles, unsigned page, int world, unsigned row, unsigned byte, uint16_t value);
 
 #endif

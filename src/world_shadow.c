@@ -23,6 +23,7 @@ static uint8_t shadowed[PAGES];
 static int active, focus;
 uint8_t *world_shadow_debug_tiles;
 static uint16_t layer_master_dbg[3];
+static uint16_t pass_scroll[3];
 
 const uint8_t *world_tile_shadow_page[4];
 const int16_t *world_tile_shadow_tags[4];
@@ -59,6 +60,16 @@ void world_shadow_reset(void)
 int world_shadow_world_column(unsigned page, unsigned row, int screen_x)
 {
     return wrap_world(floor_div8(screen_x + row_offset[page & 3][row & 63]));
+}
+
+int world_shadow_get_column(unsigned page, int world, unsigned row, uint8_t cell[4])
+{
+    page &= 3; row &= 63;
+    int w = wrap_world(world);
+    unsigned slot = (unsigned)w & (SLOTS - 1);
+    if (!active || !shadowed[page] || row_fixed[page][row] || tags[page][row][slot] != w) return 0;
+    memcpy(cell, cells[page][row][slot], 4);
+    return 1;
 }
 
 /* First world column of the 64-column window centred on a picture X. */
@@ -192,7 +203,11 @@ void world_shadow_begin_pass(const uint8_t *ram, uint8_t *tiles, const uint16_t 
 {
     world_shadow_debug_tiles = tiles;
     memcpy(layer_master_dbg, layer_master, sizeof layer_master_dbg);
-    int want = world_view_width() == WORLD_VIEW_ULTRA_WIDTH && word(ram + 0x80) == 0xb2e;
+    for (unsigned l = 0; l < 3; ++l) pass_scroll[l] = word(ram + 0xb706 + 4 * l);
+    /* Both wide views: Widescreen's 428-pixel picture plus the game's
+       ahead-drawn columns (picture X 449..473) also exceed the 512-pixel
+       ring, which wrapped those columns into the leftmost wing pixels. */
+    int want = world_view_wing() != 0 && word(ram + 0x80) == 0xb2e;
     if (!want) {
         if (active) world_shadow_reset();
         return;
@@ -291,6 +306,33 @@ void world_shadow_put_column(uint8_t *tiles, unsigned page, int world, unsigned 
     if (ring_world[page][row][c] == w) {
         memcpy(ring_cell(tiles, page, row, c), cell, 4);
         ring_known[page][row][c] = 1;
+    }
+}
+
+int world_shadow_page_offset(unsigned page, int *offset)
+{
+    for (unsigned l = 1; l < 3; ++l) {
+        unsigned m = layer_master_dbg[l];
+        if ((m & 0x54) || (m & 3) != (page & 3)) continue;
+        *offset = 96 + (int)pass_scroll[l];
+        return 1;
+    }
+    return 0;
+}
+
+void world_shadow_put_word(uint8_t *tiles, unsigned page, int world, unsigned row, unsigned byte, uint16_t value)
+{
+    page &= 3; row &= 63; byte &= 2;
+    int w = wrap_world(world);
+    unsigned slot = (unsigned)w & (SLOTS - 1);
+    if (!active || !shadowed[page] || row_fixed[page][row] || tags[page][row][slot] != w) return;
+    cells[page][row][slot][byte] = (uint8_t)value;
+    cells[page][row][slot][byte + 1] = (uint8_t)(value >> 8);
+    unsigned c = (unsigned)w & 63;
+    if (ring_world[page][row][c] == w) {
+        uint8_t *cell = ring_cell(tiles, page, row, c);
+        cell[byte] = (uint8_t)value;
+        cell[byte + 1] = (uint8_t)(value >> 8);
     }
 }
 

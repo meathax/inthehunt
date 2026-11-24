@@ -379,6 +379,54 @@ static void update_radial_effect(uint8_t *ram, const uint8_t *rom, uint16_t acto
     apply_radial_impulse(ram, rom, actor, read_word(ram, 0x92), 2);
 }
 
+/* Scenery painters (DA4F/DBAF/DACD) re-animate fixed ring cells every eight
+ * ticks for as long as their parallax X stays inside the left margin. The
+ * arcade ring keeps 192 pixels of slack beyond its 320-pixel picture, so a
+ * painted cell is always still the one it was painted for. The wider views
+ * keep far less slack (or rebase the ring, Ultrawide), and the widened
+ * margin keeps painters alive longer: they went on stamping their surface
+ * waves over cells the camera had since reused (the sky strips in the
+ * stage-one boss cavern). Wide views therefore remember the world column a
+ * painter's first cell stood for when it began, repaint only cells that
+ * still stand for it and lie on screen, and write through the ultrawide
+ * shadow by world column. Arcade writes the ring exactly as before. */
+enum { PAINTERS = 512 };
+static int16_t painter_anchor[PAINTERS];
+static uint8_t painter_known[PAINTERS];
+static int painter_offset, painter_page_shown;
+static unsigned painter_index;
+
+static int floor_div8(int v) { return v >= 0 ? v / 8 : -((-v + 7) / 8); }
+
+static void painter_forget(uint16_t actor) { painter_known[(actor >> 7) & (PAINTERS - 1)] = 0; }
+
+/* Before a paint: dest is the painter's first cell within its page. */
+static void painter_begin(uint16_t actor, uint16_t base, uint16_t dest)
+{
+    painter_index = (actor >> 7) & (PAINTERS - 1);
+    painter_page_shown = world_view_wing() && world_shadow_page_offset(base >> 14, &painter_offset);
+    if (!painter_page_shown || painter_known[painter_index]) return;
+    /* At its first paint the cell stands for the newest world column the
+       ring can hold for it: the producers draw at most 64 pixels ahead. */
+    int newest = floor_div8(world_view_left() + (int)world_view_width() + 64 + painter_offset);
+    unsigned column = (dest & 0xff) / 4;
+    painter_anchor[painter_index] = (int16_t)(newest - (int)((unsigned)(newest - (int)column) & 63));
+    painter_known[painter_index] = 1;
+}
+
+static void painter_put(uint8_t *tiles, uint16_t base, uint16_t addr, uint16_t value)
+{
+    if (!painter_page_shown) { write_word(tiles, (uint16_t)(base + addr), value); return; }
+    int anchor = painter_anchor[painter_index];
+    unsigned column = (addr & 0xff) / 4, row = (addr >> 8) & 63;
+    int world = anchor + (int)((column - (unsigned)anchor) & 63);
+    int left = world_view_left(), first = floor_div8(left + painter_offset) - 1;
+    int last = floor_div8(left + (int)world_view_width() - 1 + painter_offset) + 1;
+    if (world < first || world > last) return;      /* off screen, or its cell was reused */
+    if (world_shadow_active()) world_shadow_put_word(tiles, base >> 14, world, row, addr & 2, value);
+    else if (((unsigned)world & 63) == column) write_word(tiles, (uint16_t)(base + addr), value);
+}
+
 /* Tile RAM starts at physical D0000. The far layer replaces tile numbers
    while the near layer copies both numbers and attributes. */
 /* DA13 and DB86 load SI with the variant bits before running into the
@@ -406,6 +454,7 @@ static void update_scenery(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     sequence += near_layer ? 0x1de0 + (tick & 0x18) : read_word(ram, actor + 0x54) + (tick & 0x38);
     uint16_t dest = read_word(ram, actor + 0x50);
     uint16_t base = near_layer ? 0x8000 : 0x4000;
+    painter_begin(actor, base, dest);
     write_word(ram, 0xb89a, 0x0401);
     write_word(ram, 0xb89c, dest);
     for (unsigned strip = 0; strip < 4; strip++) {
@@ -414,7 +463,7 @@ static void update_scenery(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
         uint16_t row_dest = dest;
         for (unsigned row = 0; row < (near_layer ? 2u : 4u); row++) {
             for (unsigned col = 0; col < 16; col += near_layer ? 2 : 4)
-                write_word(tiles, base + row_dest + col, read_word(source, 16 * row + col));
+                painter_put(tiles, base, (uint16_t)(row_dest + col), read_word(source, 16 * row + col));
             row_dest = (row_dest + 0x100) & 0x3fff;
         }
         if (strip != 3) {
@@ -1378,6 +1427,17 @@ static uint16_t boss_blast(uint8_t *ram, const uint8_t *rom, uint16_t actor, uin
     return effect;
 }
 
+/* Stage-one claw boss: every chain link copies its claw's step, so the
+ * launch speed sets the arm's reach. In the arcade an aimed claw reaches
+ * about picture X 78 from the boss; the wider views extend the step so an
+ * arm reaches the player clamp at the new left edge (X -38 / -108) and a
+ * sub cannot sit out of reach in the wing. */
+static uint16_t claw_reach(uint16_t speed)
+{
+    int wing = world_view_wing();
+    return (uint16_t)(wing == WORLD_VIEW_ULTRA_WING ? speed * 27u / 16u : wing ? speed * 23u / 16u : speed);
+}
+
 static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint16_t handler)
 {
     const uint8_t *bank = rom + 0x10000;
@@ -1395,7 +1455,7 @@ static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint
         unsigned flags = read_word(ram, owner + 0x60);
         if (flags & 2) {
             ram[actor + 0x28] = ram[owner + 0x56];
-            write_word(ram, actor + 0x2e, 0x800);
+            write_word(ram, actor + 0x2e, claw_reach(0x800));
             boss_limb_velocity(ram, rom, actor);
             write_word(ram, parent + 0x62, read_word(ram, parent + 0x62) | 2);
             write_word(ram, parent + 0x5a, read_word(ram, actor + 0x38));
@@ -1407,7 +1467,7 @@ static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint
             write_word(ram, actor, 0x18a3);
         } else if (!(read_word(ram, actor + 0x52) & 2) && (flags & 1)) {
             ram[actor + 0x28] = 0x80;
-            write_word(ram, actor + 0x2e, 0x400);
+            write_word(ram, actor + 0x2e, claw_reach(0x400));
             boss_limb_velocity(ram, rom, actor);
             write_word(ram, actor + 0x58, 4);
             uint16_t effect = spawn_boss_part(ram, actor, 0x1b41);
@@ -1417,7 +1477,7 @@ static int boss_claw_step(uint8_t *ram, const uint8_t *rom, uint16_t actor, uint
         break;
     }
     case 0x17da:
-        write_word(ram, actor + 0x2e, 0x800);
+        write_word(ram, actor + 0x2e, claw_reach(0x800));
         boss_limb_velocity(ram, rom, actor);
         write_word(ram, actor + 0x42, 8);
         write_word(ram, parent + 0x62, read_word(ram, parent + 0x62) | 1);
@@ -3223,6 +3283,14 @@ static void extend_opening_rows(uint8_t *tiles, uint16_t base, uint16_t origin,
     }
 }
 
+/* Ultrawide's right edge (picture X 444) nearly meets the game's own
+   ahead-drawn columns, so its producers and set pieces run further ahead.
+   Widescreen (right edge 374) keeps the game's timing. */
+static int ultrawide_lead(void)
+{
+    return world_shadow_active() && world_view_wing() == WORLD_VIEW_ULTRA_WING;
+}
+
 static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
                                uint16_t actor, uint16_t base)
 {
@@ -3233,7 +3301,7 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     }
     /* Ultrawide paints set pieces with the same 64-pixel lead as the
        column producer (world_shadow.h). */
-    if (trigger > (uint16_t)(read_word(ram, 0xb700) + (world_shadow_active() ? 64 : 0)))
+    if (trigger > (uint16_t)(read_word(ram, 0xb700) + (ultrawide_lead() ? 64 : 0)))
         return;
     uint16_t row = read_word(ram, actor + 0x40);
     uint16_t source = read_word(rom, row + 2), origin = read_word(rom, row + 4);
@@ -3260,9 +3328,9 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
     }
     /* The attract demo opens its stage the same way; without the extension
        its wings start black until the camera scrolls real columns in. */
-    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING)
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING && !world_shadow_active())
         extend_opening_rows(tiles, base, first_block, width, height, mode == 3);
-    if (base && !trigger && world_view_wing() == WORLD_VIEW_ULTRA_WING)
+    else if (base && !trigger && world_view_wing())
         world_shadow_extend_opening(tiles, base, first_block, width, height, mode == 3);
     write_word(ram, actor + 0x40, row + 10);
     trigger = read_word(rom, row + 10);
@@ -3787,7 +3855,7 @@ static void update_camera_layers(uint8_t *ram, const uint8_t *rom, uint8_t *tile
         }
     }
     uint16_t trigger = read_word(ram, actor + 0x6a);
-    unsigned lead = world_shadow_active() ? (background ? 128u : 64u) : 0u;
+    unsigned lead = ultrawide_lead() ? (background ? 128u : 64u) : 0u;
     if ((int16_t)trigger <= (int16_t)(read_word(ram, background ? 0xb700 : 0xb70a) + lead)) {
         uint16_t source = read_word(ram, actor + 0x42), dest = read_word(ram, actor + 0x44);
         uint16_t base = (uint32_t)read_word(ram, actor + 0x60) << 4;
@@ -28831,6 +28899,7 @@ stage2_jumper_terrain:
         break;
     case 0xdb86:
         if (!tiles) return 0;
+        painter_forget(actor);
         write_word(ram, actor + 0x3c, 0xfab3);
         write_word(ram, actor + 0x50, read_word(main_rom, 0xdd13 + (ram[actor + 0x1e] & 6)));
         write_word(ram, actor + 0x52, read_word(main_rom, 0xdd1b + (ram[actor + 0x1f] & 30)));
@@ -28844,6 +28913,7 @@ stage2_jumper_terrain:
     case 0xdacd: {
         if (!tiles) return 0;
         if (address == 0xdaa9) {
+            painter_forget(actor);
             uint16_t flags = read_word(ram, actor + 0x1e);
             write_word(ram, actor + 0x50, read_word(main_rom, 0xfea7 + (flags & 0x0e)));
             write_word(ram, actor + 0x52, read_word(main_rom, 0xdd0f + ((flags >> 8) & 2)));
@@ -28861,6 +28931,7 @@ stage2_jumper_terrain:
         if (tick & 7) break;
         uint16_t sequence = (tick & 0x38) + read_word(ram, actor + 0x52) + 0x1188;
         uint16_t dest = read_word(ram, actor + 0x50);
+        painter_begin(actor, 0x4000, dest);
         write_word(ram, 0xb89a, 0x0201);
         write_word(ram, 0xb89c, dest);
         for (unsigned strip = 0; strip < 2; strip++) {
@@ -28869,7 +28940,7 @@ stage2_jumper_terrain:
             uint16_t row_dest = dest;
             for (unsigned row = 0; row < 4; row++) {
                 for (unsigned col = 0; col < 16; col += 4)
-                    write_word(tiles, 0x4000 + row_dest + col, read_word(source, 16 * row + col));
+                    painter_put(tiles, 0x4000, (uint16_t)(row_dest + col), read_word(source, 16 * row + col));
                 row_dest = (row_dest + 0x100) & 0x3fff;
             }
             if (strip != 1) {
@@ -28884,6 +28955,7 @@ stage2_jumper_terrain:
        once its parent's byte 0A has bit 1 set. */
     case 0xdb28: {
         if (!tiles) return 0;
+        painter_forget(actor);
         unsigned stage = 2 * read_word(ram, 0x84);
         uint16_t list = read_word(main_rom, 0xfe5f + stage);
         write_word(ram, actor + 0x50, read_word(main_rom, (uint16_t)(list + (ram[actor + 0x1e] & 6))));
@@ -28931,6 +29003,7 @@ stage2_jumper_terrain:
         break;
     case 0xda13: {
         if (!tiles) return 0;
+        painter_forget(actor);
         unsigned stage = 2 * read_word(ram, 0x84);
         uint16_t row = read_word(main_rom, 0xfe5f + stage);
         write_word(ram, actor + 0x50, read_word(main_rom, row + (ram[actor + 0x1e] & 6)));
