@@ -1964,9 +1964,8 @@ static int run_game(int argc, char **argv)
         if (!strncmp(argv[i], "--mode=", 7)) {
             mode_option = 1;
             if (!strcmp(argv[i] + 7, "wide")) world_view_set(WORLD_VIEW_WIDE);
-            else if (!strcmp(argv[i] + 7, "ultrawide")) world_view_set(WORLD_VIEW_ULTRA);
             else if (strcmp(argv[i] + 7, "arcade")) {
-                fprintf(stderr, "Unknown --mode=%s. Use arcade, wide or ultrawide.\n", argv[i] + 7);
+                fprintf(stderr, "Unknown --mode=%s. Use arcade or wide.\n", argv[i] + 7);
                 return 1;
             }
             continue;

@@ -33,7 +33,7 @@ int main(void)
             world_menu_update(&menu, &settings, 0, wide, 6000);
             check(menu.page == 0 && menu.row == row, "submenu restores title focus");
         }
-        /* Aspect ratio is the first VIDEO option and cycles 4:3, 16:9, 21:9. */
+        /* Aspect ratio is the first VIDEO option and cycles 4:3, 16:9. */
         menu.row = 1;
         world_menu_update(&menu, &settings, WORLD_MENU_ACCEPT, wide, 6100);
         world_menu_update(&menu, &settings, 0, wide, 6101);
@@ -44,12 +44,10 @@ int main(void)
         check((changed & WORLD_MENU_ASPECT) && settings.aspect == 1, "aspect 16:9");
         world_menu_update(&menu, &settings, 0, wide, 6105);
         world_menu_update(&menu, &settings, WORLD_MENU_RIGHT, wide, 6106);
-        world_menu_update(&menu, &settings, 0, wide, 6107);
-        world_menu_update(&menu, &settings, WORLD_MENU_RIGHT, wide, 6108);
         check(settings.aspect == 0, "aspect wraps to 4:3");
-        world_menu_update(&menu, &settings, 0, wide, 6109);
-        world_menu_update(&menu, &settings, WORLD_MENU_LEFT, wide, 6110);
-        check(settings.aspect == 2, "aspect 21:9");
+        world_menu_update(&menu, &settings, 0, wide, 6107);
+        world_menu_update(&menu, &settings, WORLD_MENU_LEFT, wide, 6108);
+        check(settings.aspect == 1, "aspect wraps back to 16:9");
         settings.aspect = 0;
 
         world_menu_open_title(&menu, WORLD_MENU_ACCEPT, wide, 7000);

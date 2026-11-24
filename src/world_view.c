@@ -6,7 +6,7 @@ int world_terrain_mirror, world_terrain_cam;
 
 void world_view_set(unsigned m)
 {
-    session_mode = mode = m == WORLD_VIEW_WIDE || m == WORLD_VIEW_ULTRA ? m : WORLD_VIEW_ARCADE;
+    session_mode = mode = m == WORLD_VIEW_WIDE ? m : WORLD_VIEW_ARCADE;   /* the ultrawide mode was retired */
     wing_mirror = world_terrain_mirror = 0;      /* a new aspect starts a clean session */
 }
 

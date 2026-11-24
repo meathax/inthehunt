@@ -276,7 +276,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     case PAGE_OPTIONS:
         ADD(ITEM_TABS, "", "LEFT/RIGHT CHANGES THE PAGE");
         if (m->tab == TAB_VIDEO) {
-            ADD(ITEM_ASPECT, "ASPECT", m->title ? "ARCADE 4:3 OR WIDER 16:9 AND 21:9"
+            ADD(ITEM_ASPECT, "ASPECT", m->title ? "ARCADE 4:3 OR WIDER 16:9"
                                                       : "APPLIES WHEN YOU EXIT TO MENU");
             ADD(ITEM_QUALITY, "GFX QUALITY", "LOW, MEDIUM OR HIGH EFFECTS");
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
@@ -394,8 +394,8 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     case ITEM_BRIGHTNESS: snprintf(out, 32, "%u%%", s->brightness); break;
     case ITEM_BORDERS: strcpy(out, s->ambient_borders ? "AMBIENT" : "BLACK"); break;
     case ITEM_ASPECT: {
-        static const char *const ratios[] = {"4:3 ARCADE", "16:9 WIDE", "21:9 ULTRAWIDE"};
-        strcpy(out, ratios[s->aspect < 3 ? s->aspect : 0]);
+        static const char *const ratios[] = {"4:3 ARCADE", "16:9 WIDE"};
+        strcpy(out, ratios[s->aspect < 2 ? s->aspect : 0]);
         break;
     }
     case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
@@ -482,7 +482,7 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VIEW;
     }
     case ITEM_BORDERS: s->ambient_borders = !s->ambient_borders; return WORLD_MENU_VIEW;
-    case ITEM_ASPECT: s->aspect = (s->aspect + (d > 0 ? 1 : 2)) % 3; return WORLD_MENU_ASPECT;
+    case ITEM_ASPECT: s->aspect = (s->aspect + 1) % 2; return WORLD_MENU_ASPECT;
     case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
     case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {
         unsigned *effect = NULL, *level = strength_field(s, id, &effect);

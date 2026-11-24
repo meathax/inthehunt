@@ -1,13 +1,11 @@
 In the Hunt v0.9.18 for Windows x64
 
-Ultrawide (21:9) mode
+Widescreen (16:9) mode
 
-- New Ultrawide mode beside Arcade and Widescreen: a 64:27 playfield (568 columns) for 21:9 monitors, chosen from the mode selector or with --mode=ultrawide.
 - Scenery, enemies, HUD panels and menus fill the wider view on all six stages; each mode keeps its own high scores.
-- Bosses now reach and shoot at subs camping in the far wings, including the stage-one claw submarine.
-- Fixed the sub wrapping from the left wing to the right side of the screen.
-- Wider stage-three boss wall; unwritten background cells in the wings render black instead of grey.
-- New radiance-cascade bounce lighting, soft shadows and light rays in the GPU effects.
+- Bosses reach and shoot at subs hugging the far edges, including the stage-one claw submarine and the stage-four boss's flames.
+- Stage 5 fills the wide picture instead of black bars, and the stage-4 arena wings are solid scenery.
+- The sub can no longer wrap from the left wing to the right side of the screen.
 - Arcade mode output is unchanged.
 
 Extract the entire ZIP and open InTheHunt.exe. On first launch, select your

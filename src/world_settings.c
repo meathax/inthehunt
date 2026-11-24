@@ -77,7 +77,7 @@ static const NumberSetting numbers[] = {
     {"brightness", offsetof(WorldSettings, brightness), 70, 150, 0},
     {"auto_quality", offsetof(WorldSettings, auto_quality), 0, 1, 0},
     {"ambient_borders", offsetof(WorldSettings, ambient_borders), 0, 1, 0},
-    {"aspect", offsetof(WorldSettings, aspect), 0, 2, 0},
+    {"aspect", offsetof(WorldSettings, aspect), 0, 1, 0},
     {"light_strength", offsetof(WorldSettings, light_strength), 25, 200, 0},
     {"shadow_strength", offsetof(WorldSettings, shadow_strength), 25, 200, 0},
     {"depth_strength", offsetof(WorldSettings, depth_strength), 25, 200, 0},
@@ -218,6 +218,7 @@ static int number(const char *text, unsigned *value)
 static int apply_setting(WorldSettings *settings, const char *key, const char *value, unsigned char *seen)
 {
     if (!strcmp(key, "pacing") && !strcmp(value, "2")) value = "1"; /* Retired timer mode. */
+    if (!strcmp(key, "aspect") && !strcmp(value, "2")) value = "1"; /* Retired ultrawide mode. */
     if (!strcmp(key, "timing_mode"))
         return world_timing_mode_parse(value, &settings->timing_mode) ? 1 : -1;
     for (unsigned i = 0; i < sizeof numbers / sizeof numbers[0]; ++i) {
