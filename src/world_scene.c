@@ -624,6 +624,7 @@ static void sprite_motions(const Sprite *now, int count, const Sprite *before, i
 static void draw_sprites(double alpha)
 {
     if((g.fx->materials || g.fx->contact_shade))material_palette_prepare();
+    const int store_material = g.fx->materials || g.fx->contact_shade;
     static Sprite now[MAX_SPRITES], before[MAX_SPRITES];
     int k = g.k;
     for (size_t i = 0, n = (size_t)g.ow * g.oh; i < n; ++i) sprite_px[i] = NONE;
@@ -688,31 +689,56 @@ static void draw_sprites(double alpha)
         if(transmissive)flags|=0x1000; /* Luminous gases transmit the lights inside them. */
         if (g.fx->rim && !transmissive && own_bank!=3 && own_bank!=10 && own_bank!=11 &&
             own_bank!=39 && own_bank!=43 && own_bank!=55) flags |= 0x2000;
+        /* Per-sprite invariants, hoisted out of the per-texel loop. */
+        const int wanted = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive;
+        const int glows = may_glow && blast;
+        const uint16_t value_bits = (uint16_t)(flags | (hud ? 0x4000 : 0));
+        const unsigned bank_base = bank * 16;
+        drawing.wanted = wanted;
+        drawing.bank = bank; drawing.flip_x = flip_x; drawing.flip_y = flip_y;
         for (int row = 0; row < height; ++row) {
             int screen_y = s->top + row;
             if (screen_y < -8 || screen_y >= H + 8) continue;
             int local = flip_y ? height - 1 - row : row;
+            int py = top + row * k;
+            const int row_ok = py > -k && py < g.oh;   /* else sprite_block rejects every texel */
+            if (!row_ok && !glows) continue;
+            if (wanted) drawing.y = local&15;
             for (int c = 0; c < s->cols; ++c) {
                 int shown = flip_x ? s->cols - 1 - c : c;
                 unsigned code = s->code + (unsigned)local / 16 + 8u * (unsigned)c;
                 const uint8_t *src=gfx2+(code&0x7fff)*32+(local&15);
                 uint64_t halves[2]={decode_plane_row(src,0x100000),decode_plane_row(src+16,0x100000)};
+                if (!(halves[0] | halves[1])) continue;   /* fully transparent tile row */
+                /* A column starting at 497 or beyond wraps to the left edge. */
+                int wrap = s->left + shown * 16 >= 497 ? 512 : 0;
+                int base_x = shown * 16 - wrap;
+                if (wanted) drawing.code = code;
                 for (int col = 0; col < 16; ++col) {
                     unsigned tx=flip_x ? 15-col : col;
                     unsigned pen=(unsigned)(halves[tx/8]>>(8*(tx&7)))&15;
                     if (!pen) continue;
-                    uint16_t index = (uint16_t)((bank * 16 + pen) & 1023);
-                    /* A column starting at 497 or beyond wraps to the left edge. */
-                    int wrap = s->left + shown * 16 >= 497 ? 512 : 0;
-                    int sx = s->left + shown * 16 + col - wrap;
-                    int px = left + (shown * 16 + col - wrap) * k, py = top + row * k;
-                    drawing.wanted = (g.fx->materials || g.fx->contact_shade) && height>=16 && own_bank!=3 && own_bank!=10 && own_bank!=11 && own_bank!=39 && own_bank!=43 && own_bank!=55 && !transmissive;
-                    drawing.code = code; drawing.bank = bank; drawing.pen = pen;
-                    drawing.x = flip_x ? 15-col : col; drawing.y = local&15;
-                    drawing.flip_x = flip_x; drawing.flip_y = flip_y;
-                    sprite_block(px, py, index | flags | (hud ? 0x4000 : 0));
+                    uint16_t index = (uint16_t)((bank_base + pen) & 1023);
+                    int sx = s->left + base_x + col;
+                    int px = left + (base_x + col) * k;
+                    if (k == 1) {
+                        /* Fast path: one output pixel per texel. */
+                        if (row_ok && (unsigned)px < (unsigned)g.ow) {
+                            uint16_t *owner = sprite_px + (size_t)py * g.ow + px;
+                            if (*owner == NONE) {
+                                *owner = index | value_bits;
+                                if (store_material) {
+                                    if (wanted) { drawing.pen = pen; drawing.x = (int)tx; }
+                                    sprite_material[(size_t)py*g.ow+px] = wanted ? drawing_material() : 0;
+                                }
+                            }
+                        }
+                    } else {
+                        if (wanted) { drawing.pen = pen; drawing.x = (int)tx; }
+                        sprite_block(px, py, index | value_bits);
+                    }
                     /* Fire, flashes and tracer light their surroundings. */
-                    if (may_glow && blast && sx >= 0 && sx < W && screen_y >= 0 && screen_y < H) {
+                    if (glows && sx >= 0 && sx < W && screen_y >= 0 && screen_y < H) {
                         uint32_t colour = cur.colors[index];
                         unsigned r = (colour >> 16) & 255, gr = (colour >> 8) & 255, b = colour & 255;
                         unsigned peak=r>gr?r:gr;

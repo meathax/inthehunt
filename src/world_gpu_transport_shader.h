@@ -29,7 +29,7 @@ bool trace(float2 origin,float2 dir,float limit,out int2 hit,out float dist,out 
     float2 next=(step*(float2(hit)-origin)+float2(step.x>0,step.y>0))*stride;
     bool outside=(cell(hit)>>24)==0;
     dist=0;normal=0;
-    [loop] for(int n=0;n<72;++n){
+    [loop] for(int n=0;n<96;++n){
         if(next.x<next.y){dist=next.x;next.x+=stride.x;hit.x+=step.x;normal=float2(-step.x,0);}
         else {dist=next.y;next.y+=stride.y;hit.y+=step.y;normal=float2(0,-step.y);}
         if(dist>limit||!inside(hit))return false;
@@ -55,10 +55,12 @@ uint pointCaster(int2 p){
 }
 // Compare boundary distances by cross multiplication. A corner crossing
 // always advances both axes, independently of ray length or camera phase.
-int pointBlockerRow(float2 receiver,float2 emitter){
+// farOverride: material at the true emitter (soft-shadow taps end beside it,
+// so the light's own body must still not shadow the light). ~0u = use endpoint.
+int pointBlockerRowFrom(float2 receiver,float2 emitter,uint farOverride){
     int2 start=int2(floor(receiver*16+.5)),finish=int2(floor(emitter*16+.5));
     int2 q=start>>4,end=finish>>4;
-    uint nearMaterial=pointCaster(q),farMaterial=pointCaster(end);
+    uint nearMaterial=pointCaster(q),farMaterial=farOverride!=~0u?farOverride:pointCaster(end);
     int2 delta=finish-start,stepDir=int2(sign(delta)),span=abs(delta);
     int2 border=16*(q+int2(stepDir.x>0,stepDir.y>0));
     int2 distance=abs(border-start)*span.yx;
@@ -82,6 +84,7 @@ int pointBlockerRow(float2 receiver,float2 emitter){
     }
     return -1;
 }
+int pointBlockerRow(float2 receiver,float2 emitter){return pointBlockerRowFrom(receiver,emitter,~0u);}
 // Codes 1..5: visible quarters 0..4. Codes 6..10: faint sky-fill blocked quarters 0..4.
 float decodeVisibility(uint code){
     return code<=5?(code-1)*.25:1-.16*((code-6)*.25);
@@ -91,7 +94,25 @@ uint pointVisibilityCode(float2 receiver,float2 emitter,bool bow){
     // Budget mode (automatic quality): one ray instead of soft three-ray edges.
     if(scene.Load(4)&2048)return row<0 || (wl>0 && row<wl && min(receiver.y,emitter.y)<wl)?5:1;
     if(wl<=0 || min(receiver.y,emitter.y)>=wl || row>=wl){
-        if(!bow || abs(receiver.x-emitter.x)<12)return row<0?5:1;
+        if(!bow){
+            // High quality: four stratified rays across the emitter disk give
+            // a soft penumbra whose width grows with distance to the blocker.
+            if(scene.Load(4)&1024)return row<0?5:1;
+            float2 delta=emitter-receiver;
+            float span=length(delta);
+            if(span<3)return row<0?5:1;
+            float2 side=float2(-delta.y,delta.x)/span*min(4.,1.5+span*.035);
+            uint ownMaterial=pointCaster(int2(floor(emitter)));
+            uint open=0;
+            [unroll]for(int t=0;t<4;++t){
+                float o=(t-1.5)/1.5;
+                open+=pointBlockerRowFrom(receiver,emitter+side*o,ownMaterial)<0?1u:0u;
+            }
+            // Keep the umbra exact: the centre ray still decides full shadow.
+            if(row>=0)open=min(open,2u);else open=max(open,2u);
+            return 1+open;
+        }
+        if(abs(receiver.x-emitter.x)<12)return row<0?5:1;
         // The bow lens is vertical in side view. Fixed taps keep tiny nearby
         // silhouette details from switching the entire distant beam on/off.
         float2 rim=float2(0,3.0);
@@ -241,14 +262,15 @@ void indirectPass(uint3 id:SV_DispatchThreadID){
     int2 q=id.xy;if(!inside(q))return;
     float3 sum=0;int wl=asint(scene.Load(8));
     uint quality=scene.Load(4);
-    int paths=(quality&2048)?1:(quality&1024)?2:4;
+    int paths=(quality&2048)?1:(quality&1024)?2:8;
+    float reach=(quality&(1024|2048))?38:56;
     [loop]for(int j=0;j<paths;j++){
         float phase=((q.x&1)+2*(q.y&1)+.5)*.25;
         float angle=(j+phase)*(6.2831853/paths);float2 dir=float2(cos(angle),sin(angle));
         float2 p=q+.5;float3 throughput=1;
         [loop]for(int b=0;b<(paths<4?1:2);b++){
             int2 hit;float d;float2 normal;
-            if(!trace(p,dir,38,hit,d,normal))break;
+            if(!trace(p,dir,reach,hit,d,normal))break;
             float2 hitPoint=p+d*dir;
             float wet=wl<0?1:saturate((max(p.y,hitPoint.y)-wl*.5)/max(.01,abs(p.y-hitPoint.y)));
             throughput*=rgb(cell(hit))*.65*transmission(d*wet);
@@ -295,10 +317,18 @@ void volumePass(uint3 id:SV_DispatchThreadID){
     // the stepped diagonals caused by integer division in the shaft texture.
     float x=q.x+scroll-.32*q.y;
     float beam=.5+.28*sin(x*.026+t*.003)+.19*sin(x*.051+q.y*.006-t*.0021);
-    float shaft=skyReaches(q)*beam*beam*l.a*exp2(-max(0.,q.y-max(0,wl))*.009);
     uint flags=scene.Load(4);
+    float shaft;
+    if(flags&512){
+        // Light rays: distinct crepuscular beams. Sharpen the slow pattern into
+        // separated shafts, brightest just under the surface, and let them
+        // reach deeper before the water absorbs them.
+        float b=saturate(beam);
+        float rays=b*b*b*(1.6+.9*sin(x*.013+t*.0011));
+        shaft=skyReaches(q)*rays*l.a*exp2(-max(0.,q.y-max(0,wl))*.0062);
+    }else shaft=skyReaches(q)*beam*beam*l.a*exp2(-max(0.,q.y-max(0,wl))*.009)*.32;
     float4 water=stageLight(1);
-    float3 colour=shaft*float3(3,11,15)*water.rgb*stageLight(2).w*((flags&512)?1.:.32);
+    float3 colour=shaft*float3(3,11,15)*water.rgb*stageLight(2).w*((flags&512)?6.5:1.);
     if(flags&32)colour+=l.rgb*float3(9,10,12)*water.rgb*((flags&4)?.65:1);
     // One extinction field is shared by downwelling and local light.
     colour*=exp2(-max(0.,q.y-max(0,wl))*.0015*water.w);
@@ -449,6 +479,7 @@ float caustics(int2 native){
     float t=asint(effects.Load(EFFECT_volume_time))*.012;
     return .62*causticRidges(world*.085,t)+.45*causticRidges(world*.137+float2(3.1,1.7),t*1.31);
 }
+// @RC_INSERT
 [numthreads(8,8,1)]
 void shadePass(uint3 id:SV_DispatchThreadID){
     uint k=scene.Load(12);uint2 extent=uint2(rasterWidth,240)*k;
@@ -467,7 +498,6 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         uint row=id.y/k;
         if(effects.Load(EFFECT_ocean_rows+(row/32)*4)&(1u<<(row%32))){
             int3 v=int3(round(base*255));
-// @RC_INSERT
             int lum=(v.r*3+v.g*5+v.b*2)/10;
             int cool=clamp((max(v.g,v.b)-v.r)*3,0,255);
             int water=min(255,cool*(255-lum)/200);

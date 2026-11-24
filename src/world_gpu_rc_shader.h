@@ -51,9 +51,11 @@ void rcJfaStep(uint3 id:SV_DispatchThreadID){
     uint best=0xffffffffu;float bestDist=1e9;
     [unroll]for(int j=0;j<9;++j){
         int2 n=c+int2(j%3-1,j/3-1)*step;
-        if(!inside(n))continue;
-        uint seed=asuint(rcUpper[indexOf(n)].x);
-        if(seed==0xffffffffu)continue;
+        // Root descriptors have no bounds checks and the unrolled guard may be
+        // compiled into a select: always load from a clamped, valid address.
+        bool valid=inside(n);
+        uint seed=asuint(rcUpper[indexOf(clamp(n,int2(0,0),size-1))].x);
+        if(!valid || seed==0xffffffffu)continue;
         float2 delta=float2(int2(seed&0xffffu,seed>>16)-c);
         float d=dot(delta,delta);
         if(d<bestDist){bestDist=d;best=seed;}
@@ -151,7 +153,10 @@ void rcCascadePass(uint3 id:SV_DispatchThreadID){
         radiance=rcEmission(hit)*transmission((th-t0)*wet);
     }else if(code==2){
         float te=max(t0,-o.y/dir.y);
-        float sky=skyReaches(int2(int((o.x+dir.x*te)*2),0))?1.:.15;
+        // The exit point can lie beyond either side of the raster: clamp the
+        // sky lookup so it stays inside the sky_stop table.
+        int exitX=clamp(int((o.x+dir.x*te)*2),0,rasterWidth-1);
+        float sky=skyReaches(int2(exitX,0))?1.:.15;
         radiance=RC_SKY*sky*transmission((te-t0)*rcWet(begin.y,0));
     }else if(code==0){
         float wet=rcWet(begin.y,o.y+dir.y*t1);
