@@ -953,6 +953,11 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
     }
     D3D12_RANGE none = {0, 0};
     readback->Unmap(0, &none);
+        {   /* BENCH_FLAGS_SET_<variant>=hex forces lighting flags on for that variant */
+            char name[32];
+            snprintf(name, sizeof name, "BENCH_FLAGS_SET_%u", v);
+            if (const char *forced = getenv(name)) g.force_set = (uint32_t)strtoul(forced, nullptr, 16);
+        }
     return 1;
 }
 

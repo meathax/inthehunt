@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <string>
 #include "world_gpu_transport_shader.h"
+#include "world_gpu_rc_shader.h"
 static_assert(sizeof(WorldEffectNode)==32);
 
 // Close single-pixel stipple holes in each material independently. Four
@@ -21,6 +23,11 @@ static void pack_point_coverage(uint8_t *out,const uint32_t *cells,int cols){
 struct GpuTransport {
     Com<ID3D12RootSignature> root;
     Com<ID3D12PipelineState> sun, direct, indirect, shade, volume, resolve;
+    // Radiance cascades (world_gpu_rc_shader.h). Absent or failed: the sampled indirect pass runs.
+    Com<ID3D12PipelineState> rc_jfa_init, rc_jfa_step, rc_jfa_finish, rc_cascade, rc_integrate, rc_resolve, rc_upsample;
+    Com<ID3D12Resource> rc_a, rc_b, rc_dist, rc_native;
+    bool rc_ready=false, rc_prev=false;
+    uint32_t force_set=0;   // benchmark variants: lighting flags forced on
     Com<ID3D12Resource> effect_upload[FRAMES], history, volume_field, effect_device, input_device;
     Com<ID3D12Resource> scene_upload[FRAMES], scene, direct_field, bounce_field, result, vis_cache;
     bool ready=false, have_field=false, have_inputs=false;
@@ -113,7 +120,7 @@ struct GpuTransport {
                     pass_queries.reset();
             }
         }
-        D3D12_ROOT_PARAMETER params[9]={};
+        D3D12_ROOT_PARAMETER params[14]={};
         for(UINT i=0;i<5;i++){
             params[i].ParameterType=i<2?D3D12_ROOT_PARAMETER_TYPE_SRV:D3D12_ROOT_PARAMETER_TYPE_UAV;
             params[i].Descriptor.ShaderRegister=i<2?i:i-2;
@@ -123,7 +130,13 @@ struct GpuTransport {
         params[6].ParameterType=D3D12_ROOT_PARAMETER_TYPE_UAV;params[6].Descriptor.ShaderRegister=3;
         params[7].ParameterType=D3D12_ROOT_PARAMETER_TYPE_UAV;params[7].Descriptor.ShaderRegister=4;
         params[8].ParameterType=D3D12_ROOT_PARAMETER_TYPE_UAV;params[8].Descriptor.ShaderRegister=5;
-        desc.NumParameters=9; desc.pParameters=params;
+        for(UINT i=9;i<13;i++){   // u6..u9: cascade buffers, distance field, per-pixel bounce
+            params[i].ParameterType=D3D12_ROOT_PARAMETER_TYPE_UAV;
+            params[i].Descriptor.ShaderRegister=i-3;
+        }
+        params[13].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        params[13].Constants.ShaderRegister=0;params[13].Constants.Num32BitValues=4;
+        desc.NumParameters=14; desc.pParameters=params;
         Com<ID3DBlob> signature, errors;
         if(FAILED(D3D12SerializeRootSignature(&desc,D3D_ROOT_SIGNATURE_VERSION_1,signature.put(),errors.put())) ||
            FAILED(dev->CreateRootSignature(0,signature->GetBufferPointer(),signature->GetBufferSize(),IID_PPV_ARGS(root.put()))))return false;
@@ -152,16 +165,60 @@ struct GpuTransport {
             snprintf(values[i],sizeof values[i],"%zu",offsets[i].value);
             defines[i]={offsets[i].name,values[i]};
         }
-        for(int i=0;i<6;i++){
-            Com<ID3DBlob> code;
-            if(FAILED(D3DCompile(source,strlen(source),"water transport",defines,nullptr,names[i],"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put()))){
-                if(errors) fprintf(stderr,"%s\n",(const char*)errors->GetBufferPointer());
-                return false;
+        std::string text=source;
+        const size_t marker=text.find("// @RC_INSERT");
+        if(marker!=std::string::npos){
+            std::string chunk=rc_shader;
+            if(const char *file=getenv("WORLD_RC_SHADER")){   // developer: iterate on the cascade source without rebuilding
+                if(FILE *f=fopen(file,"rb")){
+                    chunk.clear();char buffer[4096];size_t n;
+                    while((n=fread(buffer,1,sizeof buffer,f))>0)chunk.append(buffer,n);
+                    fclose(f);
+                }
+            }
+            text.insert(marker,chunk);
+        }
+        // Every entry point parses the whole source: compile them side by side.
+        const char *rc_names[]={"rcJfaInit","rcJfaStep","rcJfaFinish","rcCascadePass","rcIntegratePass","rcResolvePass","rcUpsamplePass"};
+        Com<ID3D12PipelineState> *rc_states[]={&rc_jfa_init,&rc_jfa_step,&rc_jfa_finish,&rc_cascade,&rc_integrate,&rc_resolve,&rc_upsample};
+        bool rc_pipelines=marker!=std::string::npos;
+        const int base_count=6,rc_count=rc_pipelines?7:0;
+        struct Compile {
+            const std::string *text;const D3D_SHADER_MACRO *defines;const char *entry;
+            Com<ID3DBlob> code,errors;HRESULT result;
+            static DWORD WINAPI run(void *p){
+                auto *c=static_cast<Compile*>(p);
+                c->result=D3DCompile(c->text->c_str(),c->text->size(),"water transport",c->defines,nullptr,c->entry,"cs_5_0",
+                                     D3DCOMPILE_OPTIMIZATION_LEVEL3,0,c->code.put(),c->errors.put());
+                return 0;
+            }
+        } compiles[13];
+        HANDLE workers[13]={};
+        for(int i=0;i<base_count+rc_count;i++){
+            compiles[i].text=&text;compiles[i].defines=defines;
+            compiles[i].entry=i<base_count?names[i]:rc_names[i-base_count];
+            compiles[i].result=E_FAIL;
+            workers[i]=CreateThread(nullptr,0,Compile::run,&compiles[i],0,nullptr);
+            if(!workers[i])Compile::run(&compiles[i]);
+        }
+        for(int i=0;i<base_count+rc_count;i++)if(workers[i]){WaitForSingleObject(workers[i],INFINITE);CloseHandle(workers[i]);}
+        for(int i=0;i<base_count+rc_count;i++){
+            const bool rc_entry=i>=base_count;
+            Compile &c=compiles[i];
+            if(rc_entry && !rc_pipelines)break;
+            if(FAILED(c.result)){
+                if(c.errors) fputs((const char*)c.errors->GetBufferPointer(),stderr);
+                if(!rc_entry)return false;
+                rc_pipelines=false;break;
             }
             D3D12_COMPUTE_PIPELINE_STATE_DESC state={};
             state.pRootSignature=root.get();
-            state.CS={code->GetBufferPointer(),code->GetBufferSize()};
-            if(FAILED(dev->CreateComputePipelineState(&state,IID_PPV_ARGS(states[i]->put()))))return false;
+            state.CS={c.code->GetBufferPointer(),c.code->GetBufferSize()};
+            Com<ID3D12PipelineState> &target=rc_entry?*rc_states[i-base_count]:*states[i];
+            if(FAILED(dev->CreateComputePipelineState(&state,IID_PPV_ARGS(target.put())))){
+                if(!rc_entry)return false;
+                rc_pipelines=false;break;
+            }
         }
         for(auto &u:scene_upload)
             if(FAILED(buffer(dev,D3D12_HEAP_TYPE_UPLOAD,offsetof(WorldLightScene,effects),D3D12_RESOURCE_STATE_GENERIC_READ,u.put())))return false;
@@ -180,6 +237,10 @@ struct GpuTransport {
         };
         ready=storage(volume_field,WORLD_VIEW_MAX_WIDTH/4*60*16) && storage(history,maxFrameBytes) && storage(direct_field,(WORLD_PROBES+WORLD_VIEW_MAX_WIDTH*240+WORLD_SKY_COLUMNS)*16) && storage(bounce_field,WORLD_PROBES*16) && storage(result,maxFrameBytes)
             && storage(vis_cache,WORLD_VIEW_MAX_WIDTH*H*16);
+        // Four rays per base cell at every cascade, plus the partial probes at the edges.
+        rc_ready=ready && rc_pipelines &&
+            storage(rc_a,4*(WORLD_VIEW_MAX_WIDTH/2+32)*(120+32)*16) && storage(rc_b,4*(WORLD_VIEW_MAX_WIDTH/2+32)*(120+32)*16) &&
+            storage(rc_dist,WORLD_PROBES*4) && storage(rc_native,WORLD_VIEW_MAX_WIDTH*240*16);
         return ready;
     }
 
@@ -189,10 +250,63 @@ struct GpuTransport {
         return (data.flags&(1024|2097152))!=0 && (data.flags&WORLD_LIGHT_FIELD_MASK)!=0;
     }
     uint32_t dispatch_flags(const WorldLightScene &data) const {
-        return data.flags | (adaptive(data) && budget_mode ? 2048u : 0u);
+        return (data.flags | force_set) | (adaptive(data) && budget_mode ? 2048u : 0u);
     }
     bool needs_light(const WorldLightScene &data) const {
         return !have_field || width!=data.width || revision!=data.revision || flags!=dispatch_flags(data) || scale!=data.scale;
+    }
+    // Radiance cascades: distance field, cascades from the farthest band down,
+    // per-cell integration, then the pixel-resolution bounce field. Quality tiers
+    // coarsen the base probe grid (spacing 1, 2 or 4 cells) and drop cascades.
+    void record_rc(ID3D12GraphicsCommandList *cmd,UINT frame,int cols,uint32_t lighting){
+        D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        const int cells_x=cols/2,cells_y=120;
+        const unsigned shift=(lighting&2048)?2u:(lighting&1024)?1u:0u,levels=5-shift;
+        unsigned values[4]={0,levels,shift,rc_prev?1u:0u};
+        cmd->SetComputeRootUnorderedAccessView(11,rc_dist->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(12,rc_native->GetGPUVirtualAddress());
+        cmd->SetComputeRoot32BitConstants(13,4,values,0);
+        // Distance field by jump flooding (16,8,4,2,1), seeds ping-ponging through A and B.
+        ID3D12Resource *seeds[2]={rc_a.get(),rc_b.get()};
+        cmd->SetComputeRootUnorderedAccessView(9,rc_b->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(10,rc_a->GetGPUVirtualAddress());
+        cmd->SetPipelineState(rc_jfa_init.get());cmd->Dispatch((cells_x+7)/8,15,1);
+        cmd->ResourceBarrier(1,&sync);
+        cmd->SetPipelineState(rc_jfa_step.get());
+        unsigned from=0;
+        for(int step=16;step>=1;step>>=1){
+            values[0]=step;
+            cmd->SetComputeRoot32BitConstants(13,4,values,0);
+            cmd->SetComputeRootUnorderedAccessView(9,seeds[from]->GetGPUVirtualAddress());
+            cmd->SetComputeRootUnorderedAccessView(10,seeds[from^1]->GetGPUVirtualAddress());
+            cmd->Dispatch((cells_x+7)/8,15,1);
+            cmd->ResourceBarrier(1,&sync);
+            from^=1;
+        }
+        cmd->SetComputeRootUnorderedAccessView(9,seeds[from]->GetGPUVirtualAddress());
+        cmd->SetPipelineState(rc_jfa_finish.get());cmd->Dispatch((cells_x+7)/8,15,1);
+        cmd->ResourceBarrier(1,&sync);
+        cmd->SetPipelineState(rc_cascade.get());
+        for(int level=(int)levels-1;level>=0;--level){
+            values[0]=level;
+            cmd->SetComputeRoot32BitConstants(13,4,values,0);
+            ID3D12Resource *lower=(level&1)?rc_b.get():rc_a.get(),*upper=(level&1)?rc_a.get():rc_b.get();
+            cmd->SetComputeRootUnorderedAccessView(9,upper->GetGPUVirtualAddress());
+            cmd->SetComputeRootUnorderedAccessView(10,lower->GetGPUVirtualAddress());
+            const int spacing=1<<(shift+level);
+            cmd->Dispatch((((cells_x+spacing-1)/spacing)+7)/8,(((cells_y+spacing-1)/spacing)+7)/8,4u<<(2*level));
+            cmd->ResourceBarrier(1,&sync);
+        }
+        cmd->SetComputeRootUnorderedAccessView(9,rc_a->GetGPUVirtualAddress());
+        cmd->SetPipelineState(rc_integrate.get());cmd->Dispatch((cells_x+7)/8,15,1);
+        cmd->ResourceBarrier(1,&sync);
+        pass_mark(cmd,frame,"indirect");
+        cmd->SetPipelineState(rc_resolve.get());cmd->Dispatch((cells_x+7)/8,15,1);
+        cmd->ResourceBarrier(1,&sync);
+        cmd->SetPipelineState(rc_upsample.get());cmd->Dispatch((cols+7)/8,30,1);
+        cmd->ResourceBarrier(1,&sync);
+        pass_mark(cmd,frame,"resolve");
+        rc_prev=true;
     }
     bool prepare(ID3D12GraphicsCommandList *cmd,ID3D12Resource *upload,int k,
                  const WorldLightScene &data,uint32_t dispatch_flags,UINT frame=0){
@@ -247,12 +361,20 @@ struct GpuTransport {
             cmd->SetPipelineState(direct.get());cmd->Dispatch((cols+7)/8,30,1);
             cmd->ResourceBarrier(1,&sync);
             pass_mark(cmd,frame,"direct");
-            cmd->SetPipelineState(indirect.get());cmd->Dispatch((cols/2+7)/8,15,1);
-            cmd->ResourceBarrier(1,&sync);
-            pass_mark(cmd,frame,"indirect");
-            cmd->SetPipelineState(resolve.get());cmd->Dispatch((cols/2+7)/8,15,1);
-            cmd->ResourceBarrier(1,&sync);
-            pass_mark(cmd,frame,"resolve");
+            if((dispatch_flags&WORLD_LIGHT_RC) && rc_ready){
+                if(width!=data.width || (dispatch_flags&WORLD_LIGHT_RC_RESET))rc_prev=false;
+                cmd->SetComputeRootUnorderedAccessView(9,rc_a->GetGPUVirtualAddress());
+                cmd->SetComputeRootUnorderedAccessView(10,rc_b->GetGPUVirtualAddress());
+                record_rc(cmd,frame,cols,dispatch_flags);
+            }else{
+                rc_prev=false;
+                cmd->SetPipelineState(indirect.get());cmd->Dispatch((cols/2+7)/8,15,1);
+                cmd->ResourceBarrier(1,&sync);
+                pass_mark(cmd,frame,"indirect");
+                cmd->SetPipelineState(resolve.get());cmd->Dispatch((cols/2+7)/8,15,1);
+                cmd->ResourceBarrier(1,&sync);
+                pass_mark(cmd,frame,"resolve");
+            }
         }
         width=data.width;revision=data.revision;flags=dispatch_flags;have_field=true;
         return true;
@@ -302,6 +424,11 @@ struct GpuTransport {
         cmd->SetComputeRootUnorderedAccessView(6,history->GetGPUVirtualAddress());
         cmd->SetComputeRootUnorderedAccessView(7,volume_field->GetGPUVirtualAddress());
         cmd->SetComputeRootUnorderedAccessView(8,vis_cache->GetGPUVirtualAddress());
+        // The shade pass may read the cascade bounce field: always bind real memory.
+        cmd->SetComputeRootUnorderedAccessView(9,(rc_a?rc_a.get():direct_field.get())->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(10,(rc_b?rc_b.get():direct_field.get())->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(11,(rc_dist?rc_dist.get():direct_field.get())->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(12,(rc_native?rc_native.get():direct_field.get())->GetGPUVirtualAddress());
         D3D12_RESOURCE_BARRIER sync={};sync.Type=D3D12_RESOURCE_BARRIER_TYPE_UAV;
         cmd->ResourceBarrier(1,&sync);
         pass_mark(cmd,frame,"upload");

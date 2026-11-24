@@ -40,7 +40,7 @@ enum {
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
     ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
     ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
-    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE
+    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE, ITEM_FX_RADIANCE
 };
 enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -102,6 +102,7 @@ static unsigned *toggle_field(WorldSettings *s, unsigned id)
     case ITEM_FX_BLAST_REFLECT: return &s->fx_blast_reflect;
     case ITEM_FX_MATERIALS: return &s->fx_materials;
     case ITEM_FX_CAUSTICS: return &s->fx_caustics;
+    case ITEM_FX_RADIANCE: return &s->fx_radiance;
     case ITEM_AUTO_QUALITY: return &s->auto_quality;
 
     default: return NULL;
@@ -315,6 +316,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_STR_SHADOW, "  SHADOW STRENGTH", "HOW DARK SUN SHADOWS FALL");
             ADD(ITEM_FX_LIGHTS, "POINT LIGHTS", "WEAPONS LIGHT NEARBY OBJECTS");
             ADD(ITEM_STR_LIGHT, "  LIGHT STRENGTH", "WEAPON AND LAMP LIGHT BRIGHTNESS");
+            ADD(ITEM_FX_RADIANCE, "  RADIANCE CASCADES", "SOFT LIGHT BOUNCES OFF SURFACES");
             ADD(ITEM_FX_GLOW, "WATER GLOW", "WATER GLOWS NEAR EXPLOSIONS");
             ADD(ITEM_FX_DEPTH, "ABSORPTION", "RED LIGHT FADES WITH DEPTH");
             ADD(ITEM_STR_DEPTH, "  DEPTH STRENGTH", "HOW MUCH DEEP WATER DARKENS");
@@ -369,6 +371,7 @@ static int item_disabled(const WorldSettings *s, unsigned id)
         return !s->fx_enable;
     if (id >= ITEM_FX_WAKES && id <= ITEM_FX_BLAST_REFLECT) return !s->fx_enable;
     if (id == ITEM_FX_SUNSHADOW || id == ITEM_FX_GLOW || id == ITEM_FX_REFLECT || id == ITEM_FX_CAUSTICS) return !s->fx_enable;
+    if (id == ITEM_FX_RADIANCE) return !s->fx_enable || !s->fx_lights;
     unsigned *effect = NULL;
     if (strength_field((WorldSettings *)s, id, &effect)) return !s->fx_enable || !*effect;
     return 0;

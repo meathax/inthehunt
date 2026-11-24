@@ -2192,7 +2192,11 @@ int world_scene_render(uint32_t *out, unsigned scale, double alpha, const WorldS
         gpu_light->scale=k;
         gpu_light->flags=(fx->depth?65536u:0u)|(fx->headlights?32768u:0u)|(fx->rim?16384u:0u)|(fx->lights?1u:0u)|(fx->sunshadow?2u:0u)|(fx->glow?4u:0u)|(fx->trails?8u:0u)|
             (fx->materials?1048576u:0u)|(fx->bubble_light?16u:0u)|(fx->water_volume?32u:0u)|(fx->reflect?64u:0u)|(fx->vivid?128u:0u)|(fx->rays?512u:0u)|(fx->ocean_depth?4096u:0u)|(fx->haze?8192u:0u)|
-            (fx->caustics?WORLD_LIGHT_CAUSTICS:0u)|(fx->auto_quality?2097152u:0u);
+            (fx->caustics?WORLD_LIGHT_CAUSTICS:0u)|(fx->auto_quality?2097152u:0u)|(fx->radiance?WORLD_LIGHT_RC:0u);
+        {   /* A scene cut must not carry the previous scene's bounce light into the cascades. */
+            static unsigned radiance_scene=0xffffffffu;
+            if(radiance_scene!=cur.scene_id){radiance_scene=cur.scene_id;gpu_light->flags|=WORLD_LIGHT_RC_RESET;}
+        }
         const unsigned strengths[6]={fx->light_strength,fx->shadow_strength,fx->depth_strength,
                                      fx->shaft_strength,fx->rim_strength,fx->caustic_strength};
         for(int i=0;i<6;++i)gpu_light->strengths[i]=strengths[i]?strengths[i]*.01f:1.f;
