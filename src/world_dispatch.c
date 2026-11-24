@@ -3258,9 +3258,11 @@ static void update_tile_script(uint8_t *ram, const uint8_t *rom, uint8_t *tiles,
             write_word(ram, 0xb89c, origin);
         }
     }
-    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING && !read_word(ram, 0x28c))
+    /* The attract demo opens its stage the same way; without the extension
+       its wings start black until the camera scrolls real columns in. */
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_WING)
         extend_opening_rows(tiles, base, first_block, width, height, mode == 3);
-    if (base && !trigger && world_view_wing() == WORLD_VIEW_ULTRA_WING && !read_word(ram, 0x28c))
+    if (base && !trigger && world_view_wing() == WORLD_VIEW_ULTRA_WING)
         world_shadow_extend_opening(tiles, base, first_block, width, height, mode == 3);
     write_word(ram, actor + 0x40, row + 10);
     trigger = read_word(rom, row + 10);

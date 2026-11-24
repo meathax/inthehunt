@@ -40,7 +40,7 @@ enum {
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
     ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
     ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
-    ITEM_CRT, ITEM_SELECT_ARCADE, ITEM_START_WIDE, ITEM_START_ULTRA, ITEM_FX_RADIANCE
+    ITEM_CRT, ITEM_ASPECT, ITEM_FX_RADIANCE
 };
 enum { MAX_ITEMS = 64, VISIBLE_ROWS = 6, ROW_STEP = 15 };
 
@@ -264,11 +264,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     switch (m->page) {
     case PAGE_MAIN:
         if (m->title) {
-            if (m->selector) {
-                ADD(ITEM_SELECT_ARCADE, "ARCADE", "ORIGINAL 4:3");
-                ADD(ITEM_START_WIDE, "WIDESCREEN", "EXPANDED 16:9");
-                ADD(ITEM_START_ULTRA, "ULTRAWIDE", "EXPANDED 21:9");
-            } else ADD(ITEM_START, "PLAY", "INSERT A COIN AND DIVE IN");
+            ADD(ITEM_START, "PLAY", "INSERT A COIN AND DIVE IN");
             ADD(ITEM_OPTIONS, "OPTIONS", "VIDEO, SOUND, GAME AND CONTROLS");
             ADD(ITEM_QUIT, "EXIT", "CLOSE IN THE HUNT");
         } else {
@@ -280,6 +276,8 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     case PAGE_OPTIONS:
         ADD(ITEM_TABS, "", "LEFT/RIGHT CHANGES THE PAGE");
         if (m->tab == TAB_VIDEO) {
+            ADD(ITEM_ASPECT, "ASPECT RATIO", m->title ? "ARCADE 4:3 OR WIDER 16:9 AND 21:9"
+                                                      : "APPLIES WHEN YOU EXIT TO MENU");
             ADD(ITEM_QUALITY, "GFX QUALITY", "LOW, MEDIUM OR HIGH EFFECTS");
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
             ADD(ITEM_SCALE, "WINDOW SIZE", "SHARP X1 TO X8 PIXEL SCALING");
@@ -395,6 +393,11 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
     case ITEM_BRIGHTNESS: snprintf(out, 32, "%u%%", s->brightness); break;
     case ITEM_BORDERS: strcpy(out, s->ambient_borders ? "AMBIENT" : "BLACK"); break;
+    case ITEM_ASPECT: {
+        static const char *const ratios[] = {"4:3 ARCADE", "16:9 WIDE", "21:9 ULTRAWIDE"};
+        strcpy(out, ratios[s->aspect < 3 ? s->aspect : 0]);
+        break;
+    }
     case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
     case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {
         unsigned *effect = NULL;
@@ -442,7 +445,7 @@ void world_menu_open(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
     m->dirty = 0;
     m->peek = 0;
     m->opened_at = now_ms;
-    m->selector = m->title = m->title_hidden = m->wake_held = 0;
+    m->title = m->title_hidden = m->wake_held = 0;
 }
 
 void world_menu_open_title(WorldMenu *m, unsigned held, int gamepad, uint32_t now_ms)
@@ -479,6 +482,7 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VIEW;
     }
     case ITEM_BORDERS: s->ambient_borders = !s->ambient_borders; return WORLD_MENU_VIEW;
+    case ITEM_ASPECT: s->aspect = (s->aspect + (d > 0 ? 1 : 2)) % 3; return WORLD_MENU_ASPECT;
     case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
     case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {
         unsigned *effect = NULL, *level = strength_field(s, id, &effect);
@@ -536,7 +540,7 @@ static void go(WorldMenu *m, unsigned page, unsigned row)
 
 void world_menu_title_activity(WorldMenu *m, unsigned held, int activity, int gamepad, uint32_t now_ms)
 {
-    if (!m->open || !m->title || m->selector) return;
+    if (!m->open || !m->title) return;
     if (activity || held || m->page != PAGE_MAIN) {
         m->last_title_input = now_ms;
         if (m->title_hidden) {
@@ -579,7 +583,7 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
             return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
         }
         if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-        else go(m, PAGE_MAIN, 2 * m->selector + (m->page == PAGE_OPTIONS ? 1 : 2));
+        else go(m, PAGE_MAIN, m->page == PAGE_OPTIONS ? 1 : 2);
         return 0;
     }
     if (m->page == PAGE_OPTIONS && (pressed & (WORLD_MENU_TAB_PREV | WORLD_MENU_TAB_NEXT))) {
@@ -609,20 +613,17 @@ unsigned world_menu_update(WorldMenu *m, WorldSettings *s, unsigned held, int ga
         switch (id) {
         case ITEM_RESUME: m->open = 0; return WORLD_MENU_RESUME | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_START: m->open = 0; return WORLD_MENU_START | (m->dirty ? WORLD_MENU_SAVE : 0);
-        case ITEM_SELECT_ARCADE: m->open = 0; return WORLD_MENU_SELECT_ARCADE | (m->dirty ? WORLD_MENU_SAVE : 0);
-        case ITEM_START_WIDE: m->open = 0; return WORLD_MENU_SELECT_WIDE | (m->dirty ? WORLD_MENU_SAVE : 0);
-        case ITEM_START_ULTRA: m->open = 0; return WORLD_MENU_SELECT_ULTRA | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_OPTIONS: go(m, PAGE_OPTIONS, m->rows[PAGE_OPTIONS] ? m->rows[PAGE_OPTIONS] : 1); return 0;
         case ITEM_CONTROLS: go(m, PAGE_CONTROLS, 0); return 0;
         case ITEM_QUIT: go(m, PAGE_QUIT, 0); return 0;
-        case ITEM_NO: go(m, PAGE_MAIN, 2 * m->selector + 2); return 0;
+        case ITEM_NO: go(m, PAGE_MAIN, 2); return 0;
         case ITEM_YES:
             if (m->title) return WORLD_MENU_QUIT | (m->dirty ? WORLD_MENU_SAVE : 0);
             m->open = 0;
             return WORLD_MENU_TITLE | (m->dirty ? WORLD_MENU_SAVE : 0);
         case ITEM_BACK:
             if (m->page == PAGE_CONTROLS) { m->tab = TAB_GAME; go(m, PAGE_OPTIONS, CONTROLS_ROW); }
-            else go(m, PAGE_MAIN, 2 * m->selector + 1);
+            else go(m, PAGE_MAIN, 1);
             return 0;
         case ITEM_TABS: m->tab = (m->tab + 1) % TAB_COUNT; return 0;
         case ITEM_DEFAULTS: {
@@ -782,29 +783,6 @@ void world_menu_render(const WorldMenu *m, const WorldSettings *s, uint32_t *c,
 {
     if (!m->open || m->title_hidden || m->peek || !c || !gfx1) return;
     stride = W = (int)canvas_w;
-    if (m->selector && m->page == PAGE_MAIN) {
-        Ramp brass = gold(), light = steel(), blue = sea();
-        int x = W - 172;
-        shade(c, 0, 168, x, 44, 0xff031623, 196);
-        big_text_at(c, gfx1, 16, 183, "IN THE HUNT", &brass);
-        panel(c, x, 7, 166, 226);
-        text(c, gfx1, x + 24, 24, "SELECT MODE", &light);
-        fill(c, x + 16, 40, 134, 1, 0xff397786);
-        Item rows[MAX_ITEMS];
-        unsigned count = page_items(m, rows);
-        for (unsigned i = 0; i < count; ++i) {
-            int y = 52 + 32 * i;
-            if (m->row == i) {
-                shade(c, x + 12, y - 5, 142, 29, 0xff18455a, 230);
-                fill(c, x + 12, y - 5, 2, 29, 0xffe4b15c);
-                torpedo(c, x + 18, y + 2, 0);
-            }
-            text(c, gfx1, x + 34, y, rows[i].label, m->row == i ? &brass : &light);
-            if (i < 3) text(c, gfx1, x + 34, y + 12, rows[i].help, &blue);
-        }
-        text(c, gfx1, x + 18, 210, m->gamepad ? "A  SELECT" : "ENTER  SELECT", &blue);
-        return;
-    }
     if (m->title && m->page == PAGE_MAIN) { title_screen(m, c, gfx1, now_ms, 0); return; }
     Ramp title = gold(), normal = steel(), picked = gold(), value = sea(), faint = dim();
     backdrop(c, now_ms);

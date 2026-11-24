@@ -21,14 +21,11 @@ enum {
     WORLD_MENU_VIEW = 128,          /* scaling, v-sync, frame rate, enhancements or cabinet switches changed */
     WORLD_MENU_START = 256,         /* title menu: start the arcade game */
     WORLD_MENU_TITLE = 512,         /* pause menu: end this game and return to the title menu */
-    WORLD_MENU_SELECT_ARCADE = 2048,
-    WORLD_MENU_SELECT_WIDE = 1024,   /* title menu: start the widescreen session */
-    WORLD_MENU_SELECT_ULTRA = 4096   /* title menu: start the ultrawide session */
+    WORLD_MENU_ASPECT = 1024        /* settings->aspect changed (applied at the title menu) */
 };
 
 typedef struct {
     unsigned open, page, tab, row, rows[4];
-    unsigned selector;
     unsigned title;                 /* the title menu (start, options, exit) rather than the pause menu */
     unsigned previous, repeat_buttons, gamepad, dirty;
     unsigned peek;                  /* the menu is hidden while the preview button is held */

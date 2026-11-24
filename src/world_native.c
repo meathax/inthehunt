@@ -381,8 +381,7 @@ static unsigned menu_frame(const uint32_t *paused, unsigned held, unsigned toggl
         result = world_menu_update(&menu, &settings, held, gamepad, GetTickCount());
     if (result & WORLD_MENU_DISPLAY) {
         launch_fullscreen_override = 0; /* An explicit player choice supersedes launch mode. */
-        world_window_set_display(settings.fullscreen, settings.window_scale,
-                                 menu.selector ? WORLD_VIEW_WIDE_WIDTH : world_view_width());
+        world_window_set_display(settings.fullscreen, settings.window_scale, world_view_width());
         world_gpu_retry_vrr();          /* a new display mode may support VRR */
     }
     if (result & WORLD_MENU_VIEW) {
@@ -1220,6 +1219,7 @@ static unsigned headless_autopilot(unsigned fallback, unsigned *edges)
 
 static int restore_snapshot(const char *load_path)
 {
+        world_stage_reset_prespawn();
         FILE *f = world_fopen(load_path, "rb");
         int failed = !f || fread(ram, sizeof ram, 1, f) != 1 || fread(tiles, sizeof tiles, 1, f) != 1 ||
             fread(oam, sizeof oam, 1, f) != 1 || fread(palette, sizeof palette, 1, f) != 1 ||
@@ -1337,25 +1337,6 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 char name[32];
                 snprintf(name, sizeof name, "title%u", i);
                 headless_shot(dir, name);
-            }
-            /* The mode selector, at its own 428-wide canvas. */
-            for (unsigned row = 0; row < 3; ++row) {
-                static uint32_t selector[WORLD_VIEW_WIDE_WIDTH * 240];
-                world_menu_open_title(&menu, 0, 0, 0);
-                menu.selector = 1;
-                menu.page = 0;
-                menu.row = row;
-                world_setup_menu_art(selector, WORLD_VIEW_WIDE_WIDTH, 240);
-                world_menu_render(&menu, &settings, selector, gfx1, 1500, WORLD_VIEW_WIDE_WIDTH);
-                uint32_t *keep = pixels; unsigned keep_w = shot_w;
-                (void)keep; (void)keep_w;
-                char name[32];
-                snprintf(name, sizeof name, "selector%u", row);
-                const uint32_t *old_source = shot_source; unsigned old_w = shot_w;
-                shot_source = selector; shot_w = WORLD_VIEW_WIDE_WIDTH;
-                headless_shot(dir, name);
-                shot_source = old_source; shot_w = old_w;
-                menu.selector = 0;
             }
             memcpy(pixels, still, sizeof still);
             menu.open = 0;
@@ -1849,6 +1830,7 @@ static void machine_reset(void)
     set_cabinet_switches();
     world_dispatch_reset();
     world_shadow_reset();
+    world_stage_reset_prespawn();
     world_boot_world(ram, tiles, oam, palette, rom, world_dispatch_port4);
     memcpy(layer_master, title_master_controls, sizeof layer_master);
     weapon_lights_count=0;memset(flight,0,sizeof flight);
@@ -1918,6 +1900,17 @@ static double camera_display_time(LONGLONG now,LONGLONG frequency)
     return sync+floor((now-sync)/period+.5)*period;
 }
 
+/* Restart the attract sequence in the configured aspect ratio. Sessions
+   keep their mode for a whole game, so the option applies only from the
+   title menu (or on returning to it). The caller saves the scores. */
+static void apply_session_aspect(void)
+{
+    world_view_set(settings.aspect);
+    machine_reset();
+    load_scores();
+    if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, world_view_width());
+}
+
 static int run_game(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : world_default_directory();
@@ -1928,12 +1921,14 @@ static int run_game(int argc, char **argv)
     WorldSettingsStatus settings_status = world_settings_load(settings_path, &settings);
     int timing_override = 0;
     const char *headless = NULL;
+    int mode_option = 0;
     for (int i = 2; i < argc; ++i) {
         if (!strncmp(argv[i], "--headless=", 11)) {
             headless = argv[i] + 11;
             continue;
         }
         if (!strncmp(argv[i], "--mode=", 7)) {
+            mode_option = 1;
             if (!strcmp(argv[i] + 7, "wide")) world_view_set(WORLD_VIEW_WIDE);
             else if (!strcmp(argv[i] + 7, "ultrawide")) world_view_set(WORLD_VIEW_ULTRA);
             else if (strcmp(argv[i] + 7, "arcade")) {
@@ -1949,6 +1944,8 @@ static int run_game(int argc, char **argv)
         }
         timing_override = 1;
     }
+    /* Scripted runs stay Arcade unless --mode says otherwise. */
+    if (!mode_option && !headless) world_view_set(settings.aspect);
     const char *launcher_mode = getenv("RECOMPLAUNCHER_MODE");
     if (!headless && launcher_mode && !strcmp(launcher_mode, "bigpicture")) {
         desktop_fullscreen = settings.fullscreen;
@@ -2010,7 +2007,7 @@ load_game_data:
         world_audio_output_close();
         return 1;
     }
-    world_window_set_display(settings.fullscreen, settings.window_scale, boss_snapshot ? world_view_width() : WORLD_VIEW_WIDE_WIDTH);
+    world_window_set_display(settings.fullscreen, settings.window_scale, world_view_width());
     apply_view();
     timeBeginPeriod(1);                 /* Sleep(1) must mean one millisecond for even pacing */
     LARGE_INTEGER rate, now;
@@ -2026,10 +2023,7 @@ load_game_data:
     double last_tick = deadline;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     world_menu_open_title(&menu, 0, 0, GetTickCount());
-    static uint32_t selector_art[WORLD_VIEW_WIDE_WIDTH * 240];
-    world_setup_menu_art(selector_art, WORLD_VIEW_WIDE_WIDTH, 240);
-    menu.selector = 1;
-    int selector_row = -1, selector_pad = -1;
+    if (!boss_snapshot) load_scores();
     if(boss_snapshot)menu.open=0;
     /* Test hooks: WORLD_PACING_LOG=path logs every displayed refresh;
        WORLD_RUN_SECONDS=n quits after n seconds. */
@@ -2064,7 +2058,6 @@ load_game_data:
         /* WORLD_TEST_TITLE=1: START GAME, play, EXIT TO MENU, START GAME again,
            logging the game's master state; quits when done. */
         if (getenv("WORLD_TEST_TITLE")) {
-            if (menu.selector) menu_held = WORLD_MENU_ACCEPT;
             static unsigned phase;
             static unsigned long logged = 1;
             if (ticks / 60 != logged) {
@@ -2090,26 +2083,11 @@ load_game_data:
             world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
-            if (result & (WORLD_MENU_SELECT_ARCADE | WORLD_MENU_SELECT_WIDE | WORLD_MENU_SELECT_ULTRA)) {
-                world_view_set(result & WORLD_MENU_SELECT_ULTRA ? WORLD_VIEW_ULTRA
-                             : result & WORLD_MENU_SELECT_WIDE ? WORLD_VIEW_WIDE : WORLD_VIEW_ARCADE);
-                machine_reset();
-                load_scores();
-                if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, world_view_width());
-                world_menu_open_title(&menu, title_held, gamepad, GetTickCount());
+            if ((result & WORLD_MENU_ASPECT) && settings.aspect != world_view_mode()) {
+                save_scores();
+                apply_session_aspect();
                 QueryPerformanceCounter(&now);
                 deadline = last_tick = (double)now.QuadPart;
-            } else if (menu.selector) {
-                /* The selector root is static between navigation events. */
-                if (menu.page || selector_row != (int)menu.row || selector_pad != gamepad) {
-                    memcpy(shown, selector_art, sizeof selector_art);
-                    world_menu_render(&menu, &settings, shown, gfx1, GetTickCount(), WORLD_VIEW_WIDE_WIDTH);
-                    selector_row = menu.page ? -1 : (int)menu.row;
-                    selector_pad = gamepad;
-                }
-                world_window_present(shown, 1, WORLD_VIEW_WIDE_WIDTH);
-                world_window_wait_vblank();
-                continue;
             } else if (result & WORLD_MENU_START) {
                 if (cabinet_switches() != world_dispatch_port4) {
                     save_scores();
@@ -2127,10 +2105,8 @@ load_game_data:
                 save_scores();
                 scores_active = 0;
                 starting = 0;
+                apply_session_aspect();
                 world_menu_open_title(&menu, menu_held, gamepad, GetTickCount());
-                menu.selector = 1;
-                selector_row = -1;
-                if (!settings.fullscreen) world_window_set_display(0, settings.window_scale, WORLD_VIEW_WIDE_WIDTH);
             }
             if (!menu.open || menu.title) {
                 hold_input = 1;

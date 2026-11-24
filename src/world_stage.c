@@ -110,38 +110,110 @@ void world_stage_three_boss_wall(const uint8_t *ram, uint8_t *tiles)
     }
 }
 
+/* Map-locked sprite actors (mines, pods, turrets, guns, vents). Each
+ * follows the playfield scroll from its spawn point and shows nothing
+ * until then, so in the arcade it appears 24+ pixels beyond the right
+ * edge. A wider view would reveal that point, making the actor pop in
+ * already on screen. These are spawned one wing of camera travel early at
+ * the same world position, so they enter from outside the wider view
+ * exactly as they do in the arcade. Tile painters, parallax-layer and
+ * camera-stopping kinds keep their authored schedule. */
+static int world_prespawn_kind(uint16_t segment, uint16_t kind)
+{
+    switch (((uint32_t)segment << 4) + kind) {
+    case 0x7e41e: case 0x7e817: /* tethered mines and item pods */
+    case 0x7df0e:               /* gun base and attached gun */
+    case 0x77187:               /* background life */
+    case 0xaf1d4: case 0xaf95d: /* destructible scenery */
+    case 0xb18cb:               /* bubble vent */
+    case 0xba0f4:               /* fixed salvo gun */
+    case 0xbb92b:               /* freeze launcher */
+    case 0xbccac:               /* mounted turret */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Records already spawned ahead of their trigger, by record index. Reset
+ * whenever the table or its cursor goes backwards (a new stage). */
+enum { PRESPAWN_RECORDS = 1024 };
+static uint8_t prespawned[PRESPAWN_RECORDS / 8];
+static uint16_t prespawn_table, prespawn_cursor;
+
+void world_stage_reset_prespawn(void)
+{
+    memset(prespawned, 0, sizeof prespawned);
+    prespawn_table = prespawn_cursor = 0;
+}
+
+static int prespawn_marked(unsigned index)
+{
+    return index < PRESPAWN_RECORDS && (prespawned[index / 8] >> (index % 8) & 1);
+}
+
+/* Spawn one record: 1 spawned, 2 skipped by its player gate, 0 pool full. */
+static int spawn_record(uint8_t *ram, const uint8_t *bank, uint16_t parent, uint16_t row,
+                        uint16_t camera)
+{
+    uint16_t trigger = word(bank, row), flags = word(bank, row + 10);
+    unsigned gate = flags >> 14, players = ram[0x264] & 12;
+    if (gate && (gate == 1 ? players == 0 : players != 12)) return 2;   /* gated out */
+    uint16_t child = world_spawn_child(ram, parent, word(bank, row + 2));
+    if (!child) return 0;
+    put(ram, child + 2, word(bank, row + 4));
+    uint16_t authored_x = word(bank, row + 6);
+    uint16_t fx = stage_spawn_x(word(bank, row + 4), word(bank, row + 2),
+                                authored_x, flags, (int16_t)(camera - trigger));
+    put(ram, child + 0x21, fx);
+    uint16_t y = word(bank, row + 8);
+    if (!(ram[0x26e] & 2)) y += word(ram, 0xb732);
+    put(ram, child + 0x24, y);
+    put(ram, child + 0x1e, flags);
+    static int spawn_trace = -1;
+    if (spawn_trace < 0) spawn_trace = !!getenv("WORLD_SPAWN_TRACE");
+    if (spawn_trace)
+        fprintf(stderr, "spawn trg=%04x cam=%04x kind=%04x:%04x ax=%04x fx=%04x y=%04x fl=%04x\n",
+                trigger, camera, word(bank, row + 4), word(bank, row + 2),
+                word(bank, row + 6), fx, y, flags);
+    return 1;
+}
+
 /* 1000:5D98. Drain due twelve-byte records in ROM order. A full actor
  * pool leaves the current record pending for the next tick. */
 void world_stage_spawns(uint8_t *ram, const uint8_t *rom, uint16_t parent)
 {
     const uint8_t *bank = rom + 0x10000;
+    uint16_t table = word(bank, 0x5e42 + 2 * word(ram, 0x84));
+    uint16_t camera = word(ram, 0xb700);
+    if (table != prespawn_table || word(ram, parent + 0x40) < prespawn_cursor) {
+        memset(prespawned, 0, sizeof prespawned);
+        prespawn_table = table;
+    }
     for (;;) {
-        uint16_t row = word(bank, 0x5e42 + 2 * word(ram, 0x84)) + word(ram, parent + 0x40);
-        uint16_t trigger = word(bank, row), camera = word(ram, 0xb700);
+        uint16_t row = table + word(ram, parent + 0x40);
+        uint16_t trigger = word(bank, row);
         if (trigger == UINT16_MAX || (int16_t)trigger > (int16_t)camera) break;
         put(ram, parent + 0x42, trigger);
-        uint16_t flags = word(bank, row + 10);
-        unsigned gate = flags >> 14, players = ram[0x264] & 12;
-        if (!gate || (gate == 1 ? players != 0 : players == 12)) {
-            uint16_t child = world_spawn_child(ram, parent, word(bank, row + 2));
-            if (!child) break;
-            put(ram, child + 2, word(bank, row + 4));
-            uint16_t authored_x = word(bank, row + 6);
-            uint16_t fx = stage_spawn_x(word(bank, row + 4), word(bank, row + 2),
-                                        authored_x, flags, (int16_t)(camera - trigger));
-            put(ram, child + 0x21, fx);
-            uint16_t y = word(bank, row + 8);
-            if (!(ram[0x26e] & 2)) y += word(ram, 0xb732);
-            put(ram, child + 0x24, y);
-            put(ram, child + 0x1e, flags);
-            static int spawn_trace = -1;
-            if (spawn_trace < 0) spawn_trace = !!getenv("WORLD_SPAWN_TRACE");
-            if (spawn_trace)
-                fprintf(stderr, "spawn trg=%04x cam=%04x kind=%04x:%04x ax=%04x fx=%04x y=%04x fl=%04x\n",
-                        trigger, camera, word(bank, row + 4), word(bank, row + 2),
-                        word(bank, row + 6), fx, y, flags);
-        }
+        if (!prespawn_marked(word(ram, parent + 0x40) / 12u) && !spawn_record(ram, bank, parent, row, camera))
+            break;
         put(ram, parent + 0x40, word(ram, parent + 0x40) + 12);
+    }
+    prespawn_cursor = word(ram, parent + 0x40);
+    /* Look one wing ahead for map-locked sprites (see world_prespawn_kind). */
+    int lead = world_view_wing();
+    if (lead) {
+        for (uint16_t offset = prespawn_cursor;; offset += 12) {
+            uint16_t row = table + offset, trigger = word(bank, row);
+            unsigned index = offset / 12u;
+            if (trigger == UINT16_MAX || (int16_t)(trigger - camera) > lead || index >= PRESPAWN_RECORDS) break;
+            if (prespawn_marked(index) || !world_prespawn_kind(word(bank, row + 4), word(bank, row + 2)))
+                continue;
+            int spawned = spawn_record(ram, bank, parent, row, camera);
+            if (!spawned) break;
+            /* A gated record is judged again when it falls due. */
+            if (spawned == 1) prespawned[index / 8] |= (uint8_t)(1u << (index % 8));
+        }
     }
     put(ram, 0xb6ea, 0);
     put(ram, 0xb6ec, 0);

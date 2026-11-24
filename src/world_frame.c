@@ -116,7 +116,17 @@ static int valid_sprite_list(const uint8_t *ram, const uint8_t *rom)
     return 1;
 }
 uint16_t world_sprite_owners[256];
-static uint8_t descriptor_blast[210];
+static uint8_t descriptor_blast[256];
+
+/* The game charges every queued sprite piece against a 210-piece frame
+   budget (9E02) and the display list holds 210 entries. The wider views
+   keep more actors alive in the wings, so busy scenes overran it and the
+   last-queued actors (the stage-one whales) dropped out for whole frames.
+   Wide views budget the full 255-entry list instead; Arcade is unchanged. */
+static unsigned sprite_limit(void)
+{
+    return world_view_width() > WORLD_VIEW_ARCADE_WIDTH ? 255 : 210;
+}
 void world_frame_tag_blast(unsigned first,unsigned end,int blast)
 {
     if(first<0x8c00 || end>0x8c00+sizeof descriptor_blast*16 || end<=first)return;
@@ -166,8 +176,8 @@ static void build_sprites(uint8_t *ram, uint8_t *oam, const uint8_t *rom)
                 unsigned slot=(actor-0x8c00)/16;
                 world_sprite_owners[out/8]=(slot+1)|(descriptor_blast[slot]<<8);
                 out += 8;
-                if (out == 210 * 8) {
-                    put(ram + 0x8b26, -210);
+                if (out == sprite_limit() * 8) {
+                    put(ram + 0x8b26, 0u - sprite_limit());
                     return;
                 }
             }
@@ -376,7 +386,8 @@ static int advance_boundary(uint8_t *ram, uint8_t *tiles, uint8_t *oam, uint8_t 
     memset(ram + 0x9c00, 0xff, 128);
     put(ram + 0x9c80, 0);
     put(ram + 0x9e04, 0x8c00);
-    put(ram + 0x9e02, 210);
+    /* queue_sprite refuses when cost + 6 >= budget: 210 admits 204 pieces. */
+    put(ram + 0x9e02, sprite_limit() == 210 ? 210 : sprite_limit() + 6);
     put(ram + 0xb892, word(ram + 0xb892) + polls);
     if (title) {
         if (!world_title_boundary(ram, tiles, palette, rom)) return 0;

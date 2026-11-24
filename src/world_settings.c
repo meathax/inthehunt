@@ -77,6 +77,7 @@ static const NumberSetting numbers[] = {
     {"brightness", offsetof(WorldSettings, brightness), 70, 150, 0},
     {"auto_quality", offsetof(WorldSettings, auto_quality), 0, 1, 0},
     {"ambient_borders", offsetof(WorldSettings, ambient_borders), 0, 1, 0},
+    {"aspect", offsetof(WorldSettings, aspect), 0, 2, 0},
     {"light_strength", offsetof(WorldSettings, light_strength), 25, 200, 0},
     {"shadow_strength", offsetof(WorldSettings, shadow_strength), 25, 200, 0},
     {"depth_strength", offsetof(WorldSettings, depth_strength), 25, 200, 0},
