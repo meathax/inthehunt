@@ -24,7 +24,7 @@ Irem’s 1993 submarine shooter runs natively on Windows using your own MAME ROM
 - **Optional enhanced effects.** Pick a lighting preset or tune effects individually, including bow lamps, dynamic shadows, light shafts, particles, water caustics and radiance-cascade bounce light.
 - **Underwater stereo.** Hear positional weapons, submarine motors, machinery and stage ambience. Adjust music, effects and ambience levels or enable Reduced Bass.
 - **PC display options.** Choose exact arcade frame timing or smooth camera scrolling, and select from optional Libretro CRT presets.
-- **Wider boss arenas.** Bosses reach and shoot at subs hugging the far edges of the wider views, and every boss hand-off and stage transition works in all three modes.
+- **Wider boss arenas.** Bosses reach and shoot at subs hugging the far edges of the wider views, and every boss hand-off and stage transition works in both modes.
 - **Local two-player play.** Share a keyboard or use gamepads to play the full arcade campaign together.
 - **Arcade slowdown.** Enable PCB-calibrated slowdown in **Options → Game**.
 

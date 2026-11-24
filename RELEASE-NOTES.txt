@@ -1,11 +1,18 @@
-In the Hunt v0.9.18 for Windows x64
+In the Hunt v0.9.19 for Windows x64
 
-Widescreen (16:9) mode
+Widescreen fixes and native ROM import
 
-- Scenery, enemies, HUD panels and menus fill the wider view on all six stages; each mode keeps its own high scores.
-- Bosses reach and shoot at subs hugging the far edges, including the stage-one claw submarine and the stage-four boss's flames.
-- Stage 5 fills the wide picture instead of black bars, and the stage-4 arena wings are solid scenery.
-- The sub can no longer wrap from the left wing to the right side of the screen.
+- ROM import now runs inside the game. It no longer writes a PowerShell script
+  to the temp folder, which some antivirus engines falsely flagged.
+  Existing imports keep working without re-importing.
+- The 21:9 ultrawide mode is retired: Aspect is 4:3 or 16:9, and a saved
+  ultrawide setting loads as 16:9.
+- Widescreen bosses: the stage-one claw submarine's arm attack is back, the
+  stage-four boss's flames reach into the wings, and no wing area is a safe zone.
+- Widescreen visuals: stage-one far scenery, the stage-four arena and stage-five
+  wings are filled; whales, mines and attract-mode wings stay drawn.
+- Enhanced renderer: duplicated ice-mount sprites stay attached to the map.
+- Options: the aspect label no longer clips, and fit scaling shows FIT.
 - Arcade mode output is unchanged.
 
 Extract the entire ZIP and open InTheHunt.exe. On first launch, select your
