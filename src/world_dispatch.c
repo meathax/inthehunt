@@ -19609,7 +19609,13 @@ stage2_jumper_terrain:
         else if (!world_sub_open_water(ram, main_rom, tiles, actor))
             return 0;
         break;
-    case 0x7c3b:
+    case 0x7c3b: {
+        /* WORLD_GODMODE=1 (test-only): the sub survives every hit, so
+           headless runs reach each boss. Never set by the game. */
+        static int godmode = -1;
+        if (godmode < 0) godmode = getenv("WORLD_GODMODE") != NULL;
+        if (godmode && !read_word(ram, actor + 0x26)) write_word(ram, actor + 0x26, 1);
+    }
         if (read_word(ram, 0x2a4) || (read_word(ram, 0x262) & 0x8080)
             || ram[actor + 0xa] || read_word(ram, actor + 0x26)
             || (read_word(ram, 0xb8b2) & (1u << (ram[actor + 0xb] & 2)))) {

@@ -1,4 +1,5 @@
 #include "world_stage.h"
+#include "world_shadow.h"
 #include "world_view.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,14 +87,26 @@ static uint16_t stage_spawn_x(uint16_t segment, uint16_t kind, uint16_t x,
 
 void world_stage_three_boss_wall(const uint8_t *ram, uint8_t *tiles)
 {
-    if (world_view_width() != WORLD_VIEW_WIDE_WIDTH || word(ram, 0x84) != 2 ||
+    if (world_view_width() <= WORLD_VIEW_ARCADE_WIDTH || word(ram, 0x84) != 2 ||
         word(ram, 0x80) != 0xb2e || word(ram, 0xb70a) != 0x11bf) return;
     /* At the final horizontal lock, the authored industrial wall ends at
        field column 43 in the 64-tile ring. Its girders repeat every 16
-       tiles. Publish the next seven columns, including collision material. */
+       tiles. Publish the next seven columns (Widescreen) or sixteen
+       (Ultrawide, through picture X 448), including collision material. */
+    unsigned extra = world_view_width() == WORLD_VIEW_ULTRA_WIDTH ? 16 : 7;
     for (unsigned row = 0; row < 64; ++row) {
         uint8_t *line = tiles + 0x4000 + row * 256;
-        memcpy(line + 44 * 4, line + 28 * 4, 7 * 4);
+        for (unsigned k = 0; k < extra; ++k) {
+            const uint8_t *cell = line + (28 + k % 16) * 4;
+            if (world_shadow_active()) {
+                /* Ring column 44 + k is at picture X 321 + 8k at this lock. */
+                int world = world_shadow_world_column(1, row, 321 + 8 * (int)k);
+                uint8_t copy[4];
+                memcpy(copy, cell, 4);
+                world_shadow_put_column(tiles, 1, world, row, copy);
+            } else
+                memcpy(line + (44 + k) * 4, cell, 4);
+        }
     }
 }
 

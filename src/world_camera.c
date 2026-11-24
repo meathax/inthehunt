@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "world_view.h"
 
 static uint16_t word(const uint8_t *p) { return p[0] | ((uint16_t)p[1] << 8); }
 static void put(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = v >> 8; }
@@ -18,7 +19,10 @@ int world_horizontal_camera(uint8_t *ram, const uint8_t *rom, uint16_t controlle
     if (ram[0x26f] & 0x80) return 0;
     for (unsigned i = 0; i < 2; ++i) {
         if (!(players & (4u << i))) continue;
-        if (positions[i] < 0xa0) return 0;
+        /* A sub within 48 pixels of the left limit holds the camera (0xA0
+           in the arcade view). The wide views keep that distance from
+           their own limit rather than from the arcade edge. */
+        if (positions[i] < (uint16_t)(world_view_player_min_x() + 0x30)) return 0;
         scrolling |= positions[i] >= origin;
         distance += (uint16_t)(positions[i] - origin);
     }
