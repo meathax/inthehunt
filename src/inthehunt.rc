@@ -1,7 +1,3 @@
 1 ICON "../artwork/icon/inthehunt.ico"
 
-201 RCDATA "import/world_import.ps1"
-202 RCDATA "import/recomplauncher_setup.ps1"
-203 RCDATA "import/world_regions.json"
-
 204 RCDATA "../artwork/setup/background.png"

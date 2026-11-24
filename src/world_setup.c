@@ -1,4 +1,4 @@
-/* Native first-run screen and embedded, hash-checked ROM importer. */
+/* Native first-run screen; the hash-checked ROM import itself is in world_import.c. */
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
 #include <windows.h>
@@ -7,12 +7,17 @@
 #include <wincodec.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <wchar.h>
+#include "world_import.h"
 #include "world_setup.h"
 
-typedef struct { HANDLE process; wchar_t temporary[MAX_PATH]; } Import;
+typedef struct {
+    HANDLE thread;
+    wchar_t archive[32768], world[32768], error[512];
+    volatile LONG ok;
+} Import;
 static wchar_t root[32768];
-static const wchar_t *files[] = {L"world_import.ps1", L"recomplauncher_setup.ps1", L"world_regions.json"};
 
 static int installation(void)
 {
@@ -38,66 +43,50 @@ const char *world_default_directory(void)
 
 static void import_close(Import *job)
 {
-    if (job->process) { CloseHandle(job->process); job->process = NULL; }
-    if (job->temporary[0]) {
-        wchar_t file[MAX_PATH];
-        for (unsigned i = 0; i < 3; ++i) {
-            swprintf(file, MAX_PATH, L"%ls\\%ls", job->temporary, files[i]);
-            DeleteFileW(file);
-        }
-        RemoveDirectoryW(job->temporary);
-        job->temporary[0] = 0;
-    }
+    if (job->thread) { CloseHandle(job->thread); job->thread = NULL; }
 }
 
-static int import_start(Import *job, const wchar_t *archive, const wchar_t *directory)
+static DWORD WINAPI import_thread(void *parameter)
 {
-    wchar_t temp[MAX_PATH], file[MAX_PATH], system[MAX_PATH], command[2048], guid[40];
-    GUID id;
-    if (!installation() || !GetTempPathW(MAX_PATH, temp) || FAILED(CoCreateGuid(&id))) return 0;
-    StringFromGUID2(&id, guid, 40);
-    if (swprintf(job->temporary, MAX_PATH, L"%lsInTheHunt-%ls", temp, guid) < 0 ||
-        !CreateDirectoryW(job->temporary, NULL)) { job->temporary[0] = 0; return 0; }
-    for (unsigned i = 0; i < 3; ++i) {
-        HRSRC resource = FindResourceW(NULL, MAKEINTRESOURCEW(201 + i), (LPCWSTR)RT_RCDATA);
-        HGLOBAL loaded = resource ? LoadResource(NULL, resource) : NULL;
-        const void *bytes = loaded ? LockResource(loaded) : NULL;
-        DWORD size = resource ? SizeofResource(NULL, resource) : 0, written = 0;
-        if (!bytes || !size) goto failed;
-        swprintf(file, MAX_PATH, L"%ls\\%ls", job->temporary, files[i]);
-        HANDLE f = CreateFileW(file, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (f == INVALID_HANDLE_VALUE) goto failed;
-        int ok = WriteFile(f, bytes, size, &written, NULL) && written == size;
-        CloseHandle(f);
-        if (!ok) goto failed;
-    }
-    if (!GetSystemDirectoryW(system, MAX_PATH)) goto failed;
-    if (swprintf(command, 2048, L"\"%ls\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%ls\\recomplauncher_setup.ps1\"", system, job->temporary) < 0) goto failed;
-    /* Paths are inherited Unicode data, never interpolated shell expressions. */
-    if (!SetEnvironmentVariableW(L"INTHUNT_IMPORT_ARCHIVE", archive) ||
-        !SetEnvironmentVariableW(L"INTHUNT_IMPORT_ROOT", root) ||
-        !SetEnvironmentVariableW(L"INTHUNT_IMPORT_DEST", directory)) goto failed;
-    STARTUPINFOW si = {0}; PROCESS_INFORMATION pi = {0}; si.cb = sizeof si;
-    int ok = CreateProcessW(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, root, &si, &pi);
-    SetEnvironmentVariableW(L"INTHUNT_IMPORT_ARCHIVE", NULL);
-    SetEnvironmentVariableW(L"INTHUNT_IMPORT_ROOT", NULL);
-    SetEnvironmentVariableW(L"INTHUNT_IMPORT_DEST", NULL);
-    if (!ok) goto failed;
-    CloseHandle(pi.hThread); job->process = pi.hProcess;
-    return 1;
-failed:
-    import_close(job);
+    Import *job = parameter;
+    InterlockedExchange(&job->ok, world_import_rom(&world_regions, job->archive, job->world,
+                                                   job->error, sizeof job->error / sizeof job->error[0]));
     return 0;
 }
 
+/* The import runs in-process; directory NULL means the installation's .local\world. */
+static int import_start(Import *job, const wchar_t *archive, const wchar_t *directory)
+{
+    job->ok = 0; job->error[0] = 0;
+    if (!installation() || wcslen(archive) >= 32768) return 0;
+    wcscpy(job->archive, archive);
+    if (directory && directory[0]) {
+        if (wcslen(directory) >= 32768) return 0;
+        wcscpy(job->world, directory);
+    } else if (swprintf(job->world, 32768, L"%ls\\.local\\world", root) < 0) return 0;
+    job->thread = CreateThread(NULL, 0, import_thread, job, 0, NULL);
+    return job->thread != NULL;
+}
+
+/* recomplauncher prepare step: progress lines on stdout, the failure reason on stderr. */
 int world_setup_import(const wchar_t *archive)
 {
-    Import job = {0}; DWORD result = 1;
-    if (!archive || !archive[0] || !import_start(&job, archive, NULL)) return 1;
-    WaitForSingleObject(job.process, INFINITE);
-    GetExitCodeProcess(job.process, &result);
-    import_close(&job);
-    return result ? 1 : 0;
+    Import *job = calloc(1, sizeof *job);
+    if (!job) return 1;
+    printf("progress 0.1 Checking and importing In the Hunt ROM chips\n");
+    fflush(stdout);
+    int ok = archive && archive[0] && import_start(job, archive, NULL);
+    if (ok) { WaitForSingleObject(job->thread, INFINITE); ok = job->ok; }
+    if (ok) { printf("progress 1 Ready to play\n"); fflush(stdout); }
+    else {
+        char message[2048];
+        const wchar_t *text = job->error[0] ? job->error : L"Could not start the ROM import.";
+        if (!WideCharToMultiByte(CP_UTF8, 0, text, -1, message, sizeof message, NULL, NULL)) strcpy(message, "ROM import failed.");
+        fprintf(stderr, "%s\n", message);
+    }
+    import_close(job);
+    free(job);
+    return ok ? 0 : 1;
 }
 
 typedef struct {
@@ -221,10 +210,10 @@ static LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp)
             InvalidateRect(w,NULL,FALSE); return 0;
         } break;
     case WM_TIMER:
-        if(s->job.process && WaitForSingleObject(s->job.process,0)==WAIT_OBJECT_0) {
-            DWORD result=1; GetExitCodeProcess(s->job.process,&result); import_close(&s->job); KillTimer(w,1); s->busy=0;
-            if(!result) { s->success=1; DestroyWindow(w); }
-            else { s->status=L"Import failed. Check the archive and game folder. Split sets need the parent alongside.";
+        if(s->job.thread && WaitForSingleObject(s->job.thread,0)==WAIT_OBJECT_0) {
+            import_close(&s->job); KillTimer(w,1); s->busy=0;
+            if(s->job.ok) { s->success=1; DestroyWindow(w); }
+            else { s->status=s->job.error[0]?s->job.error:L"Import failed. Check the archive and game folder. Split sets need the parent alongside.";
                 EnableWindow(s->browse,TRUE); EnableWindow(s->quit,TRUE); SetWindowTextW(s->browse,L"Browse for ROM..."); SetFocus(s->browse); InvalidateRect(w,NULL,FALSE); }
         } return 0;
     case WM_CLOSE: if(!s->busy) DestroyWindow(w); return 0;
