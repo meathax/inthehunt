@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 #include <string>
 
@@ -297,9 +298,37 @@ DWORD WINAPI compile_preset(void *context)
     }
 }
 
+/* Developer validation: WORLD_D3D_DEBUG=1 enables the D3D12 debug layer,
+   =2 adds GPU-based validation; messages are printed to stderr. */
+ID3D12InfoQueue *debug_messages;
+void report_debug_messages(void)
+{
+    if (!debug_messages) return;
+    UINT64 n = debug_messages->GetNumStoredMessages();
+    for (UINT64 i = 0; i < n; ++i) {
+        SIZE_T bytes = 0;
+        if (FAILED(debug_messages->GetMessage(i, nullptr, &bytes)) || !bytes) continue;
+        std::vector<char> storage(bytes);
+        auto *m = reinterpret_cast<D3D12_MESSAGE *>(storage.data());
+        if (SUCCEEDED(debug_messages->GetMessage(i, m, &bytes)) && m->Severity <= D3D12_MESSAGE_SEVERITY_WARNING)
+            fprintf(stderr, "D3D12 %s %d: %s%c", m->Severity <= D3D12_MESSAGE_SEVERITY_ERROR ? "ERROR" : "WARNING",
+                    (int)m->ID, m->pDescription, 10);
+    }
+    debug_messages->ClearStoredMessages();
+}
+
 bool create_device(Com<IDXGIFactory4> &factory, Com<ID3D12Device> &device, Com<ID3D12CommandQueue> &queue,
                    char *error, size_t size)
 {
+    if (const char *debug = getenv("WORLD_D3D_DEBUG")) {
+        Com<ID3D12Debug> layer;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(layer.put())))) {
+            layer->EnableDebugLayer();
+            Com<ID3D12Debug1> gbv;
+            if (atoi(debug) >= 2 && SUCCEEDED(layer->QueryInterface(IID_PPV_ARGS(gbv.put()))))
+                gbv->SetEnableGPUBasedValidation(TRUE);
+        } else fprintf(stderr, "D3D12 debug layer unavailable.%c", 10);
+    }
     if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(factory.put())))) { say(error, size, "DXGI is unavailable."); return false; }
     Com<IDXGIFactory6> preferred;
     if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(preferred.put())))) {
@@ -319,6 +348,8 @@ bool create_device(Com<IDXGIFactory4> &factory, Com<ID3D12Device> &device, Com<I
         say(error, size, "Direct3D 12 is unavailable on this PC.");
         return false;
     }
+    if (getenv("WORLD_D3D_DEBUG") && !debug_messages)
+        device->QueryInterface(IID_PPV_ARGS(&debug_messages));
     D3D12_COMMAND_QUEUE_DESC q = {};
     q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     q.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH;
@@ -642,7 +673,20 @@ extern "C" void world_gpu_wait_frame(void)
     }
 }
 
-extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_time, unsigned source_w)
+/* Developer timing for the pacing log: fence wait, upload, light record,
+   picture pass, Present (milliseconds of CPU time on this thread). */
+extern "C" double world_gpu_present_ms[5];
+double world_gpu_present_ms[5];
+static inline double gpu_now_ms(void)
+{
+    static double scale;
+    LARGE_INTEGER t;
+    if (!scale) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); scale = 1000.0 / (double)f.QuadPart; }
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart * scale;
+}
+
+static void present_frame(const uint32_t *frame, int k, double source_time, unsigned source_w)
 {
     Presenter *p = gpu;
     if (!p) return;
@@ -682,6 +726,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
         p->resize((UINT)rc.right, (UINT)rc.bottom);
     }
     UINT f = p->frame_index;
+    double t0 = gpu_now_ms();
     if (p->fence->GetCompletedValue() < p->frame_fence[f]) {
         p->fence->SetEventOnCompletion(p->frame_fence[f], p->event);
         WaitForSingleObject(p->event, 2000);
@@ -705,9 +750,11 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     cmd->ClearRenderTargetView(rtv, black, 0, nullptr);
 
     ID3D12Resource *fresh = nullptr;
+    double t1 = gpu_now_ms(), t2 = t1, t3 = t1;
     if (frame) {
         upload(p->device.get(), cmd, p->picture_upload[f].get(), p->picture.get(), frame,
                (UINT)(p->picture_w * p->picture_k), (UINT)(H * p->picture_k), !p->light_frame);
+        t2 = gpu_now_ms();
         if(p->light_frame && p->transport.ready)
             if (!p->transport.record(cmd,f,k,*p->light_frame,p->picture_upload[f].get(),p->picture.get())) {
                 p->transport.ready=false;
@@ -718,6 +765,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
                                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         cmd->ResourceBarrier(1, &t);
         fresh = p->picture.get();
+        t3 = gpu_now_ms();
     }
     gdl::post::Output out;
     out.resource = target;
@@ -745,6 +793,7 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     cmd->Close();
     ID3D12CommandList *lists[] = {cmd};
     p->queue->ExecuteCommandLists(1, lists);
+    double t4 = gpu_now_ms();
     // The beam simulator needs every display refresh, so it always syncs.
     bool sync = !p->vrr && (p->vsync || p->beam);
     HRESULT presented = p->swap->Present(sync ? 1 : 0, !sync && p->tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
@@ -753,6 +802,11 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
     p->queue->Signal(p->fence.get(), p->fence_value);
     p->frame_fence[f] = p->fence_value;
     p->frame_index = (f + 1) % FRAMES;
+    {
+        double t5 = gpu_now_ms();
+        world_gpu_present_ms[0] = t1 - t0; world_gpu_present_ms[1] = t2 - t1; world_gpu_present_ms[2] = t3 - t2;
+        world_gpu_present_ms[3] = t4 - t3; world_gpu_present_ms[4] = t5 - t4;
+    }
 
     // Refresh rate, from the spacing of synchronised presents.
     LARGE_INTEGER now, rate;
@@ -763,6 +817,23 @@ extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_ti
         if (hz > 23.0 && hz < 1000.0) p->refresh_hz = p->refresh_hz > 0.0 ? p->refresh_hz * 0.95 + hz * 0.05 : hz;
     }
     p->last_present = now;
+    report_debug_messages();
+}
+
+/* The post chain reports failures (for example a removed device) by throwing.
+   An exception must not cross into the C game loop and abort the process:
+   stop using the GPU view, so the window falls back to its plain presenter. */
+extern "C" void world_gpu_present(const uint32_t *frame, int k, double source_time, unsigned source_w)
+{
+    try {
+        present_frame(frame, k, source_time, source_w);
+    } catch (const std::exception &e) {
+        fprintf(stderr, "GPU presentation stopped: %s%c", e.what(), 10);
+        if (gpu) gpu->shown = false;
+    } catch (...) {
+        fprintf(stderr, "GPU presentation stopped.%c", 10);
+        if (gpu) gpu->shown = false;
+    }
 }
 
 static int render_offscreen(const float *offsets,const WorldLightScene *lighting, const uint32_t *frame, unsigned source_w,

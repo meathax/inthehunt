@@ -297,6 +297,11 @@ static void apply_brightness(uint32_t *picture, size_t count)
     }
 }
 
+/* Developer timing for the pacing log: enhance, overlays, window present. */
+static double present_profile_ms[3];
+static int present_profile_k;
+extern double world_gpu_present_ms[5];
+
 static void present_game(const uint32_t *source)
 {
     /* The title menu sits over the running attract sequence, at 1x. */
@@ -310,7 +315,10 @@ static void present_game(const uint32_t *source)
     world_scene_camera_output(pixel_camera ? offsets : NULL);
     world_scene_light_ready=trace && !title && settings.gfx_quality==WORLD_GFX_HIGH ? world_gpu_prepare_lights : NULL;
     world_scene_light_target(trace ? &lights : NULL);
+    LARGE_INTEGER prof0, prof1, prof2, prof3;
+    QueryPerformanceCounter(&prof0);
     int k = shown_k = enhance(source, shown, effect_clock(), title ? 1 : scene_scale(), scene_alpha);
+    QueryPerformanceCounter(&prof1);
     world_scene_light_ready=NULL;
     /* Some stages keep their 4:3 aperture inside the widescreen canvas. */
     if (frame_w > WORLD_VIEW_ARCADE_WIDTH && world_view_width() == WORLD_VIEW_ARCADE_WIDTH) {
@@ -338,7 +346,17 @@ static void present_game(const uint32_t *source)
     world_gpu_light_frame(trace && lights.scale==k ? &lights : NULL);
     memcpy(displayed_camera_offsets,offsets,sizeof offsets);
     world_gpu_camera_offsets(pixel_camera ? offsets : NULL);
+    QueryPerformanceCounter(&prof2);
     world_window_present(shown, k, frame_w);
+    QueryPerformanceCounter(&prof3);
+    {
+        LARGE_INTEGER hz; QueryPerformanceFrequency(&hz);
+        double ms = 1000.0 / (double)hz.QuadPart;
+        present_profile_ms[0] = (double)(prof1.QuadPart - prof0.QuadPart) * ms;
+        present_profile_ms[1] = (double)(prof2.QuadPart - prof1.QuadPart) * ms;
+        present_profile_ms[2] = (double)(prof3.QuadPart - prof2.QuadPart) * ms;
+        present_profile_k = k;
+    }
     world_gpu_camera_offsets(NULL);
     world_scene_camera_output(NULL);
     world_gpu_light_frame(NULL);
@@ -2207,6 +2225,9 @@ load_game_data:
                     (after_present.QuadPart-after_submit.QuadPart)*1000.0/rate.QuadPart);
             for(int j=0;j<5;++j) fprintf(pacing_log," %.3f",world_scene_stage_ms[j]);
             memset(world_scene_stage_ms,0,sizeof(double)*6);
+            fputc(10,pacing_log);
+            fprintf(pacing_log,"prof %d %.3f %.3f %.3f",present_profile_k,present_profile_ms[0],present_profile_ms[1],present_profile_ms[2]);
+            for(int j=0;j<5;++j) fprintf(pacing_log," %.3f",world_gpu_present_ms[j]);
             fputc(10,pacing_log);
             fprintf(pacing_log, "%.4f %lu %.5f %u\n",
                     (double)now.QuadPart * 1000.0 / rate.QuadPart,ticks,scene_alpha,word(ram + 0xb70a));
