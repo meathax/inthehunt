@@ -32,6 +32,7 @@ const uint8_t *world_tile_shadow_page[4];
 const int16_t *world_tile_shadow_tags[4];
 const uint8_t *world_tile_shadow_rows[4];
 int world_tile_shadow_clip;
+int world_tile_shadow_static;
 
 static struct { uint16_t base, origin; unsigned width, height; int upward; } opening[4];
 static unsigned openings;

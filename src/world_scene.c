@@ -382,7 +382,13 @@ static void render_layer(int layer, int from, int to)
                 if (tile) { memcpy(mirrored_cell, tile, 4); mirrored_cell[3] ^= 0x02; tile = mirrored_cell; }
                 reflect = 1;
             } else tile = world_tile_entry(cur.tiles, master, sx, sy);
-            (void)reflect;
+            /* Unwritten background cell (tile 0, palette 16) in a wing: mirror the picture edge. */
+            if (layer == 2 && tile && !reflect && (px_here < 0 || px_here >= WORLD_VIEW_ARCADE_WIDTH) &&
+                word(tile) == 0 && word(tile + 2) == 0x0010) {
+                int k = 80 + (int)scroll - 2 * layer + (wide ? 256 : 0);
+                const uint8_t *m = world_tile_entry(cur.tiles, master, (unsigned)(world_view_mirror_x(px_here, k) + k), sy);
+                if (m) { memcpy(mirrored_cell, m, 4); mirrored_cell[3] ^= 0x02; tile = mirrored_cell; }
+            }
             int blank = !tile;
             if (blank) tile = blank_cell;
             unsigned attr = word(tile + 2), bank = (attr & 0x7f) | ((cur.video_control >> 7) & 0x180);

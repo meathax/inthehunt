@@ -31,6 +31,9 @@ extern const uint8_t *world_tile_shadow_rows[4];
 /* Nonzero when renderers sample ultrawide pictures: a non-shadowed page
  * then shows nothing beyond its 64 columns instead of wrapping. */
 extern int world_tile_shadow_clip;
+/* Nonzero while the camera is held still: a column the shadow never saw is
+ * then what the hardware ring shows (static rooms repeat), not transparent. */
+extern int world_tile_shadow_static;
 
 /* Cell pointer for a playfield sample, or NULL for a transparent sample. */
 static inline const uint8_t *world_tile_entry(const uint8_t *tiles, unsigned master, unsigned sx, unsigned sy)
@@ -41,7 +44,10 @@ static inline const uint8_t *world_tile_entry(const uint8_t *tiles, unsigned mas
     if (mode == 1) {
         int world = (int)(sx >> 3) & 8191;
         unsigned slot = (unsigned)world & 127;
-        if ((world_tile_shadow_tags[page][row * WORLD_SHADOW_COLUMNS + slot] & 8191) != world) return 0;
+        if ((world_tile_shadow_tags[page][row * WORLD_SHADOW_COLUMNS + slot] & 8191) != world) {
+            if (!world_tile_shadow_static) return 0;
+            return tiles + ((page * 0x4000 + (row * columns + ((sx / 8) & (columns - 1))) * 4) & 0xffff);
+        }
         return world_tile_shadow_page[page] + (row * WORLD_SHADOW_COLUMNS + slot) * 4;
     }
     /* HUD lines (and unshadowed layers) end at their 64 columns; static

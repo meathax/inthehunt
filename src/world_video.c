@@ -51,6 +51,13 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
            divides it, so column selection is unaffected. */
         unsigned sx = (unsigned)(xs + 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
         const uint8_t *tile = world_tile_entry(tiles, master, sx, sy);
+        /* A background cell the game never wrote (tile 0, palette 16) lies in a
+           wing the arcade never shows: take the mirrored picture edge instead. */
+        if (layer == 2 && tile && (x < 0 || x >= WORLD_VIEW_ARCADE_WIDTH) && word(tile) == 0 && word(tile + 2) == 0x0010) {
+            int k = 80 + (int)scroll - 2 * layer + (wide ? 256 : 0);
+            sx = (unsigned)(world_view_mirror_x(x, k) + k);
+            tile = world_tile_entry(tiles, master, sx, sy);
+        }
         if (!tile) continue;
         unsigned attr = word(tile + 2);
         unsigned pen = world_video_tile_pen(gfx1, word(tile),

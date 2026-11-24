@@ -661,6 +661,7 @@ static void capture_video(void)
             else if (word(ram + 0x84) == 3 && held_frames >= 20 && b700 >= 0x500) mirror = 1; /* the final arena, not earlier holds */
         }
         world_view_set_wing_mirror(mirror);
+        world_tile_shadow_static = held_frames >= 20;
     }
     WorldVideoLayer layers[3];
     for (unsigned i = 0; i < 3; ++i) {
@@ -938,6 +939,7 @@ static int tick(uint16_t pads, uint16_t system)
             }
         }
         world_shadow_end_pass(ram, tiles);
+        world_view_end_pass();
         world_stage_one_far_mountains(ram, tiles);
         weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){
