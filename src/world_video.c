@@ -52,6 +52,9 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
         if (!pen && layer != 2) continue;
 
         unsigned bank = (attr & 0x7f) | ((video_control >> 7) & 0x180);
+        /* A background cell the map never wrote (tile 0, palette 16) shows a
+           flat grey backdrop; only a wing can reach one. Keep it black. */
+        if (layer == 2 && (x < 0 || x >= 320) && word(tile) == 0 && attr == 0x0010) { pixel.palette_index = 0; pixel.sprite_priority = 0; continue; }
         pixel.palette_index = (uint16_t)(bank * 16 + pen);
         if (pen && ((attr & 0x100) || ((attr & 0x80) && pen >= 8)))
             pixel.sprite_priority = 1;

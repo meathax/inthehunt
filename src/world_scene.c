@@ -396,6 +396,11 @@ static void render_layer(int layer, int from, int to)
             for (; bx<end; ++bx, pens>>=8) {
                 unsigned pen = pens&15;
                 idx[bx] = pen || layer==2 ? (uint16_t)((bank*16+pen)&1023) : 0xffff;
+                /* An unwritten background cell (tile 0, palette 16) is flat grey; a wing can show one. */
+                if (layer==2 && code==0 && attr==0x0010) {
+                    int px = bx - MARGIN + scene_left;
+                    if (px < 0 || px >= 320) idx[bx] = 0;
+                }
                 if(layer==1){
                     terrain_cast[by*LW+bx]=terrain && pen;
                     floor_material[by*LW+bx]=(0xff02u >> ((attr>>11)&15))&1;
