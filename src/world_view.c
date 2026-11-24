@@ -47,10 +47,9 @@ uint16_t world_view_player_min_x(void)
 {
     /* left edge +96 field bias, authored +16 inset. Wide aperture edge is
        -53 1/3, so +16 -> 58.67 rounds inward to 59 (0x3B). The ultrawide
-       edge (-124 4/9) would give field -12: the hull stays at field 0 so
-       player X never wraps negative for the unsigned ROM comparisons
-       (a 28-pixel inset). */
-    return mode == WORLD_VIEW_ULTRA ? 0x00 : mode == WORLD_VIEW_WIDE ? 0x3b : 0x70;
+       edge (-124 4/9) + 16 gives field -12 (0xFFF4); callers compare it
+       as a signed 16-bit value. */
+    return mode == WORLD_VIEW_ULTRA ? 0xfff4 : mode == WORLD_VIEW_WIDE ? 0x3b : 0x70;
 }
 
 uint16_t world_view_player_max_x(void)

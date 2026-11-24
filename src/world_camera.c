@@ -22,7 +22,7 @@ int world_horizontal_camera(uint8_t *ram, const uint8_t *rom, uint16_t controlle
         /* A sub within 48 pixels of the left limit holds the camera (0xA0
            in the arcade view). The wide views keep that distance from
            their own limit rather than from the arcade edge. */
-        if (positions[i] < (uint16_t)(world_view_player_min_x() + 0x30)) return 0;
+        if ((int16_t)positions[i] < (int16_t)(world_view_player_min_x() + 0x30)) return 0;
         scrolling |= positions[i] >= origin;
         distance += (uint16_t)(positions[i] - origin);
     }

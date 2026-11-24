@@ -8774,7 +8774,7 @@ static int stage_three_ship(uint8_t *ram, const uint8_t *rom, const uint8_t *ter
             }
         } else {
             x = read_word(ram, actor + 0x21);
-            uint16_t zone = x < 0x70 ? 0 : x - 0x70 >= 0x160 ? 0x15f : x - 0x70;
+            uint16_t zone = (world_view_wing() ? (int16_t)x < 0x70 : x < 0x70) ? 0 : x - 0x70 >= 0x160 ? 0x15f : x - 0x70;
             zone = (zone >> 4) & 0x1e;
             write_word(ram, actor + 0x38, read_word(bank, 0xcbd0 + zone));
             write_word(ram, actor + 0x48, read_word(bank, 0xcbe6 + zone));
@@ -22388,6 +22388,9 @@ stage2_jumper_terrain:
     case 0x11025:
     case 0x11bcf: {
         const uint8_t *bank = main_rom + 0x10000;
+        /* The stage-one claw submarine reaches only the arcade playfield;
+           it throws one dodgeable round at a sub camping in a wing. */
+        if (address == 0x10a6b || address == 0x10fab) boss_wing_shot(ram, main_rom, actor, 0);
         if (address == 0x10a46 || address == 0x10f69) {
             ram[actor + 0xc] = 4;
             uint16_t target = world_enemy_target(ram, actor);

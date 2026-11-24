@@ -141,7 +141,7 @@ int main(void)
     check(world_view_width() == 568 && world_view_wing() == 124, "ultra width/wing");
     check(world_view_raster(-124) == 0 && world_view_raster(443) == 567, "ultra endpoints");
     check(world_view_raster(160) == 284, "ultra centre");
-    check(world_view_player_min_x() == 0 && world_view_player_max_x() == 0x204, "ultra clamps");
+    check(world_view_player_min_x() == 0xfff4 && world_view_player_max_x() == 0x204, "ultra clamps");
     check(world_view_spawn_x(0x1a0) == 0x1a0 + 124 && world_view_spawn_x(0x5f) == (uint16_t)(0x5f - 124), "ultra spawn");
     check(world_view_edge_less(0x0000, 0x3f) == 0, "ultra field 0 still inside");
     check(world_view_edge_less((uint16_t)-62, 0x3f) == 1, "ultra left retire past -61");

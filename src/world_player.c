@@ -248,8 +248,9 @@ void world_sub_entry_step(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint
         if (!((word(cfg) | word(cfg + 2)) & 0xff02)) put(a + 0x6e, 0);
     }
     int16_t ceiling = (int16_t)word(ram + 0x25c);
-    put(a + 0x21, x > world_view_player_max_x() ? world_view_player_max_x()
-                : x < world_view_player_min_x() ? world_view_player_min_x() : x);
+    /* Ultrawide's left limit lies at a negative field: compare signed. */
+    put(a + 0x21, x > (int16_t)world_view_player_max_x() ? world_view_player_max_x()
+                : x < (int16_t)world_view_player_min_x() ? world_view_player_min_x() : x);
     put(a + 0x24, y < 0xa0 ? 0xa0 : y > ceiling ? ceiling : y);
     world_stage_five_entry_ice(ram, rom, tiles, sub);
     update_water_medium(ram, rom, a, cfg[10], cfg[14] & 8 ? 3 : 0);
@@ -345,14 +346,14 @@ int world_sub_open_water(uint8_t *ram, const uint8_t *rom, uint8_t *tiles, uint1
                 x = ((uint16_t)(x + horizontal_scroll) & 0xfff8) - 1 - horizontal_scroll;
                 x_fraction = 0;
             }
-        } else if (x > world_view_player_max_x()) x = world_view_player_max_x();
+        } else if ((int16_t)x > (int16_t)world_view_player_max_x()) x = world_view_player_max_x();
         else if (left & 0xff02) {
             if (ram[0xb8ae] & owner_bit) health = 0;
             else {
                 x = ((uint16_t)(x - 1 + horizontal_scroll) & 0xfff8) + 8 - horizontal_scroll;
                 x_fraction = 0;
             }
-        } else if (x < world_view_player_min_x()) x = world_view_player_min_x();
+        } else if ((int16_t)x < (int16_t)world_view_player_min_x()) x = world_view_player_min_x();
     }
     uint16_t vertical[3];
     for (unsigned i = 0; i < 3; i++) {
