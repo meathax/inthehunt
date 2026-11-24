@@ -31,6 +31,7 @@
 #include "world_menu.h"
 #include "world_shadow.h"
 #include "world_view.h"
+extern int world_terrain_mirror, world_terrain_cam;
 
 static uint8_t rom[1<<20], gfx1[2<<20], gfx2[4<<20], ram[65536], tiles[65536];
 static uint8_t oam[2048], palette[2048];
@@ -884,6 +885,8 @@ static int tick(uint16_t pads, uint16_t system)
         WorldDispatch pass;
         uint32_t addr;
         world_dispatch_begin(&pass, ram);
+        world_terrain_mirror = world_view_wing_mirror() != 0;
+        world_terrain_cam = word(ram + 0xb70a);
         world_shadow_begin_pass(ram, tiles, layer_master);
         unsigned calls = 0;
         while (world_dispatch_target(&pass, ram, &addr)) {
@@ -939,7 +942,6 @@ static int tick(uint16_t pads, uint16_t system)
             }
         }
         world_shadow_end_pass(ram, tiles);
-        world_view_end_pass();
         world_stage_one_far_mountains(ram, tiles);
         weapon_envelopes(weapon_lights,weapon_lights_count);
         for(unsigned i=0;i<boss_lamp_count && weapon_lights_count<MAX_WEAPON_EMITTERS;++i){

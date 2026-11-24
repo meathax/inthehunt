@@ -1,12 +1,13 @@
 #include "world_view.h"
 
 static unsigned session_mode, mode;
-static int wing_mirror, boss_noted, boss_locked;
+static int wing_mirror;
+int world_terrain_mirror, world_terrain_cam;
 
 void world_view_set(unsigned m)
 {
     session_mode = mode = m == WORLD_VIEW_WIDE || m == WORLD_VIEW_ULTRA ? m : WORLD_VIEW_ARCADE;
-    wing_mirror = boss_noted = boss_locked = 0;      /* a new aspect starts a clean session */
+    wing_mirror = world_terrain_mirror = 0;      /* a new aspect starts a clean session */
 }
 
 unsigned world_view_mode(void)
@@ -20,9 +21,6 @@ void world_view_set_stage(unsigned stage)
     mode = stage == 4 ? WORLD_VIEW_ARCADE : session_mode;
 }
 
-void world_view_note_boss(void) { boss_noted = 1; }
-void world_view_end_pass(void) { boss_locked = boss_noted; boss_noted = 0; }
-int world_view_wing_locked(void) { return boss_locked || wing_mirror; }
 int world_view_wing_mirror(void) { return wing_mirror; }
 void world_view_set_wing_mirror(int m) { wing_mirror = m; }
 
@@ -69,7 +67,6 @@ uint16_t world_view_player_min_x(void)
        -53 1/3, so +16 -> 58.67 rounds inward to 59 (0x3B). The ultrawide
        edge (-124 4/9) + 16 gives field -12 (0xFFF4); callers compare it
        as a signed 16-bit value. */
-    if (world_view_wing_locked()) return 0x70;
     return mode == WORLD_VIEW_ULTRA ? 0xfff4 : mode == WORLD_VIEW_WIDE ? 0x3b : 0x70;
 }
 
@@ -77,7 +74,6 @@ uint16_t world_view_player_max_x(void)
 {
     /* right edge +96, authored -24 inset; wide aperture edge 373 1/3 ->
        445.33 rounds inward to 445 (0x1BD); ultrawide 444 4/9 -> 516. */
-    if (world_view_wing_locked()) return 0x188;
     return mode == WORLD_VIEW_ULTRA ? 0x204 : mode == WORLD_VIEW_WIDE ? 0x1bd : 0x188;
 }
 

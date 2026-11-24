@@ -12728,9 +12728,36 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
         write_word(ram, child + 0x3a, read_word(ram, actor + 0x3a));
         write_word(ram, child + 0x44, 1);
         return 1;
-    case 0x76aaa:
+    case 0x76aaa: {
         move_actor_axis(ram, actor + 0x20, read_word(ram, actor + 0x38));
         move_actor_axis(ram, actor + 0x23, read_word(ram, actor + 0x3a));
+        /* The stage-four boss's flames run a fixed animation that fades out
+           near the arcade's left limit, so a wider view would leave its
+           wings safe. Past the arcade's playable edge a cloud returns to its
+           last damaging frame and burns until it leaves the wide picture.
+           Arcade (no wing) is unchanged. */
+        if (world_view_wing() && (int16_t)read_word(ram, actor + 0x21) < 0x78) {
+            if (world_view_edge_less(read_word(ram, actor + 0x21), 0x40)) {
+                finish_animation(ram, actor);
+                return 1;
+            }
+            if (!read_word(ram, actor + 0x3c)) {
+                for (unsigned i = read_word(ram, actor + 0x40); i >= 2; ) {
+                    i -= 2;
+                    if (read_word(bank, (uint16_t)(0x59be + i))) {
+                        write_word(ram, actor + 0x2a, read_word(bank, (uint16_t)(0x597c + i)));
+                        write_word(ram, actor + 0x3c, read_word(bank, (uint16_t)(0x59be + i)));
+                        break;
+                    }
+                }
+            }
+            if (read_word(ram, actor + 0x3c)) {
+                queue_sprite(ram, rom, actor, 0);
+                ram[actor + 0x0d] = 2;
+                world_player_contact(ram, rom, actor);
+                return 1;
+            }
+        }
         if (!decrement(ram, actor + 0x44)) {
             uint16_t index = read_word(ram, actor + 0x40);
             uint16_t frame = read_word(bank, (uint16_t)(0x597c + index));
@@ -12749,6 +12776,7 @@ static int stage_four_creature(uint8_t *ram, const uint8_t *rom, const uint8_t *
             world_player_contact(ram, rom, actor);
         }
         return 1;
+    }
     }
     return 0;
 }
@@ -13929,7 +13957,6 @@ static int stage_four_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terr
 {
     const uint8_t *bank = rom + 0x70000;
     uint16_t parent, hit, child;
-    world_view_note_boss();    /* its attacks never reach the wings: keep the 4:3 limits */
     switch (address) {
     case 0x75aa2: {
         world_acquire_resource(ram, actor, 0xa5);
@@ -16056,7 +16083,6 @@ static int final_boss(uint8_t *ram, const uint8_t *rom, const uint8_t *terrain, 
 {
     const uint8_t *bank = rom + 0x70000;
     uint16_t parent, child, hit, row;
-    world_view_note_boss();    /* its attacks never reach the wings: keep the 4:3 limits */
     switch (address) {
     case 0x7abdc:
         world_acquire_resource(ram, actor, 0x3f);

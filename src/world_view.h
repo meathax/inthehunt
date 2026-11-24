@@ -48,14 +48,6 @@ unsigned world_view_canvas_width(void);
  * reflected into the wings, tile-aligned, for tile layers 1 and 2. 0 off;
  * 1 reflect; 2 reflect and hide layer 0 in the wings (its HUD stays put). */
 int world_view_wing_mirror(void);
-/* Encounters whose attacks never reach the wings (the stage-four boss, the
- * final hull) and mirrored wings (no authored floor or walls there) keep
- * the player inside the 4:3 limits. Derived from the live view mode each
- * pass, so the Options aspect ratio needs nothing else. A boss handler calls
- * note_boss() every pass it runs; world_view_end_pass() latches the result. */
-void world_view_note_boss(void);
-void world_view_end_pass(void);
-int world_view_wing_locked(void);
 void world_view_set_wing_mirror(int mode);
 /* The picture-x range reflected for a layer whose picture x 0 samples
  * playfield column K: [-inf,*lo) and [*hi,inf) take the reflection, and
