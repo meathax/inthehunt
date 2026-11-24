@@ -375,7 +375,7 @@ static void render_layer(int layer, int from, int to)
                 bx += run; continue;
             }
             const uint8_t *tile;
-            if (cur.wing_mirror && layer > 0 && (px_here < 0 || px_here >= WORLD_VIEW_ARCADE_WIDTH)) {
+            if (cur.wing_mirror && layer > 0 && (px_here < 0 || (px_here >= WORLD_VIEW_ARCADE_WIDTH && cur.wing_mirror != 3))) {
                 int k = 80 + (int)scroll - 2 * layer + (wide ? 256 : 0);
                 int xr = world_view_mirror_x(px_here, k);
                 tile = world_tile_entry(cur.tiles, master, (unsigned)(xr + k), sy);

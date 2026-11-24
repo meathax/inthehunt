@@ -660,6 +660,10 @@ static void capture_video(void)
         if (word(ram + 0x80) == 0xb2e && frame_w > WORLD_VIEW_ARCADE_WIDTH) {
             if (word(ram + 0x84) == 4) mirror = 2;
             else if (word(ram + 0x84) == 3 && held_frames >= 20 && b700 >= 0x500) mirror = 1; /* the final arena, not earlier holds */
+            /* Stage-one boss cavern: as the opening's sea-scenery edge scrolls out
+               through the left wing, the arcade never shows that edge; reflect the
+               picture's own cavern wall over it until the real cavern fills the wing. */
+            else if (word(ram + 0x84) == 0 && b700 >= 0x1600 && word(ram + 0xb70a) >= 0x7fc && word(ram + 0xb70a) <= 0x834) mirror = 3; /* left wing only */
         }
         world_view_set_wing_mirror(mirror);
         world_tile_shadow_static = held_frames >= 20;
@@ -885,7 +889,7 @@ static int tick(uint16_t pads, uint16_t system)
         WorldDispatch pass;
         uint32_t addr;
         world_dispatch_begin(&pass, ram);
-        world_terrain_mirror = world_view_wing_mirror() != 0;
+        world_terrain_mirror = world_view_wing_mirror() == 1 || world_view_wing_mirror() == 2;
         world_terrain_cam = word(ram + 0xb70a);
         world_shadow_begin_pass(ram, tiles, layer_master);
         unsigned calls = 0;

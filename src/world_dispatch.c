@@ -1395,8 +1395,12 @@ static void boss_limb_velocity(uint8_t *ram, const uint8_t *rom, uint16_t actor)
     unsigned angle = 2 * ram[actor + 0x28];
     uint16_t speed = read_word(ram, actor + 0x2e);
     for (unsigned axis = 0; axis < 2; ++axis) {
-        uint16_t unit = read_word(rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + angle);
-        write_word(ram, actor + 0x38 + 2*axis, ((uint32_t)unit * speed) >> 8);
+        /* Signed product: the arcade speeds (0x400/0x800) are powers of two,
+           where an unsigned 16-bit product happens to keep the sign; the
+           wide-view claw speeds (claw_reach) are not, and an unsigned product
+           flung every chain link hundreds of pixels off screen. */
+        int32_t unit = (int16_t)read_word(rom + 0xa0000, (axis ? 0x9d92 : 0x9e12) + angle);
+        write_word(ram, actor + 0x38 + 2*axis, (uint16_t)((unit * (int32_t)speed) >> 8));
     }
 }
 
