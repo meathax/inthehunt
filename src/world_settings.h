@@ -59,6 +59,7 @@ typedef struct {
     unsigned auto_quality;       /* lighten High lighting when the GPU falls behind */
     unsigned ambient_borders;    /* fill the bars beside the picture with its blurred colours */
     unsigned fx_caustics;        /* sunlit seabed caustics */
+    unsigned fx_radiance;        /* radiance cascades: smooth, long-range bounce light */
     /* Effect strengths in percent (25..200, 100 = as designed). */
     unsigned light_strength, shadow_strength, depth_strength, shaft_strength, rim_strength, caustic_strength;
     char shader[WORLD_SETTINGS_ID_SIZE];

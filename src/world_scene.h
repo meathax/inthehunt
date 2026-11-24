@@ -34,6 +34,7 @@ typedef struct {
     unsigned pressure, sediment_light, water_volume, ocean_depth, aftermath, materials;
     unsigned headlight_level, headlights, rim, bubble_light, contact_shade, blast_reflect;
     unsigned caustics;   /* sunlit seabed caustics (GPU lighting) */
+    unsigned radiance;   /* radiance cascades replace the sampled bounce light (GPU lighting) */
     unsigned auto_quality; /* GPU lighting may lighten itself when over budget */
     /* Strengths in percent for the GPU lighting; 0 means 100. */
     unsigned light_strength, shadow_strength, depth_strength, shaft_strength, rim_strength, caustic_strength;

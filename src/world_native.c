@@ -187,6 +187,7 @@ static WorldSceneFx scene_effects(void)
     fx.contact_shade = settings.fx_contact_shade;
     fx.blast_reflect = settings.fx_blast_reflect;
     fx.caustics = settings.fx_caustics;
+    fx.radiance = settings.fx_radiance;
     fx.auto_quality = settings.auto_quality;
     fx.light_strength = settings.light_strength;
     fx.shadow_strength = settings.shadow_strength;

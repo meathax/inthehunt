@@ -6,6 +6,8 @@
 enum { WORLD_SKY_COLUMNS=(WORLD_VIEW_MAX_WIDTH+53+3)&~3, WORLD_PROBES=WORLD_VIEW_MAX_WIDTH/2*120, WORLD_EMITTERS=140 };
 enum {
     WORLD_LIGHT_CAUSTICS = 1u << 22,
+    WORLD_LIGHT_RC = 1u << 23,       /* radiance cascades replace the sampled indirect pass */
+    WORLD_LIGHT_RC_RESET = 1u << 24, /* scene cut: drop the previous bounce light */
     WORLD_LIGHT_SUN_MASK = 2 | 16 | 16384 | WORLD_LIGHT_CAUSTICS,
     WORLD_LIGHT_FIELD_MASK = WORLD_LIGHT_SUN_MASK | 1 | 4 | 32768
 };

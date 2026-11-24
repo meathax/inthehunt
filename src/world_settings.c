@@ -73,6 +73,7 @@ static const NumberSetting numbers[] = {
     {"fx_contact_shade", offsetof(WorldSettings, fx_contact_shade), 0, 1, WORLD_GFX_HIGH},
     {"fx_blast_reflect", offsetof(WorldSettings, fx_blast_reflect), 0, 1, WORLD_GFX_HIGH},
     {"fx_caustics", offsetof(WorldSettings, fx_caustics), 0, 1, WORLD_GFX_MEDIUM},
+    {"fx_radiance", offsetof(WorldSettings, fx_radiance), 0, 1, WORLD_GFX_HIGH},
     {"brightness", offsetof(WorldSettings, brightness), 70, 150, 0},
     {"auto_quality", offsetof(WorldSettings, auto_quality), 0, 1, 0},
     {"ambient_borders", offsetof(WorldSettings, ambient_borders), 0, 1, 0},

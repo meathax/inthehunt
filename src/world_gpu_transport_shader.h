@@ -467,6 +467,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         uint row=id.y/k;
         if(effects.Load(EFFECT_ocean_rows+(row/32)*4)&(1u<<(row%32))){
             int3 v=int3(round(base*255));
+// @RC_INSERT
             int lum=(v.r*3+v.g*5+v.b*2)/10;
             int cool=clamp((max(v.g,v.b)-v.r)*3,0,255);
             int water=min(255,cool*(255-lum)/200);
@@ -536,7 +537,7 @@ void shadePass(uint3 id:SV_DispatchThreadID){
         float3 response=pointCaster(native)!=0?.20+.98*base:.105+.49*base;
         colour+=response*energy;
     }
-    if(flags&1)colour+=.36*base*directField[indexOf(native/2)].rgb*lightS;
+    if(flags&1)colour+=((flags&RC_FLAG)?.5:.36)*base*bounceAt(native)*lightS;
     if(flags&4)colour+=wet*energy*float3(.042,.049,.056);
     if((flags&(32|512)) && (tag&240)==224){
         float2 pos=clamp((float2(id.xy/k)-2)*.25,0,float2(rasterWidth/4-1,59));

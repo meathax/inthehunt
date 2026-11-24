@@ -900,6 +900,11 @@ extern "C" int world_gpu_light_benchmark(const WorldLightScene *const *scenes,co
         g.force_pass_profile = true;
         g.quiet_passes = true;
         if (sources && sources[v]) g.source = sources[v];
+        {   /* BENCH_FLAGS_SET_<variant>=hex forces lighting flags on for that variant */
+            char name[32];
+            snprintf(name, sizeof name, "BENCH_FLAGS_SET_%u", v);
+            if (const char *forced = getenv(name)) g.force_set = (uint32_t)strtoul(forced, nullptr, 16);
+        }
         if (!g.init(device.get(), queue.get()) || !g.pass_queries) { say(error, error_size, "GPU transport variant failed to build."); return 0; }
     }
     for (unsigned i = 0; i < count * variants; ++i) for (int n = 0; n < 8; ++n) pass_ms[i][n] = 0;
