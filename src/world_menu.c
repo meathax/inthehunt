@@ -276,7 +276,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
     case PAGE_OPTIONS:
         ADD(ITEM_TABS, "", "LEFT/RIGHT CHANGES THE PAGE");
         if (m->tab == TAB_VIDEO) {
-            ADD(ITEM_ASPECT, "ASPECT RATIO", m->title ? "ARCADE 4:3 OR WIDER 16:9 AND 21:9"
+            ADD(ITEM_ASPECT, "ASPECT", m->title ? "ARCADE 4:3 OR WIDER 16:9 AND 21:9"
                                                       : "APPLIES WHEN YOU EXIT TO MENU");
             ADD(ITEM_QUALITY, "GFX QUALITY", "LOW, MEDIUM OR HIGH EFFECTS");
             ADD(ITEM_DISPLAY, "DISPLAY", "WINDOW OR FULL SCREEN");
@@ -406,7 +406,7 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     }
     case ITEM_PACING: strcpy(out, s->pacing ? "EXACT" : "SMOOTH"); break;
     case ITEM_SCALE: snprintf(out, 32, "X%u", s->window_scale); break;
-    case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT 4:3" : "STRETCH"); break;
+    case ITEM_SCALING: strcpy(out, s->scaling == 0 ? "INTEGER" : s->scaling == 1 ? "FIT" : "STRETCH"); break;
     case ITEM_CRT:
         strcpy(out, s->crt_shader ? world_gpu_preset_name[s->crt_shader - 1] : "OFF");
         break;
