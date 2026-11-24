@@ -170,7 +170,10 @@ static void apply_openings(uint8_t *tiles)
             int dy = opening[i].upward ? (int)(y % 4) - (int)(y & ~3u) : (int)y;
             unsigned r = (unsigned)(((origin >> 8) & 0x3f) + dy) & 63;
             if (row_fixed[p][r]) continue;
-            for (int w = first - 16; w < end + 16; ++w) {
+            /* A full 64-column map is authored to the right and streamed
+               on by the game; only the left of world column 0 is missing. */
+            int stop = opening[i].width >= 16 ? first : end + 16;
+            for (int w = first - 16; w < stop; ++w) {
                 if (w >= first && w < end) continue;
                 int src = w < first ? 2 * first - 1 - w : 2 * end - 1 - w;
                 unsigned ss = (unsigned)wrap_world(src) & (SLOTS - 1);
@@ -268,7 +271,7 @@ void world_shadow_extend_opening(uint8_t *tiles, uint16_t base, uint16_t origin,
                                  unsigned width, unsigned height, int upward)
 {
     (void)tiles;
-    if (width >= 16 || openings >= 4) return;
+    if (openings >= 4) return;
     opening[openings].base = base;
     opening[openings].origin = origin;
     opening[openings].width = width;
