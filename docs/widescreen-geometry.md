@@ -66,3 +66,21 @@ Gameplay (screen-space, all in field units = screen+96):
 - Camera algorithm, scroll speed table, script progress 0xb700, trigger order,
   vertical geometry (y untouched), weapon speeds/damage/lifetimes, difficulty,
   authored stage order, Arcade code path (mode == ARCADE keeps every constant).
+
+## Ultrawide (64:27, "21:9")
+
+| | Ultrawide |
+|---|---|
+| raster W | 568 (aperture 568 8/9; 4/9 + 4/9 overscan) |
+| view.left | -124 (raster = screen + 124) |
+| player X limits (field) | [-12 (0xFFF4, compare signed), 0x204] |
+| HUD panels | shifted 12 tiles toward the edges |
+| edge constants | shifted by the 124-pixel wing (`world_view_wing()`) |
+
+The M92 tile rings are 64 columns (512 px) but the picture is 568 px wide, and
+sprite X is 9-bit. `src/world_shadow.c` keeps a 128-column world-column copy of
+each scrolling page and rebases the ring around each actor before its handler
+runs; renderers read the copy (`world_tile_entry`). Column producers and set
+piece painters run 64 px ahead (128 for the slower background). Sprites in
+ultrawide use signed X. Unwritten background filler cells in the wings render
+black. Test aids: `--mode=ultrawide`, `WORLD_GODMODE=1`.

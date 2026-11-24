@@ -1320,6 +1320,25 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 snprintf(name, sizeof name, "title%u", i);
                 headless_shot(dir, name);
             }
+            /* The mode selector, at its own 428-wide canvas. */
+            for (unsigned row = 0; row < 3; ++row) {
+                static uint32_t selector[WORLD_VIEW_WIDE_WIDTH * 240];
+                world_menu_open_title(&menu, 0, 0, 0);
+                menu.selector = 1;
+                menu.page = 0;
+                menu.row = row;
+                world_setup_menu_art(selector, WORLD_VIEW_WIDE_WIDTH, 240);
+                world_menu_render(&menu, &settings, selector, gfx1, 1500, WORLD_VIEW_WIDE_WIDTH);
+                uint32_t *keep = pixels; unsigned keep_w = shot_w;
+                (void)keep; (void)keep_w;
+                char name[32];
+                snprintf(name, sizeof name, "selector%u", row);
+                const uint32_t *old_source = shot_source; unsigned old_w = shot_w;
+                shot_source = selector; shot_w = WORLD_VIEW_WIDE_WIDTH;
+                headless_shot(dir, name);
+                shot_source = old_source; shot_w = old_w;
+                menu.selector = 0;
+            }
             memcpy(pixels, still, sizeof still);
             menu.open = 0;
         }

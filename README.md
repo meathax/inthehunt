@@ -16,11 +16,11 @@ Irem’s 1993 submarine shooter runs natively on Windows using your own MAME ROM
 | --- | --- |
 | ![Arcade and Widescreen selector](artwork/screenshots/mode-select.png) | ![Widescreen Ice Cavern gameplay](artwork/screenshots/widescreen-play.png) |
 
-**Experimental 16:9 widescreen**
+**Experimental 16:9 widescreen and 21:9 ultrawide**
 
 ## What the PC port adds
 
-- **Arcade and Widescreen.** Choose the original 4:3 game or expanded 16:9 gameplay at launch. Each mode keeps its own high scores. Choose Play to start, or leave the menu idle for five seconds to watch the attract sequence.
+- **Arcade, Widescreen and Ultrawide.** Choose the original 4:3 game, expanded 16:9 gameplay or 64:27 ultrawide (21:9 monitors) at launch. Each mode keeps its own high scores. Choose Play to start, or leave the menu idle for five seconds to watch the attract sequence.
 - **Optional enhanced effects.** Pick a lighting preset or tune effects individually, including bow lamps, dynamic shadows, light shafts, particles, water caustics and radiance-cascade bounce light.
 - **Underwater stereo.** Hear positional weapons, submarine motors, machinery and stage ambience. Adjust music, effects and ambience levels or enable Reduced Bass.
 - **PC display options.** Choose exact arcade frame timing or smooth camera scrolling, and select from optional Libretro CRT presets.
