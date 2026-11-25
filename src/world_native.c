@@ -652,18 +652,32 @@ static void capture_video(void)
     /* Wings with no authored picture: the arcade-width shaft (stage 5) always,
        and a locked stage-4 arena once the camera has held still. */
     {
-        static unsigned held_b700, held_frames;
+        static unsigned held_b700, held_frames, held_b70a, held_scroll;
         unsigned b700 = word(ram + 0xb700);
         held_frames = b700 == held_b700 ? held_frames + 1 : 0;
         held_b700 = b700;
+        /* The picture's own scroll can hold while the world counter steps (a lock that moves on). */
+        held_scroll = word(ram + 0xb70a) == held_b70a ? held_scroll + 1 : 0;
+        held_b70a = word(ram + 0xb70a);
         int mirror = 0;
         if (word(ram + 0x80) == 0xb2e && frame_w > WORLD_VIEW_ARCADE_WIDTH) {
             if (word(ram + 0x84) == 4) mirror = 2;
-            else if (word(ram + 0x84) == 3 && held_frames >= 20 && b700 >= 0x500) mirror = 1; /* the final arena, not earlier holds */
+            else if (word(ram + 0x84) == 3 && (held_frames >= 20 || held_scroll >= 20) && b700 >= 0x500) mirror = 1; /* the final arena, not earlier holds */
             /* Stage-one boss cavern: as the opening's sea-scenery edge scrolls out
                through the left wing, the arcade never shows that edge; reflect the
                picture's own cavern wall over it until the real cavern fills the wing. */
             else if (word(ram + 0x84) == 0 && b700 >= 0x1600 && word(ram + 0xb70a) >= 0x7fc && word(ram + 0xb70a) <= 0x834) mirror = 3; /* left wing only */
+            /* Stage-one boss cavern: the picture's left edge meets the approach passage, whose
+               lighter rock and surface water show through the left wing as a hard seam. */
+            else if (word(ram + 0x84) == 0 && b700 >= 0x1640 && b700 < 0x2f00) mirror = 3;
+            /* Stage-two boss arena: the arena art ends 31 pixels past the arcade's right edge; the
+               ring's stale columns beyond it would show as a strip, so reflect the right wing. */
+            else if (word(ram + 0x84) == 1 && b700 >= 0x1018 && held_frames >= 20) mirror = 4;
+        }
+        {   /* WORLD_MIRROR=n (test-only): force a wing-mirror mode for layout experiments. */
+            static int force = -2;
+            if (force == -2) force = getenv("WORLD_MIRROR") ? atoi(getenv("WORLD_MIRROR")) : -1;
+            if (force >= 0 && word(ram + 0x80) == 0xb2e && frame_w > WORLD_VIEW_ARCADE_WIDTH) mirror = force;
         }
         world_view_set_wing_mirror(mirror);
         world_tile_shadow_static = held_frames >= 20;
@@ -1543,6 +1557,34 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                               || word(ram + 0x80) == 0xa81)) {
             ram[0x84] = (uint8_t)stage_seed; ram[0x85] = 0;
         }
+        /* WORLD_GOD=1 (test-only audit sweep): players are contact-immune so a
+           scripted autopilot can scroll a whole stage; WORLD_SHOT_EVERY=n
+           additionally saves a screenshot every n live ticks. */
+        static int god = -1;
+        static unsigned long shot_every;
+        if (god < 0) {
+            god = getenv("WORLD_GOD") ? 1 : 0;
+            shot_every = getenv("WORLD_SHOT_EVERY") ? strtoul(getenv("WORLD_SHOT_EVERY"), NULL, 10) : 0;
+        }
+        if (god && word(ram + 0x80) == 0xb2e) {
+            unsigned a = word(ram + 0x90), b = word(ram + 0x92);
+            if (a) { ram[a + 0x3c] = 0xff; ram[a + 0x3d] = 0xff; }
+            if (b) { ram[b + 0x3c] = 0xff; ram[b + 0x3d] = 0xff; }
+            /* WORLD_SCOUT=x: also pin player one's screen X so the camera keeps scrolling. */
+            static int scout = -2;
+            if (scout == -2) scout = getenv("WORLD_SCOUT") ? (int)strtol(getenv("WORLD_SCOUT"), NULL, 0) : -1;
+            if (scout >= 0 && a) { ram[a + 0x21] = (uint8_t)scout; ram[a + 0x22] = (uint8_t)(scout >> 8); }
+            static int scouty = -2;
+            if (scouty == -2) scouty = getenv("WORLD_SCOUTY") ? (int)strtol(getenv("WORLD_SCOUTY"), NULL, 0) : -1;
+            if (scouty >= 0 && a) { ram[a + 0x24] = (uint8_t)scouty; ram[a + 0x25] = (uint8_t)(scouty >> 8); }
+        }
+        if (shot_every && word(ram + 0x80) == 0xb2e && ticks % shot_every == 0) shot = 1;
+        {   /* WORLD_SHOT_B700=n: a shot each time the world position crosses a multiple of n. */
+            static unsigned step, last = 0xffff;
+            if (!step) step = getenv("WORLD_SHOT_B700") ? (unsigned)strtoul(getenv("WORLD_SHOT_B700"), NULL, 0) : 0xffffffffu;
+            unsigned cell = word(ram + 0xb700) / (step ? step : 1);
+            if (step != 0xffffffffu && word(ram + 0x80) == 0xb2e && cell != last && ticks > 600) { last = cell; shot = 1; }
+        }
         unsigned input = held, edges = buttons;
         if (autopilot) input = headless_autopilot(held, &edges);
         if (!tick((uint16_t)~input, (uint16_t)~edges)) break;
@@ -1748,7 +1790,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
             snprintf(log_path, sizeof log_path, "%s/headless-scroll.txt", dir);
             FILE *log = world_fopen(log_path, "a");
             if (log) {
-                fprintf(log, "%06lu stage %u master %04x", ticks, word(ram + 0x84), word(ram + 0x80));
+                fprintf(log, "%06lu stage %u master %04x b700 %04x b70a %04x", ticks, word(ram + 0x84), word(ram + 0x80), word(ram + 0xb700), word(ram + 0xb70a));
                 for (unsigned i = 0; i < 3; ++i)
                     fprintf(log, " L%u %04x %04x m%04x", i, word(ram + 0xb706 + 4*i), word(ram + 0xb708 + 4*i), layer_master[i]);
                 fprintf(log, " vc %04x water %d\n", word(ram + 0x8b28), with_fx ? world_scene_waterline() : -1);

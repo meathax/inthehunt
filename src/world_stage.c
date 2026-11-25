@@ -31,6 +31,12 @@ static int world_anchored_kind(uint16_t segment, uint16_t kind)
     case 0xba0f4:               /* fixed salvo gun and its wreck */
     case 0xbb92b:               /* freeze launcher and its beam */
     case 0xbccac:               /* mounted turret */
+    case 0x1e58c: case 0x1e720: /* fixed scenery of the sea-wall stage */
+    case 0x7d2dd:               /* scroll-locked stage-three scenery */
+    case 0xb9036:               /* stage-one scroll-locked hazard */
+    case 0xb488a: case 0xb73c0: /* sunken-city hazards and turrets */
+    case 0xb876c:               /* sunken-city tower facade (87A1 pieces) */
+    case 0xb8939: case 0xb921a: /* sunken-city scroll-locked pieces */
         return 1;
     default:
         return 0;
@@ -181,6 +187,12 @@ static int world_prespawn_kind(uint16_t segment, uint16_t kind)
     case 0xba0f4:               /* fixed salvo gun */
     case 0xbb92b:               /* freeze launcher */
     case 0xbccac:               /* mounted turret */
+    case 0x1e58c: case 0x1e720: /* fixed scenery of the sea-wall stage */
+    case 0x7d2dd:               /* scroll-locked stage-three scenery */
+    case 0xb9036:               /* stage-one scroll-locked hazard */
+    case 0xb488a: case 0xb73c0: /* sunken-city hazards and turrets */
+    case 0xb876c:               /* sunken-city tower facade (87A1 pieces) */
+    case 0xb8939: case 0xb921a: /* sunken-city scroll-locked pieces */
         return 1;
     default:
         return 0;

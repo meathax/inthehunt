@@ -43,7 +43,7 @@ WorldVideoPixel world_video_playfields(const uint8_t *tiles, const uint8_t *gfx1
             scroll = word(tiles + 0xf400 + layer * 0x400 + sy * 2);
         unsigned wide = master & 4;
         int xs = x, mirror = world_view_wing_mirror();
-        if (mirror && (x < 0 || (x >= WORLD_VIEW_ARCADE_WIDTH && mirror != 3))) {
+        if (mirror && ((x < 0 && mirror != 4) || (x >= WORLD_VIEW_ARCADE_WIDTH && mirror != 3))) {
             if (layer == 0) { if (mirror == 2) continue; }
             else xs = world_view_mirror_x(x, 80 + (int)scroll - 2 * layer + (wide ? 256 : 0));
         }
