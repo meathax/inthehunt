@@ -140,19 +140,50 @@ float3 sharpen(float2 uv, float3 e) {
     return saturate((e + (b + d + f + h) * w) / (1.0 + 4.0 * w));
 }
 
+// Sharp bilinear over one source texel boundary per output pixel.
+float3 sharp_px(float2 uv) {
+    float2 scale = max(floor((dst_rect.zw - dst_rect.xy) * src_size.zw), 1.0);
+    float2 t = uv * src_size.xy - 0.5;
+    float2 i = floor(t);
+    float2 f = saturate((t - i - 0.5) * scale + 0.5);
+    return tex.SampleLevel(s_linear, (i + 0.5 + f) * src_size.zw, 0).rgb;
+}
+
 float4 ps_pixels(float4 pos : SV_Position) : SV_Target {
-    float2 uv = (pos.xy - dst_rect.xy) / (dst_rect.zw - dst_rect.xy);
+    float2 size = dst_rect.zw - dst_rect.xy;
+    float2 uv = (pos.xy - dst_rect.xy) / size;
+    const bool curved = geom.x > 0.0 || geom.z > 0.0;
+    float alpha = 1.0;
+    if (curved) {
+        // Same tube geometry as ps(): barrel warp plus rounded, antialiased outline.
+        float2 q = uv * 2.0 - 1.0;
+        float2 w = q * (1.0 + geom.xy * q.yx * q.yx);
+        float2 half_px = size * 0.5;
+        float r = geom.z * size.y;
+        float2 dd = abs(w) * half_px - (half_px - r);
+        float sd = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - r;
+        alpha = saturate(0.5 - sd);
+        if (alpha > 0.999) alpha = 1.0;
+        if (alpha <= 0.0) {
+            if (mode2.z != 0) discard;                         // the caller's border art shows through
+            return float4(0, 0, 0, 1);
+        }
+        uv = w * 0.5 + 0.5;
+    }
     float4 base=tex.SampleLevel(s_point,uv,0);
+    float2 suv=uv;
     if(mode2.w){
         uint plane=(uint)round(base.a*255);
         if(plane==251 || plane==252){
             float2 shift=plane==251 ? camera.xy : camera.zw;
             float4 shifted=tex.SampleLevel(s_point,uv+shift*src_size.zw,0);
             // Never pull sprite, HUD or other-plane colour across an edge.
-            if(shifted.a==base.a)base=shifted;
+            if(shifted.a==base.a){base=shifted;suv=uv+shift*src_size.zw;}
         }
     }
-    return float4(base.rgb,1);
+    // A warped picture needs filtering: point samples would shimmer along the bowed rows.
+    float3 c = curved ? sharp_px(suv) : base.rgb;
+    return float4(c * alpha, 1);
 }
 
 float4 ps(float4 pos : SV_Position) : SV_Target {

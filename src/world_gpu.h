@@ -66,6 +66,8 @@ int world_gpu_vrr_failed(void);
 void world_gpu_retry_vrr(void);
 /* Fill the bars beside the picture with a dim blur of its edges (else black). */
 void world_gpu_set_ambient_borders(int on);
+/* Tube curvature: the CRT preset's own, or a native barrel warp without one. */
+void world_gpu_set_curvature(int on);
 int world_gpu_light_offscreen(const WorldLightScene *scene,const uint32_t *pixels,uint32_t *out,
                               unsigned source_w,char *error,size_t size);
 /* Developer benchmark: on one device, rebuild and shade each captured k=1

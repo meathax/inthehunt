@@ -38,7 +38,7 @@ enum {
     ITEM_FX_PRESSURE, ITEM_FX_SEDIMENT_LIGHT, ITEM_FX_WATER_VOLUME, ITEM_FX_OCEAN_DEPTH, ITEM_FX_AFTERMATH, ITEM_FX_MATERIALS,
     ITEM_FX_HEADLIGHTS, ITEM_HEADLIGHT_LEVEL, ITEM_FX_RIM, ITEM_FX_BUBBLE_LIGHT, ITEM_FX_CONTACT_SHADE, ITEM_FX_BLAST_REFLECT,
     ITEM_QUALITY, ITEM_START, ITEM_AUTOFIRE, ITEM_FX_SUNSHADOW, ITEM_FX_GLOW, ITEM_FX_REFLECT,
-    ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
+    ITEM_BRIGHTNESS, ITEM_BORDERS, ITEM_CURVATURE, ITEM_AUTO_QUALITY, ITEM_FX_CAUSTICS,
     ITEM_STR_LIGHT, ITEM_STR_SHADOW, ITEM_STR_DEPTH, ITEM_STR_SHAFT, ITEM_STR_RIM, ITEM_STR_CAUSTIC,
     ITEM_CRT, ITEM_ASPECT, ITEM_FX_RADIANCE
 };
@@ -284,6 +284,7 @@ static unsigned page_items(const WorldMenu *m, Item *items)
             ADD(ITEM_PACING, "FRAME PACING", "DISPLAY LOCK OR EXACT ARCADE VRR");
             ADD(ITEM_SCALING, "SCALING", "INTEGER IS SHARPEST");
             ADD(ITEM_CRT, "CRT SHADER", "TUBE SIMULATION PRESET");
+            ADD(ITEM_CURVATURE, "CURVATURE", "CURVED TUBE OR FLAT PICTURE");
             ADD(ITEM_BRIGHTNESS, "BRIGHTNESS", "LIFTS OR DEEPENS DARK TONES");
             ADD(ITEM_BORDERS, "SIDE BORDERS", "GLOW OR BLACK BESIDE THE PICTURE");
             ADD(ITEM_AUTO_QUALITY, "AUTO QUALITY", "EASES LIGHTING IF THE GPU LAGS");
@@ -393,6 +394,7 @@ static void item_value(const WorldSettings *s, unsigned id, char out[32])
     case ITEM_DISPLAY: strcpy(out, s->fullscreen ? "FULL SCREEN" : "WINDOW"); break;
     case ITEM_BRIGHTNESS: snprintf(out, 32, "%u%%", s->brightness); break;
     case ITEM_BORDERS: strcpy(out, s->ambient_borders ? "AMBIENT" : "BLACK"); break;
+    case ITEM_CURVATURE: strcpy(out, s->curvature ? "ON" : "OFF"); break;
     case ITEM_ASPECT: {
         static const char *const ratios[] = {"4:3 ARCADE", "16:9 WIDE"};
         strcpy(out, ratios[s->aspect < 2 ? s->aspect : 0]);
@@ -482,6 +484,7 @@ static unsigned adjust(WorldSettings *s, unsigned id, int d)
         return WORLD_MENU_VIEW;
     }
     case ITEM_BORDERS: s->ambient_borders = !s->ambient_borders; return WORLD_MENU_VIEW;
+    case ITEM_CURVATURE: s->curvature = !s->curvature; return WORLD_MENU_VIEW;
     case ITEM_ASPECT: s->aspect = (s->aspect + 1) % 2; return WORLD_MENU_ASPECT;
     case ITEM_STR_LIGHT: case ITEM_STR_SHADOW: case ITEM_STR_DEPTH:
     case ITEM_STR_SHAFT: case ITEM_STR_RIM: case ITEM_STR_CAUSTIC: {

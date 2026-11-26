@@ -140,6 +140,16 @@ UINT64 upload_size(ID3D12Device *device, ID3D12Resource *dst)
 }
 
 static bool ambient_borders;
+static bool curvature;
+
+// Tube curvature: a loaded CRT preset uses its own curvature; the plain
+// picture uses the native barrel warp with rounded corners.
+static void apply_curvature(gdl::post::Settings &s, bool preset)
+{
+    s.preset_curvature = curvature;
+    s.curvature = curvature && !preset ? 0.35f : 0.0f;
+    s.corner_radius = curvature && !preset ? 0.03f : 0.0f;
+}
 
 void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h, unsigned source_w)
 {
@@ -158,7 +168,7 @@ void apply(PostChain &chain, int scaling, int beam, UINT out_w, UINT out_h, unsi
     s.ambient_borders = ambient_borders;
     s.auto_progressive_fix = true;
     s.beam.enabled = beam != 0;
-    s.preset_curvature = false;           // flat screen, no vignette, in every preset
+    apply_curvature(s, !chain.preset_path().empty());
     s.source_fps = 60.0125f;
 }
 
@@ -549,6 +559,12 @@ extern "C" void world_gpu_set_ambient_borders(int on)
 {
     ambient_borders = on != 0;
     if (gpu && gpu->chain) gpu->chain->settings().ambient_borders = ambient_borders;
+}
+
+extern "C" void world_gpu_set_curvature(int on)
+{
+    curvature = on != 0;
+    if (gpu && gpu->chain) apply_curvature(gpu->chain->settings(), !gpu->chain->preset_path().empty());
 }
 
 extern "C" int world_gpu_set_preset(const char *path, char *error, size_t error_size)

@@ -58,6 +58,7 @@ typedef struct {
     unsigned brightness;         /* picture brightness curve, percent (100 = arcade) */
     unsigned auto_quality;       /* lighten High lighting when the GPU falls behind */
     unsigned ambient_borders;    /* fill the bars beside the picture with its blurred colours */
+    unsigned curvature;          /* curved CRT tube face instead of a flat picture */
     unsigned aspect;             /* 0 arcade 4:3, 1 widescreen 16:9 (WORLD_VIEW_*) */
     unsigned fx_caustics;        /* sunlit seabed caustics */
     unsigned fx_radiance;        /* radiance cascades: smooth, long-range bounce light */

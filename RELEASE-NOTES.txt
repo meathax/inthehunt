@@ -1,15 +1,13 @@
-In the Hunt v0.9.20 for Windows x64
+In the Hunt v0.9.21 for Windows x64
 
-Widescreen edge and placement fixes
+CRT curvature option
 
-- Stage 2 sunken city: the building towers no longer show dark blocks or
-  notches; their sprite pieces now line up with the map art.
-- Other scroll-locked scenery and hazards (sea-wall scenery, sunken-city
-  turrets and pieces) keep their map position instead of shifting at the edge.
-- Stage 1 boss cavern: the left edge no longer shows a hard seam.
-- Stage 2 twin-hull arena: the wrong strip on the right edge is gone.
-- Stage 4 lava cave: stale side patches no longer flash when the camera lock moves on.
-- Arcade mode output is unchanged.
+- New Options > Video > CURVATURE toggle (off by default).
+- With a CRT shader selected, the shader's own tube curvature is used.
+- Without a CRT shader, the picture gets a gentle curved tube face with
+  smooth rounded corners; fine scrolling stays smooth and the picture is
+  filtered so curved rows do not shimmer.
+- The setting changes instantly and is saved with your other settings.
 
 Extract the entire ZIP and open InTheHunt.exe. On first launch, select your
 own supported MAME ROM archive. To carry over saves and settings, copy

@@ -104,6 +104,7 @@ static void apply_view(void)
     /* 2 = locked to the display: the loop waits for VBlank itself. */
     world_window_set_view((int)settings.scaling, 2);
     world_gpu_set_ambient_borders((int)settings.ambient_borders);
+    world_gpu_set_curvature((int)settings.curvature);
     char preset[1200] = "", error[256] = "", folder[1024];
     if (settings.crt_shader) {
         if (!world_gpu_find_shaders(data_directory, folder, sizeof folder)) {
