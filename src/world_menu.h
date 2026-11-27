@@ -21,7 +21,7 @@ enum {
     WORLD_MENU_VIEW = 128,          /* scaling, v-sync, frame rate, enhancements or cabinet switches changed */
     WORLD_MENU_START = 256,         /* title menu: start the arcade game */
     WORLD_MENU_TITLE = 512,         /* pause menu: end this game and return to the title menu */
-    WORLD_MENU_ASPECT = 1024        /* settings->aspect changed (applied at the title menu) */
+    WORLD_MENU_ASPECT = 1024        /* Play chose a different screen mode (settings->aspect) */
 };
 
 typedef struct {

@@ -1380,7 +1380,7 @@ static void headless_run(const char *dir, const char *script_path, int timing_ov
                 snprintf(name, sizeof name, "menu%u", i);
                 headless_shot(dir, name);
             }
-            static const unsigned title_pages[][2] = {{0, 0}, {0, 2}, {3, 1}};
+            static const unsigned title_pages[][2] = {{0, 0}, {0, 2}, {3, 1}, {4, 0}, {4, 1}};
             for (unsigned i = 0; i < sizeof title_pages / sizeof title_pages[0]; ++i) {
                 world_menu_open_title(&menu, 0, i & 1, 0);
                 menu.page = title_pages[i][0];
@@ -1981,9 +1981,9 @@ static double camera_display_time(LONGLONG now,LONGLONG frequency)
     return sync+floor((now-sync)/period+.5)*period;
 }
 
-/* Restart the attract sequence in the configured aspect ratio. Sessions
-   keep their mode for a whole game, so the option applies only from the
-   title menu (or on returning to it). The caller saves the scores. */
+/* Restart the board in the chosen aspect ratio. Sessions keep their mode
+   for a whole game; it is picked when Play is pressed on the title menu.
+   The caller saves the scores. */
 static void apply_session_aspect(void)
 {
     world_view_set(settings.aspect);
@@ -2163,13 +2163,14 @@ load_game_data:
             world_menu_title_activity(&menu, title_held, world_window_button_activity() || toggle, gamepad, GetTickCount());
             unsigned result = menu_frame(paused_frame, menu_held, toggle, rising, gamepad);
             if (result & WORLD_MENU_QUIT) break;
-            if ((result & WORLD_MENU_ASPECT) && settings.aspect != world_view_mode()) {
-                save_scores();
-                apply_session_aspect();
-                QueryPerformanceCounter(&now);
-                deadline = last_tick = (double)now.QuadPart;
-            } else if (result & WORLD_MENU_START) {
-                if (cabinet_switches() != world_dispatch_port4) {
+            if (result & WORLD_MENU_START) {
+                /* Play picks the screen mode; a changed mode restarts the board in it. */
+                if (settings.aspect != world_view_mode()) {
+                    save_scores();
+                    apply_session_aspect();
+                    QueryPerformanceCounter(&now);
+                    deadline = last_tick = (double)now.QuadPart;
+                } else if (cabinet_switches() != world_dispatch_port4) {
                     save_scores();
                     machine_reset();
                     load_scores();

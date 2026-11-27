@@ -1,13 +1,12 @@
-In the Hunt v0.9.21 for Windows x64
+In the Hunt v0.9.22 for Windows x64
 
-CRT curvature option
+Choose the screen mode when you play
 
-- New Options > Video > CURVATURE toggle (off by default).
-- With a CRT shader selected, the shader's own tube curvature is used.
-- Without a CRT shader, the picture gets a gentle curved tube face with
-  smooth rounded corners; fine scrolling stays smooth and the picture is
-  filtered so curved rows do not shimmer.
-- The setting changes instantly and is saved with your other settings.
+- PLAY on the title menu now asks for a screen mode: 4:3 ARCADE or
+  16:9 WIDESCREEN (EXPERIMENTAL). The game starts straight away in the
+  chosen mode.
+- The chooser remembers your last pick, and Back returns to the title menu.
+- The ASPECT option has been removed from Options > Video.
 
 Extract the entire ZIP and open InTheHunt.exe. On first launch, select your
 own supported MAME ROM archive. To carry over saves and settings, copy
